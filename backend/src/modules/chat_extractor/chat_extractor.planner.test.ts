@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { splitRequestedWindowByTargetDate } from "./seam1.planner.ts";
+import { splitRequestedWindowByTargetDate } from "./chat_extractor.planner.ts";
 
 describe("splitRequestedWindowByTargetDate", () => {
   it("splits a partial range into one run per target_date", () => {

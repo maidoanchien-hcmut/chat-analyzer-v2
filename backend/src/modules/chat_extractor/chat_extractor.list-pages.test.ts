@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import { parseListPagesResponse } from "./seam1.service.ts";
+import { parseListPagesResponse } from "./chat_extractor.service.ts";
 
 describe("parseListPagesResponse", () => {
   it("parses the shape documented in the local Pancake spec", () => {

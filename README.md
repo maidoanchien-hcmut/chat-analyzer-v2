@@ -2,8 +2,8 @@
 
 Monorepo cho ứng dụng chat-analyzer:
 
-- `backend/`: Bun + Elysia + Prisma + PostgreSQL + Redis, hiện expose các endpoint seam1/control-plane không yêu cầu đăng nhập.
-- `frontend/`: frontend standalone tối giản bằng HTML/CSS/TypeScript thuần, build và serve bằng Bun; thao tác Seam 1 qua form HTTP trực tiếp.
+- `backend/`: Bun + Elysia + Prisma + PostgreSQL + Redis, hiện expose các endpoint `chat-extractor` control-plane không yêu cầu đăng nhập.
+- `frontend/`: frontend standalone tối giản bằng HTML/CSS/TypeScript thuần, build và serve bằng Bun; thao tác `chat-extractor` qua form HTTP trực tiếp.
 - `service/`: AI service sẽ nhận phần seam2 sau này.
 - `docs/`: tài liệu thiết kế và các matrix/schema liên quan.
 
@@ -61,16 +61,27 @@ bun run dev
 Endpoint chính:
 
 - [backend health](http://localhost:3000/health)
-- `POST /seam1/pages/list-from-token`
-- `POST /seam1/control-center/pages/register`
-- `GET /seam1/health/summary`
-- `GET /seam1/runs/:id`
-- `POST /seam1/jobs/preview`
-- `POST /seam1/jobs/execute`
+- `POST /chat-extractor/pages/list-from-token`
+- `GET /chat-extractor/control-center/pages`
+- `GET /chat-extractor/control-center/pages/:id`
+- `POST /chat-extractor/control-center/pages/register`
+- `PATCH /chat-extractor/control-center/pages/:id`
+- `POST /chat-extractor/control-center/pages/:id/onboarding/preview`
+- `POST /chat-extractor/control-center/pages/:id/onboarding/execute`
+- `GET /chat-extractor/control-center/pages/:id/prompts`
+- `POST /chat-extractor/control-center/pages/:id/prompts`
+- `POST /chat-extractor/control-center/pages/:id/prompts/clone`
+- `POST /chat-extractor/control-center/pages/:id/prompts/:promptVersionId/activate`
+- `GET /chat-extractor/health/summary`
+- `GET /chat-extractor/runs/:id`
+- `POST /chat-extractor/jobs/preview`
+- `POST /chat-extractor/jobs/execute`
+- `POST /chat-extractor/jobs/scheduler/preview`
+- `POST /chat-extractor/jobs/scheduler/execute`
 
 ## Frontend
 
-Frontend hiện là shell vận hành tối giản, không dùng framework và không có login. Luồng chính là HTTP tự nhiên: nhập token, list pages, register page trong memory, rồi preview/execute job trực tiếp sang backend.
+Frontend hiện là shell vận hành tối giản, không dùng framework và không có login. Luồng chính là HTTP tự nhiên: nhập token, list pages, register page vào DB, rồi chọn `connected_page` đã lưu để onboarding/fine-tune/prompt/manual run trực tiếp qua backend.
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\frontend
@@ -91,8 +102,11 @@ UI cho phép:
 
 - nhập base URL của backend
 - dán `Pancake user access token` để list pages
-- chọn page, cấu hình timezone/page slug và register trong session hiện tại
-- preview và execute job `manual`, `onboarding`, `scheduler` qua HTTP body trực tiếp
+- register page với `business timezone`, cờ `Auto Scraper`, `Auto AI Analysis`
+- chọn page đã lưu trong DB rồi fine-tune `tag/opening/bot` JSON config
+- preview và execute onboarding sample cho một page đã lưu
+- tạo, clone và activate prompt version theo page
+- preview và execute job `manual`, `scheduler` bằng `connected_page_id` thay vì gửi full runtime page bundle
 - tra cứu `etl_run` và health summary
 - xem response JSON thô ngay trên màn hình để audit
 
@@ -121,5 +135,5 @@ bun run dev
 ## Ghi chú
 
 - Repo standalone hiện không có đăng nhập, refresh session, role hay permission.
-- Các bảng auth cũ đã bị loại khỏi Prisma schema; dữ liệu seam1 là trọng tâm runtime hiện tại.
+- Các bảng auth cũ đã bị loại khỏi Prisma schema; dữ liệu `chat-extractor` là trọng tâm runtime hiện tại.
 - `service/` chưa được nối vào frontend ở phase này; frontend mới chừa sẵn chỗ cho seam2.

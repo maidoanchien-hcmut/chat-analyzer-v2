@@ -1,6 +1,7 @@
 package job
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -9,14 +10,17 @@ import (
 
 func TestRequestApplyPopulatesConfig(t *testing.T) {
 	req := Request{
+		ConnectedPageID:                "connected-page-1",
 		UserAccessToken:                "user-token",
 		PageID:                         "page-1",
 		TargetDate:                     "2026-03-31",
 		BusinessTimezone:               "Asia/Ho_Chi_Minh",
 		RunMode:                        "manual_range",
+		ProcessingMode:                 "etl_only",
 		RunGroupID:                     "group-1",
 		SnapshotVersion:                2,
 		IsPublished:                    false,
+		RunParamsJSON:                  json.RawMessage(`{"max_conversations":10}`),
 		MaxConversations:               10,
 		MaxMessagePagesPerConversation: 3,
 		TagRules: []TagRule{
@@ -54,11 +58,20 @@ func TestRequestApplyPopulatesConfig(t *testing.T) {
 	if cfg.PageID != "page-1" {
 		t.Fatalf("expected page ID to be copied")
 	}
+	if cfg.ConnectedPageID != "connected-page-1" {
+		t.Fatalf("expected connected page ID to be copied")
+	}
 	if cfg.RunMode != "manual_range" {
 		t.Fatalf("expected run mode to be copied")
 	}
+	if cfg.ProcessingMode != "etl_only" {
+		t.Fatalf("expected processing mode to be copied")
+	}
 	if cfg.SnapshotVersion != 2 {
 		t.Fatalf("expected snapshot version 2, got %d", cfg.SnapshotVersion)
+	}
+	if got := string(cfg.RunParamsJSON); got != `{"max_conversations":10}` {
+		t.Fatalf("expected run params json to be copied, got %s", got)
 	}
 	if cfg.WindowStartAt == nil || cfg.WindowEndExclusiveAt == nil {
 		t.Fatalf("expected window bounds to be parsed")
@@ -89,6 +102,9 @@ func TestRequestApplyDefaultsRunModeAndSnapshotVersion(t *testing.T) {
 
 	if cfg.RunMode != "scheduled_daily" {
 		t.Fatalf("expected default run mode scheduled_daily, got %s", cfg.RunMode)
+	}
+	if cfg.ProcessingMode != "etl_only" {
+		t.Fatalf("expected default processing mode etl_only, got %s", cfg.ProcessingMode)
 	}
 	if cfg.SnapshotVersion != 1 {
 		t.Fatalf("expected default snapshot version 1, got %d", cfg.SnapshotVersion)

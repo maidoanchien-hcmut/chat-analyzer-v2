@@ -1,5 +1,5 @@
 import { AppError } from "../../core/errors.ts";
-import type { RunSlice } from "./seam1.types.ts";
+import type { RunSlice } from "./chat_extractor.types.ts";
 
 export function splitRequestedWindowByTargetDate(
   requestedWindowStartAt: string,
@@ -9,7 +9,7 @@ export function splitRequestedWindowByTargetDate(
   const start = new Date(requestedWindowStartAt);
   const end = new Date(requestedWindowEndExclusiveAt);
   if (Number.isNaN(start.valueOf()) || Number.isNaN(end.valueOf()) || start >= end) {
-    throw new AppError(400, "SEAM1_INVALID_WINDOW", "requested_window_start_at must be before requested_window_end_exclusive_at.");
+    throw new AppError(400, "CHAT_EXTRACTOR_INVALID_WINDOW", "requested_window_start_at must be before requested_window_end_exclusive_at.");
   }
 
   const slices: RunSlice[] = [];

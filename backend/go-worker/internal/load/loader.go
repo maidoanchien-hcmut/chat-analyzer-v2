@@ -144,6 +144,10 @@ func insertETLRunStart(
 	if err != nil {
 		return "", fmt.Errorf("marshal tag dictionary: %w", err)
 	}
+	runParamsJSON := cfg.RunParamsJSON
+	if len(runParamsJSON) == 0 {
+		runParamsJSON = json.RawMessage(`{}`)
+	}
 
 	etlRunID := uuid.NewString()
 	_, err = db.Exec(ctx, `
@@ -151,7 +155,9 @@ func insertETLRunStart(
 			id,
 			run_group_id,
 			run_mode,
+			connected_page_id,
 			page_id,
+			processing_mode,
 			target_date,
 			business_timezone,
 			requested_window_start_at,
@@ -161,18 +167,21 @@ func insertETLRunStart(
 			status,
 			snapshot_version,
 			is_published,
+			run_params_json,
 			tag_dictionary_json,
 			metrics_json,
 			started_at,
 			finished_at
 		) VALUES (
-			$1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8, $9, $10, 'running', $11, false, $12::jsonb, $13::jsonb, $14, NULL
+			$1, NULLIF($2, ''), $3, NULLIF($4, '')::uuid, $5, $6, $7, $8, $9, $10, $11, 'running', $12, false, $13::jsonb, $14::jsonb, $15::jsonb, $16, NULL
 		)
 	`,
 		etlRunID,
 		cfg.RunGroupID,
 		cfg.RunMode,
+		cfg.ConnectedPageID,
 		cfg.PageID,
+		cfg.ProcessingMode,
 		targetDate.Format(time.DateOnly),
 		cfg.BusinessTimezone,
 		cfg.RequestedWindowStartAt,
@@ -180,6 +189,7 @@ func insertETLRunStart(
 		windowStartAt,
 		windowEndAt,
 		cfg.SnapshotVersion,
+		runParamsJSON,
 		tagDictionaryJSON,
 		metricsJSON,
 		startedAt,

@@ -1,8 +1,8 @@
 # go-worker
 
-`go-worker` owns seam 1 extract/ETL work.
+`go-worker` owns chat-extractor ETL work.
 
-Current worker path follows the production extract shape from [pancake-seam1-extract-transform-audit.md](D:/Code/chat-analyzer-v2/docs/plans/pancake-seam1-extract-transform-audit.md):
+Current worker path follows the production extract shape from [pancake-chat-extractor-extract-transform-audit.md](D:/Code/chat-analyzer-v2/docs/plans/pancake-chat-extractor-extract-transform-audit.md):
 
 - loads only process-level config from `.env`
 - accepts per-run input from a backend job payload or local CLI flags
@@ -18,7 +18,7 @@ Current worker path follows the production extract shape from [pancake-seam1-ext
   - `opening_rules`
   - `customer_directory`
   - `bot_signatures`
-- loads Seam 1 directly into Postgres via `etl_run`, `conversation_day`, `message`, and `thread_customer_mapping`
+- loads chat-extractor rows directly into Postgres via `etl_run`, `conversation_day`, `message`, and `thread_customer_mapping`
 - persists `etl_run` lifecycle as `running -> loaded/published` or `running -> failed`
 
 ## Run
@@ -43,6 +43,9 @@ Job payload sample:
 
 ```json
 {
+  "connected_page_id": "connected-page-uuid",
+  "processing_mode": "etl_only",
+  "run_params_json": {},
   "user_access_token": "token",
   "page_id": "1406535699642677",
   "target_date": "2026-03-31",
@@ -68,8 +71,10 @@ File mẫu nằm ở [local-run.example.json](D:/Code/chat-analyzer-v2/backend/g
 
 ## Notes
 
-- `DATABASE_URL` is required because `go-worker` loads Seam 1 directly into Postgres.
+- `DATABASE_URL` is required because `go-worker` loads chat-extractor rows directly into Postgres.
 - `WORKER_REQUEST_TIMEOUT_SECONDS` is process-level. Per-run ETL scope belongs in the job payload.
+- `connected_page_id` is the DB-backed control-plane owner for the run; `page_id` stays in the payload because the worker still talks to Pancake and writes thread-level mappings keyed by source page.
+- `processing_mode` and `run_params_json` are persisted onto `etl_run` for onboarding/manual/scheduler audit.
 - `PANCAKE_PAGE_ACCESS_TOKEN` is intentionally not part of any config surface. The worker obtains it from Pancake.
 - `window_*` allow a partial-day operational run inside the selected `target_date`.
 - `is_published = true` is only valid for a full-day bucket.

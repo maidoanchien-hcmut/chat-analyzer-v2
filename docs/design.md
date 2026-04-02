@@ -398,11 +398,11 @@ Khi Sales Lead thấy một nhân viên bị AI chấm điểm thấp (ví dụ 
 - Cho phép thêm trang mới như sau:
   - IT chọn thêm trang mới.
   - IT không cần biết trước opening block hay tag mapping để add page.
-  - IT chọn `organization` sở hữu page này.
   - IT dán `Pancake user access token`.
   - Hệ thống gọi `list pages`, cho IT chọn đúng `page`.
   - IT chọn `business timezone`.
   - IT chọn `initial_conversation_limit` cho run đầu.
+  - Backend phải persist page này ngay vào `connected_page`; frontend chỉ là HTTP client, không giữ page config làm source of truth lâu dài.
   - IT bấm chạy lần đầu để hệ thống tạo `onboarding sample extract` cho ngày `D`:
     - chỉ lấy tối đa số conversation theo `initial_conversation_limit`
     - với từng conversation được chọn thì vẫn lấy toàn bộ message thuộc ngày `D`
@@ -410,14 +410,19 @@ Khi Sales Lead thấy một nhân viên bị AI chấm điểm thấp (ví dụ 
   - Sau run đầu tiên, UI phải sinh ra các dữ liệu để IT fine-tune:
     - tag dictionary và tag đang xuất hiện trên conversation
     - `opening_candidate_window` phổ biến nhất
+    - `connected_page.onboarding_state_json` phải giữ lại artifacts/candidates gần nhất để UI mở lại vẫn xem được
   - Sau khi fine-tune, IT mới được chọn bước tiếp theo:
     - `Run Pilot AI` trên sample nhỏ
     - bật `Auto Scraper`
     - bật `Auto AI Analysis`
   - Mặc định page mới phải khởi tạo với cả `Auto Scraper = OFF` và `Auto AI Analysis = OFF` cho tới khi IT chủ động bật.
+- Prompt management theo page là owner riêng:
+  - prompt phải có version riêng trong `page_prompt_version`
+  - có thể tạo draft mới, clone active prompt từ page khác, rồi activate cho page hiện tại
 - Cho phép chạy thủ công để populate dữ liệu khi cần thiết, ví dụ khi có sự cố hoặc khi muốn backfill dữ liệu cũ. Cho phép chọn khoảng thời gian cụ thể để chạy lại ETL, AI, hoặc cả hai.
   - Nếu khoảng thời gian không bám mốc 0h-24h, hệ thống phải tự chia thành các `etl_run` theo từng `target_date`.
   - Mỗi `etl_run` phải giữ lại `requested_window_*` để audit và `window_*` thực tế để biết slice nào đã được xử lý.
+  - `processing_mode` và các tham số runtime như `initial_conversation_limit`, `max_conversations` phải nằm ở `etl_run`, không nhét vào frontend session hay page config dài hạn
   - Run partial-day chỉ phục vụ vận hành, debug, recovery, hoặc pilot; không được auto publish làm dashboard official.
 - Scheduler control:
   - `Auto Scraper`: bật/tắt scheduler extract hằng ngày theo từng page.

@@ -9,9 +9,11 @@ datasource db {
 
 model EtlRun {
   id                            String            @id @default(uuid()) @db.Uuid
+  connectedPageId               String?           @map("connected_page_id") @db.Uuid
   runGroupId                    String?           @map("run_group_id") @db.Uuid
   runMode                       String            @map("run_mode")
   pageId                        String            @map("page_id")
+  processingMode                String            @default("etl_only") @map("processing_mode")
   targetDate                    DateTime          @map("target_date") @db.Date
   businessTimezone              String            @map("business_timezone")
   requestedWindowStartAt        DateTime?         @map("requested_window_start_at") @db.Timestamptz(6)
@@ -21,23 +23,71 @@ model EtlRun {
   status                        String
   snapshotVersion               Int               @map("snapshot_version")
   isPublished                   Boolean           @default(false) @map("is_published")
+  runParamsJson                 Json              @default("{}") @map("run_params_json")
   tagDictionaryJson             Json              @map("tag_dictionary_json")
   metricsJson                   Json              @map("metrics_json")
   errorText                     String?           @map("error_text")
   startedAt                     DateTime          @default(now()) @map("started_at") @db.Timestamptz(6)
   finishedAt                    DateTime?         @map("finished_at") @db.Timestamptz(6)
+  connectedPage                 ConnectedPage?    @relation("ConnectedPageRuns", fields: [connectedPageId], references: [id], onDelete: SetNull)
   conversationDays              ConversationDay[]
   messages                      Message[]
 
   @@unique([pageId, targetDate, snapshotVersion])
+  @@index([connectedPageId])
   @@index([runGroupId])
   @@index([pageId])
+  @@index([processingMode])
   @@index([targetDate])
   @@index([status])
   @@index([isPublished])
   @@index([startedAt])
   @@index([finishedAt])
   @@map("etl_run")
+}
+
+model ConnectedPage {
+  id                       String              @id @default(uuid()) @db.Uuid
+  pancakePageId            String              @unique @map("pancake_page_id")
+  pageName                 String              @map("page_name")
+  pancakeUserAccessToken   String              @map("pancake_user_access_token")
+  businessTimezone         String              @map("business_timezone")
+  autoScraperEnabled       Boolean             @default(false) @map("auto_scraper_enabled")
+  autoAiAnalysisEnabled    Boolean             @default(false) @map("auto_ai_analysis_enabled")
+  activePromptVersionId    String?             @map("active_prompt_version_id") @db.Uuid
+  activeTagMappingJson     Json                @default("[]") @map("active_tag_mapping_json")
+  activeOpeningRulesJson   Json                @default("[]") @map("active_opening_rules_json")
+  activeBotSignaturesJson  Json                @default("[]") @map("active_bot_signatures_json")
+  onboardingStateJson      Json                @default("{}") @map("onboarding_state_json")
+  isActive                 Boolean             @default(true) @map("is_active")
+  createdAt                DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  activePromptVersion      PagePromptVersion?  @relation("ActivePromptVersion", fields: [activePromptVersionId], references: [id], onDelete: SetNull)
+  etlRuns                  EtlRun[]            @relation("ConnectedPageRuns")
+  promptVersions           PagePromptVersion[] @relation("PagePromptVersions")
+
+  @@index([pageName])
+  @@index([autoScraperEnabled])
+  @@index([autoAiAnalysisEnabled])
+  @@index([isActive])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@map("connected_page")
+}
+
+model PagePromptVersion {
+  id              String          @id @default(uuid()) @db.Uuid
+  connectedPageId String          @map("connected_page_id") @db.Uuid
+  versionNo       Int             @map("version_no")
+  promptText      String          @map("prompt_text")
+  notes           String?
+  createdAt       DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  activeForPages  ConnectedPage[] @relation("ActivePromptVersion")
+  connectedPage   ConnectedPage   @relation("PagePromptVersions", fields: [connectedPageId], references: [id], onDelete: Cascade)
+
+  @@unique([connectedPageId, versionNo])
+  @@index([connectedPageId, createdAt(sort: Desc)])
+  @@map("page_prompt_version")
 }
 
 model ConversationDay {

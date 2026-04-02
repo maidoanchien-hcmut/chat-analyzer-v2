@@ -1,84 +1,181 @@
-type JobKind = "manual" | "onboarding" | "scheduler";
-type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+const rootElement = document.querySelector<HTMLDivElement>("#app");
 
-type ListedPage = {
+type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+type ProcessingMode = "etl_only" | "etl_and_ai";
+type ManualRunMode = "backfill_day" | "manual_range";
+
+type PancakePage = {
   pageId: string;
   pageName: string;
 };
 
-type RegisteredPageState = {
-  organizationId: string;
-  pageSlug: string;
-  pageId: string;
+type ConnectedPage = {
+  id: string;
+  pancakePageId: string;
   pageName: string;
-  userAccessToken: string;
   businessTimezone: string;
-  initialConversationLimit: number;
-  autoScraper: boolean;
-  autoAiAnalysis: boolean;
-} | null;
+  autoScraperEnabled: boolean;
+  autoAiAnalysisEnabled: boolean;
+  activePromptVersionId: string | null;
+  activeTagMappingJson: JsonValue | null;
+  activeOpeningRulesJson: JsonValue | null;
+  activeBotSignaturesJson: JsonValue | null;
+  onboardingStateJson: JsonValue | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+};
+
+type PromptVersion = {
+  id: string;
+  connectedPageId: string;
+  versionNo: number;
+  promptText: string;
+  notes: string | null;
+  createdAt: string;
+};
+
+type PromptListResponse = {
+  connectedPageId: string;
+  activePromptVersionId: string | null;
+  prompts: PromptVersion[];
+};
 
 type AppState = {
   apiBaseUrl: string;
-  tokenInput: string;
-  listedPages: ListedPage[];
-  selectedPageId: string;
-  organizationId: string;
-  pageSlug: string;
-  businessTimezone: string;
-  initialConversationLimit: string;
-  autoScraper: boolean;
-  autoAiAnalysis: boolean;
-  registeredPage: RegisteredPageState;
-  jobKind: JobKind;
-  jobName: string;
-  targetDate: string;
-  snapshotVersion: string;
-  publish: boolean;
-  maxConversations: string;
-  runId: string;
-  health: JsonValue | null;
-  listPagesResult: JsonValue | null;
-  registerResult: JsonValue | null;
-  previewResult: JsonValue | null;
-  executeResult: JsonValue | null;
-  runResult: JsonValue | null;
   loadingKey: string | null;
   errorMessage: string | null;
   lastUpdatedAt: string | null;
+  tokenInput: string;
+  listedPancakePages: PancakePage[];
+  selectedPancakePageId: string;
+  listPagesResponse: unknown;
+  connectedPages: ConnectedPage[];
+  selectedConnectedPageId: string;
+  selectedConnectedPage: ConnectedPage | null;
+  connectedPagesResponse: unknown;
+  connectedPageResponse: unknown;
+  registerBusinessTimezone: string;
+  registerAutoScraperEnabled: boolean;
+  registerAutoAiAnalysisEnabled: boolean;
+  registerResponse: unknown;
+  patchBusinessTimezone: string;
+  patchAutoScraperEnabled: boolean;
+  patchAutoAiAnalysisEnabled: boolean;
+  patchIsActive: boolean;
+  tagMappingDraft: string;
+  openingRulesDraft: string;
+  botSignaturesDraft: string;
+  patchResponse: unknown;
+  onboardingTargetDate: string;
+  onboardingInitialConversationLimit: string;
+  onboardingProcessingMode: ProcessingMode;
+  onboardingWriteArtifacts: boolean;
+  onboardingPreviewResponse: unknown;
+  onboardingExecuteResponse: unknown;
+  promptsResponse: unknown;
+  promptsData: PromptListResponse | null;
+  promptTextDraft: string;
+  promptNotesDraft: string;
+  cloneSourcePageId: string;
+  activatePromptVersionId: string;
+  promptCreateResponse: unknown;
+  promptCloneResponse: unknown;
+  promptActivateResponse: unknown;
+  manualJobName: string;
+  manualProcessingMode: ProcessingMode;
+  manualRunMode: ManualRunMode;
+  manualTargetDate: string;
+  manualWindowStart: string;
+  manualWindowEnd: string;
+  manualPublish: boolean;
+  manualSnapshotVersion: string;
+  manualMaxConversations: string;
+  manualMaxMessagePagesPerConversation: string;
+  manualWriteArtifacts: boolean;
+  manualPreviewResponse: unknown;
+  manualExecuteResponse: unknown;
+  schedulerJobName: string;
+  schedulerTargetDate: string;
+  schedulerProcessingMode: ProcessingMode;
+  schedulerIsPublished: boolean;
+  schedulerSnapshotVersion: string;
+  schedulerMaxConversations: string;
+  schedulerMaxMessagePagesPerConversation: string;
+  schedulerPreviewResponse: unknown;
+  schedulerExecuteResponse: unknown;
+  healthResponse: unknown;
+  runId: string;
+  runResponse: unknown;
 };
 
 const state: AppState = {
   apiBaseUrl: "http://localhost:3000",
-  tokenInput: "",
-  listedPages: [],
-  selectedPageId: "",
-  organizationId: "default",
-  pageSlug: "demo-clinic",
-  businessTimezone: "Asia/Ho_Chi_Minh",
-  initialConversationLimit: "25",
-  autoScraper: false,
-  autoAiAnalysis: false,
-  registeredPage: null,
-  jobKind: "manual",
-  jobName: "demo-day-run",
-  targetDate: "2026-04-01",
-  snapshotVersion: "1",
-  publish: false,
-  maxConversations: "",
-  runId: "",
-  health: null,
-  listPagesResult: null,
-  registerResult: null,
-  previewResult: null,
-  executeResult: null,
-  runResult: null,
   loadingKey: null,
   errorMessage: null,
-  lastUpdatedAt: null
+  lastUpdatedAt: null,
+  tokenInput: "",
+  listedPancakePages: [],
+  selectedPancakePageId: "",
+  listPagesResponse: null,
+  connectedPages: [],
+  selectedConnectedPageId: "",
+  selectedConnectedPage: null,
+  connectedPagesResponse: null,
+  connectedPageResponse: null,
+  registerBusinessTimezone: "Asia/Ho_Chi_Minh",
+  registerAutoScraperEnabled: false,
+  registerAutoAiAnalysisEnabled: false,
+  registerResponse: null,
+  patchBusinessTimezone: "Asia/Ho_Chi_Minh",
+  patchAutoScraperEnabled: false,
+  patchAutoAiAnalysisEnabled: false,
+  patchIsActive: true,
+  tagMappingDraft: "[]",
+  openingRulesDraft: "[]",
+  botSignaturesDraft: "[]",
+  patchResponse: null,
+  onboardingTargetDate: todayInputValue(),
+  onboardingInitialConversationLimit: "25",
+  onboardingProcessingMode: "etl_only",
+  onboardingWriteArtifacts: true,
+  onboardingPreviewResponse: null,
+  onboardingExecuteResponse: null,
+  promptsResponse: null,
+  promptsData: null,
+  promptTextDraft: "",
+  promptNotesDraft: "",
+  cloneSourcePageId: "",
+  activatePromptVersionId: "",
+  promptCreateResponse: null,
+  promptCloneResponse: null,
+  promptActivateResponse: null,
+  manualJobName: "manual-run",
+  manualProcessingMode: "etl_only",
+  manualRunMode: "backfill_day",
+  manualTargetDate: todayInputValue(),
+  manualWindowStart: "",
+  manualWindowEnd: "",
+  manualPublish: false,
+  manualSnapshotVersion: "",
+  manualMaxConversations: "",
+  manualMaxMessagePagesPerConversation: "",
+  manualWriteArtifacts: true,
+  manualPreviewResponse: null,
+  manualExecuteResponse: null,
+  schedulerJobName: "scheduler-preview",
+  schedulerTargetDate: todayInputValue(),
+  schedulerProcessingMode: "etl_only",
+  schedulerIsPublished: false,
+  schedulerSnapshotVersion: "",
+  schedulerMaxConversations: "",
+  schedulerMaxMessagePagesPerConversation: "",
+  schedulerPreviewResponse: null,
+  schedulerExecuteResponse: null,
+  healthResponse: null,
+  runId: "",
+  runResponse: null
 };
-
-const rootElement = document.querySelector<HTMLDivElement>("#app");
 
 if (!rootElement) {
   throw new Error("Missing #app root element.");
@@ -86,350 +183,255 @@ if (!rootElement) {
 
 const root = rootElement;
 
+root.addEventListener("click", onRootClick);
+root.addEventListener("change", onRootChange);
+
 render();
 
 function render() {
+  const selectedPage = getSelectedConnectedPage();
+  const promptCount = state.promptsData?.prompts.length ?? 0;
+
   root.innerHTML = `
     <div class="shell">
       <header class="topbar">
         <div class="title-block">
           <p class="eyebrow">chat-analyzer-v2</p>
-          <h1>Seam 1 HTTP console</h1>
+          <h1>Pancake control-plane tối giản</h1>
           <p class="subtitle">
-            Frontend gửi request HTTP trực tiếp sang backend. Token và page config chỉ giữ trong memory của phiên hiện tại.
+            Frontend chỉ gọi HTTP API. Sau khi register, dữ liệu page đang vận hành luôn đọc lại từ backend.
           </p>
         </div>
-
         <div class="quickbar">
-          <label class="field field-inline">
+          <label class="field">
             <span>Backend API</span>
             <input id="api-base-url" type="text" value="${escapeAttribute(state.apiBaseUrl)}" placeholder="http://localhost:3000" />
           </label>
           <button class="button" data-action="save-api-base">Lưu endpoint</button>
+          <button class="button" data-action="load-connected-pages">Tải page đã đăng ký</button>
           <button class="button" data-action="load-health">Health</button>
-          <button class="button button-primary" data-action="preview-job">Preview</button>
         </div>
       </header>
 
-      <section class="module-strip">
-        ${renderModuleCard("Page đã chọn", selectedPageLabel(), "List từ Pancake rồi register tại frontend session")}
-        ${renderModuleCard("Job mode", state.jobKind, "manual, onboarding hoặc scheduler")}
-        ${renderModuleCard("Run target", state.targetDate || "chưa có", "Ngày business date đang chuẩn bị chạy")}
-        ${renderModuleCard("Health", readHealthStatus(), "Đọc từ backend /seam1/health/summary")}
-        ${renderModuleCard("Trạng thái", state.loadingKey ? `đang chạy ${state.loadingKey}` : "sẵn sàng", "Không còn phụ thuộc preset JSON")}
-        ${renderModuleCard("Cập nhật cuối", state.lastUpdatedAt ?? "chưa có", "Ghi sau mỗi request thành công")}
+      <section class="metric-strip">
+        ${renderMetricCard("Page đang chọn", selectedPage?.pageName ?? "chưa có", selectedPage ? selectedPage.businessTimezone : "Chọn page từ danh sách control-plane")}
+        ${renderMetricCard("Pancake page", getSelectedPancakePage()?.pageName ?? "chưa chọn", "List từ token để register")}
+        ${renderMetricCard("Prompt active", selectedPage?.activePromptVersionId ?? "chưa active", `${promptCount} version đang tải`)}
+        ${renderMetricCard("Auto", selectedPage ? `${selectedPage.autoScraperEnabled ? "Scraper on" : "Scraper off"} / ${selectedPage.autoAiAnalysisEnabled ? "AI on" : "AI off"}` : "chưa có", selectedPage?.isActive ? "Page đang active" : "Page đang tắt")}
+        ${renderMetricCard("Health", readHealthLabel(), state.loadingKey ? `đang chạy ${state.loadingKey}` : "sẵn sàng")}
+        ${renderMetricCard("Cập nhật cuối", state.lastUpdatedAt ?? "chưa có", state.errorMessage ? "Có lỗi ở panel dưới" : "Không giữ state config lâu dài")}
       </section>
 
       <main class="workspace">
-        <section class="control-stack">
-          <section class="panel compact-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Pancake</p>
-                <h2>List pages</h2>
-              </div>
-            </div>
-
-            <label class="field">
-              <span>User access token</span>
-              <input id="token-input" type="password" value="${escapeAttribute(state.tokenInput)}" placeholder="Dán Pancake user access token" />
-            </label>
-
-            <div class="button-row">
-              <button class="button button-primary" data-action="list-pages">List pages</button>
-            </div>
-
-            <label class="field">
-              <span>Chọn page</span>
-              <select id="selected-page-id">
-                ${renderPageOptions()}
-              </select>
-            </label>
-          </section>
-
-          <section class="panel compact-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Control Center</p>
-                <h2>Register page</h2>
-              </div>
-            </div>
-
-            <div class="compact-form">
-              <label class="field">
-                <span>Organization ID</span>
-                <input id="organization-id" type="text" value="${escapeAttribute(state.organizationId)}" />
-              </label>
-              <label class="field">
-                <span>Page slug</span>
-                <input id="page-slug" type="text" value="${escapeAttribute(state.pageSlug)}" />
-              </label>
-              <label class="field">
-                <span>Business timezone</span>
-                <input id="business-timezone" type="text" value="${escapeAttribute(state.businessTimezone)}" />
-              </label>
-              <label class="field">
-                <span>Initial conversation limit</span>
-                <input id="initial-conversation-limit" type="number" min="1" value="${escapeAttribute(state.initialConversationLimit)}" />
-              </label>
-            </div>
-
-            <div class="button-row">
-              <button class="button" data-action="toggle-auto-scraper">Auto Scraper: ${state.autoScraper ? "ON" : "OFF"}</button>
-              <button class="button" data-action="toggle-auto-ai">Auto AI: ${state.autoAiAnalysis ? "ON" : "OFF"}</button>
-              <button class="button button-primary" data-action="register-page">Register</button>
-            </div>
-          </section>
-
-          <section class="panel compact-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Extract</p>
-                <h2>Run config</h2>
-              </div>
-            </div>
-
-            <div class="compact-form">
-              <label class="field">
-                <span>Job kind</span>
-                <select id="job-kind">
-                  ${renderJobKindOptions()}
-                </select>
-              </label>
-              <label class="field">
-                <span>Job name</span>
-                <input id="job-name" type="text" value="${escapeAttribute(state.jobName)}" />
-              </label>
-              <label class="field">
-                <span>Target date</span>
-                <input id="target-date" type="date" value="${escapeAttribute(state.targetDate)}" />
-              </label>
-              <label class="field">
-                <span>Snapshot version</span>
-                <input id="snapshot-version" type="number" min="1" value="${escapeAttribute(state.snapshotVersion)}" />
-              </label>
-              <label class="field">
-                <span>Max conversations</span>
-                <input id="max-conversations" type="number" min="0" value="${escapeAttribute(state.maxConversations)}" placeholder="để trống nếu không giới hạn" />
-              </label>
-            </div>
-
-            <div class="button-row">
-              <button class="button" data-action="toggle-publish">Publish: ${state.publish ? "ON" : "OFF"}</button>
-              <button class="button button-primary" data-action="preview-job">Preview</button>
-              <button class="button button-danger" data-action="execute-job">Execute</button>
-            </div>
-          </section>
-
-          <section class="panel compact-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Audit</p>
-                <h2>Run detail</h2>
-              </div>
-            </div>
-
-            <label class="field">
-              <span>Run ID</span>
-              <input id="run-id" type="text" value="${escapeAttribute(state.runId)}" placeholder="etl_run UUID" />
-            </label>
-
-            <div class="button-row">
-              <button class="button" data-action="load-run">Get run</button>
-            </div>
-          </section>
+        <section class="sidebar">
+          ${renderPancakePanel()}
+          ${renderConnectedPagesPanel(selectedPage)}
+          ${renderPageConfigPanel(selectedPage)}
+          ${renderOnboardingPanel(selectedPage)}
+          ${renderPromptPanel(selectedPage)}
+          ${renderManualRunPanel(selectedPage)}
+          ${renderSchedulerPanel()}
+          ${renderAuditPanel()}
         </section>
 
-        <section class="surface-grid">
-          <section class="panel compact-panel surface-panel">
+        <section class="content">
+          <section class="panel summary-panel">
             <div class="panel-header">
               <div>
-                <p class="panel-kicker">Response</p>
-                <h2>Health</h2>
+                <p class="panel-kicker">Canonical page</p>
+                <h2>Tóm tắt page hiện hành</h2>
               </div>
-            </div>
-            ${renderJsonBlock(state.health)}
-          </section>
-
-          <section class="panel compact-panel surface-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Response</p>
-                <h2>Pages</h2>
-              </div>
-            </div>
-            ${renderJsonBlock(state.listPagesResult)}
-          </section>
-
-          <section class="panel compact-panel surface-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Response</p>
-                <h2>Register</h2>
-              </div>
-            </div>
-            ${renderJsonBlock(state.registerResult)}
-          </section>
-
-          <section class="panel compact-panel surface-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Response</p>
-                <h2>Preview</h2>
-              </div>
-            </div>
-            ${renderJsonBlock(state.previewResult)}
-          </section>
-
-          <section class="panel compact-panel surface-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Response</p>
-                <h2>Execution</h2>
-              </div>
-            </div>
-            ${renderJsonBlock(state.executeResult)}
-          </section>
-
-          <section class="panel compact-panel surface-panel">
-            <div class="panel-header">
-              <div>
-                <p class="panel-kicker">Response</p>
-                <h2>Run detail</h2>
-              </div>
+              <button class="button" data-action="load-connected-page">Reload page</button>
             </div>
             ${state.errorMessage ? `<div class="error-box">${escapeHtml(state.errorMessage)}</div>` : ""}
-            ${renderJsonBlock(state.runResult)}
+            ${renderSelectedPageSummary(selectedPage)}
+          </section>
+
+          <section class="response-grid">
+            ${renderResponsePanel("Health", state.healthResponse)}
+            ${renderResponsePanel("Pancake pages", state.listPagesResponse)}
+            ${renderResponsePanel("Connected pages", state.connectedPagesResponse)}
+            ${renderResponsePanel("Connected page detail", state.connectedPageResponse)}
+            ${renderResponsePanel("Register / patch", { register: state.registerResponse, patch: state.patchResponse })}
+            ${renderResponsePanel("Onboarding", { preview: state.onboardingPreviewResponse, execute: state.onboardingExecuteResponse })}
+            ${renderResponsePanel("Prompts", { list: state.promptsResponse, create: state.promptCreateResponse, clone: state.promptCloneResponse, activate: state.promptActivateResponse })}
+            ${renderResponsePanel("Jobs", { manualPreview: state.manualPreviewResponse, manualExecute: state.manualExecuteResponse, schedulerPreview: state.schedulerPreviewResponse, schedulerExecute: state.schedulerExecuteResponse, run: state.runResponse })}
           </section>
         </section>
       </main>
     </div>
   `;
-
-  bindEvents();
 }
 
-function bindEvents() {
-  document.querySelector<HTMLButtonElement>("[data-action='save-api-base']")?.addEventListener("click", () => {
-    state.apiBaseUrl = normalizeBaseUrl(getInputValue("#api-base-url", state.apiBaseUrl));
-    state.errorMessage = null;
-    render();
-  });
+async function onRootClick(event: Event) {
+  const button = (event.target as HTMLElement).closest<HTMLElement>("[data-action]");
+  if (!button) {
+    return;
+  }
 
-  document.querySelector<HTMLButtonElement>("[data-action='load-health']")?.addEventListener("click", () => {
-    void runAction("health", async () => {
-      state.health = await requestJson("/seam1/health/summary");
-    });
-  });
+  const action = button.dataset.action;
+  if (!action) {
+    return;
+  }
 
-  document.querySelector<HTMLButtonElement>("[data-action='list-pages']")?.addEventListener("click", () => {
-    void runAction("list-pages", async () => {
-      syncPageForm();
-      const data = await requestJson("/seam1/pages/list-from-token", {
-        method: "POST",
-        body: JSON.stringify({
-          user_access_token: state.tokenInput
-        })
+  switch (action) {
+    case "save-api-base":
+      syncAllForms();
+      state.apiBaseUrl = normalizeBaseUrl(state.apiBaseUrl);
+      state.errorMessage = null;
+      render();
+      return;
+    case "list-pages":
+      return void runAction("list-pages", async () => {
+        assertNonEmpty(state.tokenInput, "Cần nhập user access token.");
+        const data = await requestJson("POST", "/chat-extractor/pages/list-from-token", { userAccessToken: state.tokenInput });
+        state.listPagesResponse = data;
+        state.listedPancakePages = extractPancakePages(data);
+        state.selectedPancakePageId = state.listedPancakePages.find((page) => page.pageId === state.selectedPancakePageId)?.pageId ?? state.listedPancakePages[0]?.pageId ?? "";
       });
-      state.listPagesResult = data;
-      state.listedPages = Array.isArray(data) ? data.filter(isListedPage) : [];
-      state.selectedPageId = state.listedPages[0]?.pageId ?? "";
-    });
-  });
-
-  document.querySelector<HTMLButtonElement>("[data-action='register-page']")?.addEventListener("click", () => {
-    void runAction("register-page", async () => {
-      syncPageForm();
-      const data = await requestJson("/seam1/control-center/pages/register", {
-        method: "POST",
-        body: JSON.stringify({
-          organization_id: state.organizationId,
-          page_slug: state.pageSlug,
-          user_access_token: state.tokenInput,
-          page_id: state.selectedPageId,
-          business_timezone: state.businessTimezone,
-          initial_conversation_limit: readPositiveInt(state.initialConversationLimit, 25),
-          auto_scraper: state.autoScraper,
-          auto_ai_analysis: state.autoAiAnalysis
-        })
+    case "load-connected-pages":
+      return void runAction("load-pages", async () => {
+        await refreshConnectedPages(state.selectedConnectedPageId);
       });
-      state.registerResult = data;
-
-      const selectedPage = state.listedPages.find((page) => page.pageId === state.selectedPageId);
-      if (selectedPage) {
-        state.registeredPage = {
-          organizationId: state.organizationId,
-          pageSlug: state.pageSlug,
-          pageId: selectedPage.pageId,
-          pageName: selectedPage.pageName,
+    case "load-connected-page":
+      return void runAction("load-page", async () => {
+        await refreshSelectedConnectedPage(requireSelectedConnectedPageId());
+      });
+    case "register-page":
+      return void runAction("register", async () => {
+        assertNonEmpty(state.tokenInput, "Cần nhập user access token.");
+        assertNonEmpty(state.selectedPancakePageId, "Cần chọn page từ Pancake.");
+        const response = await requestJson<{ page: ConnectedPage }>("POST", "/chat-extractor/control-center/pages/register", {
+          pancakePageId: state.selectedPancakePageId,
           userAccessToken: state.tokenInput,
-          businessTimezone: state.businessTimezone,
-          initialConversationLimit: readPositiveInt(state.initialConversationLimit, 25),
-          autoScraper: state.autoScraper,
-          autoAiAnalysis: state.autoAiAnalysis
-        };
-      }
-    });
-  });
-
-  document.querySelector<HTMLButtonElement>("[data-action='preview-job']")?.addEventListener("click", () => {
-    void runAction("preview-job", async () => {
-      syncJobForm();
-      state.previewResult = await requestJson("/seam1/jobs/preview", {
-        method: "POST",
-        body: JSON.stringify(buildJobPayload())
+          businessTimezone: state.registerBusinessTimezone.trim() || "Asia/Ho_Chi_Minh",
+          autoScraperEnabled: state.registerAutoScraperEnabled,
+          autoAiAnalysisEnabled: state.registerAutoAiAnalysisEnabled
+        });
+        state.registerResponse = response;
+        await refreshConnectedPages(response.page.id);
+        await refreshSelectedConnectedPage(response.page.id);
       });
-    });
-  });
-
-  document.querySelector<HTMLButtonElement>("[data-action='execute-job']")?.addEventListener("click", () => {
-    void runAction("execute-job", async () => {
-      syncJobForm();
-      state.executeResult = await requestJson("/seam1/jobs/execute", {
-        method: "POST",
-        body: JSON.stringify({
-          ...buildJobPayload(),
-          write_artifacts: true
-        })
+    case "save-page-config":
+      return void runAction("patch-page", async () => {
+        const pageId = requireSelectedConnectedPageId();
+        const response = await requestJson<{ page: ConnectedPage }>("PATCH", `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}`, {
+          businessTimezone: state.patchBusinessTimezone.trim() || "Asia/Ho_Chi_Minh",
+          autoScraperEnabled: state.patchAutoScraperEnabled,
+          autoAiAnalysisEnabled: state.patchAutoAiAnalysisEnabled,
+          activeTagMappingJson: parseJsonDraft("Tag mapping", state.tagMappingDraft),
+          activeOpeningRulesJson: parseJsonDraft("Opening rules", state.openingRulesDraft),
+          activeBotSignaturesJson: parseJsonDraft("Bot signatures", state.botSignaturesDraft),
+          isActive: state.patchIsActive
+        });
+        state.patchResponse = response;
+        await refreshConnectedPages(pageId);
+        await refreshSelectedConnectedPage(pageId);
       });
-    });
-  });
+    case "preview-onboarding":
+      return void runAction("preview-onboarding", async () => {
+        const pageId = requireSelectedConnectedPageId();
+        state.onboardingPreviewResponse = await requestJson("POST", `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}/onboarding/preview`, buildOnboardingPayload());
+      });
+    case "execute-onboarding":
+      return void runAction("execute-onboarding", async () => {
+        const pageId = requireSelectedConnectedPageId();
+        state.onboardingExecuteResponse = await requestJson("POST", `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}/onboarding/execute`, {
+          ...buildOnboardingPayload(),
+          writeArtifacts: state.onboardingWriteArtifacts
+        });
+        await refreshSelectedConnectedPage(pageId);
+      });
+    case "load-prompts":
+      return void runAction("load-prompts", async () => {
+        await loadPrompts(requireSelectedConnectedPageId());
+      });
+    case "create-prompt":
+      return void runAction("create-prompt", async () => {
+        const pageId = requireSelectedConnectedPageId();
+        assertNonEmpty(state.promptTextDraft, "Cần nhập prompt text.");
+        state.promptCreateResponse = await requestJson("POST", `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}/prompts`, {
+          promptText: state.promptTextDraft,
+          notes: state.promptNotesDraft || null
+        });
+        state.promptTextDraft = "";
+        state.promptNotesDraft = "";
+        await loadPrompts(pageId);
+      });
+    case "clone-prompt":
+      return void runAction("clone-prompt", async () => {
+        const pageId = requireSelectedConnectedPageId();
+        assertNonEmpty(state.cloneSourcePageId, "Cần chọn page nguồn để clone prompt.");
+        state.promptCloneResponse = await requestJson("POST", `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}/prompts/clone`, {
+          sourcePageId: state.cloneSourcePageId,
+          notes: state.promptNotesDraft || null
+        });
+        await loadPrompts(pageId);
+      });
+    case "activate-prompt":
+      return void runAction("activate-prompt", async () => {
+        const pageId = requireSelectedConnectedPageId();
+        assertNonEmpty(state.activatePromptVersionId, "Cần chọn version prompt để activate.");
+        state.promptActivateResponse = await requestJson("POST", `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}/prompts/${encodeURIComponent(state.activatePromptVersionId)}/activate`, {});
+        await refreshConnectedPages(pageId);
+        await refreshSelectedConnectedPage(pageId);
+        await loadPrompts(pageId);
+      });
+    case "preview-manual":
+      return void runAction("preview-manual", async () => {
+        state.manualPreviewResponse = await requestJson("POST", "/chat-extractor/jobs/preview", buildManualPayload());
+      });
+    case "execute-manual":
+      return void runAction("execute-manual", async () => {
+        state.manualExecuteResponse = await requestJson("POST", "/chat-extractor/jobs/execute", {
+          ...buildManualPayload(),
+          writeArtifacts: state.manualWriteArtifacts
+        });
+      });
+    case "preview-scheduler":
+      return void runAction("preview-scheduler", async () => {
+        state.schedulerPreviewResponse = await requestJson("POST", "/chat-extractor/jobs/scheduler/preview", buildSchedulerPayload());
+      });
+    case "execute-scheduler":
+      return void runAction("execute-scheduler", async () => {
+        state.schedulerExecuteResponse = await requestJson("POST", "/chat-extractor/jobs/scheduler/execute", buildSchedulerPayload());
+      });
+    case "load-health":
+      return void runAction("health", async () => {
+        state.healthResponse = await requestJson("GET", "/chat-extractor/health/summary");
+      });
+    case "load-run":
+      return void runAction("run-detail", async () => {
+        assertNonEmpty(state.runId, "Cần nhập run ID.");
+        state.runResponse = await requestJson("GET", `/chat-extractor/runs/${encodeURIComponent(state.runId)}`);
+      });
+    default:
+      return;
+  }
+}
 
-  document.querySelector<HTMLButtonElement>("[data-action='load-run']")?.addEventListener("click", () => {
-    void runAction("run-detail", async () => {
-      state.runId = getInputValue("#run-id", state.runId).trim();
-      if (!state.runId) {
-        throw new Error("Cần nhập run ID.");
-      }
-      state.runResult = await requestJson(`/seam1/runs/${encodeURIComponent(state.runId)}`);
-    });
-  });
+function onRootChange(event: Event) {
+  const target = event.target;
+  if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) {
+    return;
+  }
 
-  document.querySelector<HTMLButtonElement>("[data-action='toggle-auto-scraper']")?.addEventListener("click", () => {
-    state.autoScraper = !state.autoScraper;
+  syncAllForms();
+
+  if (target.id === "selected-connected-page-id") {
+    const page = state.connectedPages.find((item) => item.id === state.selectedConnectedPageId) ?? null;
+    setSelectedConnectedPage(page);
     render();
-  });
+    return;
+  }
 
-  document.querySelector<HTMLButtonElement>("[data-action='toggle-auto-ai']")?.addEventListener("click", () => {
-    state.autoAiAnalysis = !state.autoAiAnalysis;
+  if (target.id === "manual-run-mode") {
     render();
-  });
-
-  document.querySelector<HTMLButtonElement>("[data-action='toggle-publish']")?.addEventListener("click", () => {
-    state.publish = !state.publish;
-    render();
-  });
-
-  document.querySelector<HTMLSelectElement>("#job-kind")?.addEventListener("change", (event) => {
-    state.jobKind = (event.currentTarget as HTMLSelectElement).value as JobKind;
-  });
-
-  document.querySelector<HTMLSelectElement>("#selected-page-id")?.addEventListener("change", (event) => {
-    state.selectedPageId = (event.currentTarget as HTMLSelectElement).value;
-  });
+  }
 }
 
 async function runAction(key: string, action: () => Promise<void>) {
+  syncAllForms();
   state.loadingKey = key;
   state.errorMessage = null;
   render();
@@ -445,197 +447,768 @@ async function runAction(key: string, action: () => Promise<void>) {
   }
 }
 
-function syncPageForm() {
+function syncAllForms() {
+  state.apiBaseUrl = getInputValue("#api-base-url", state.apiBaseUrl).trim() || state.apiBaseUrl;
   state.tokenInput = getInputValue("#token-input", state.tokenInput).trim();
-  state.organizationId = getInputValue("#organization-id", state.organizationId).trim() || "default";
-  state.pageSlug = getInputValue("#page-slug", state.pageSlug).trim();
-  state.businessTimezone = getInputValue("#business-timezone", state.businessTimezone).trim();
-  state.initialConversationLimit = getInputValue("#initial-conversation-limit", state.initialConversationLimit).trim();
-  state.selectedPageId = getSelectValue("#selected-page-id", state.selectedPageId);
+  state.selectedPancakePageId = getSelectValue("#selected-pancake-page-id", state.selectedPancakePageId);
+  state.selectedConnectedPageId = getSelectValue("#selected-connected-page-id", state.selectedConnectedPageId);
+  state.registerBusinessTimezone = getInputValue("#register-business-timezone", state.registerBusinessTimezone).trim();
+  state.registerAutoScraperEnabled = getCheckboxValue("#register-auto-scraper", state.registerAutoScraperEnabled);
+  state.registerAutoAiAnalysisEnabled = getCheckboxValue("#register-auto-ai", state.registerAutoAiAnalysisEnabled);
+  state.patchBusinessTimezone = getInputValue("#patch-business-timezone", state.patchBusinessTimezone).trim();
+  state.patchAutoScraperEnabled = getCheckboxValue("#patch-auto-scraper", state.patchAutoScraperEnabled);
+  state.patchAutoAiAnalysisEnabled = getCheckboxValue("#patch-auto-ai", state.patchAutoAiAnalysisEnabled);
+  state.patchIsActive = getCheckboxValue("#patch-is-active", state.patchIsActive);
+  state.tagMappingDraft = getTextareaValue("#tag-mapping-draft", state.tagMappingDraft);
+  state.openingRulesDraft = getTextareaValue("#opening-rules-draft", state.openingRulesDraft);
+  state.botSignaturesDraft = getTextareaValue("#bot-signatures-draft", state.botSignaturesDraft);
+  state.onboardingTargetDate = getInputValue("#onboarding-target-date", state.onboardingTargetDate);
+  state.onboardingInitialConversationLimit = getInputValue("#onboarding-initial-limit", state.onboardingInitialConversationLimit).trim();
+  state.onboardingProcessingMode = getSelectValue("#onboarding-processing-mode", state.onboardingProcessingMode) as ProcessingMode;
+  state.onboardingWriteArtifacts = getCheckboxValue("#onboarding-write-artifacts", state.onboardingWriteArtifacts);
+  state.promptTextDraft = getTextareaValue("#prompt-text-draft", state.promptTextDraft);
+  state.promptNotesDraft = getInputValue("#prompt-notes-draft", state.promptNotesDraft);
+  state.cloneSourcePageId = getSelectValue("#clone-source-page-id", state.cloneSourcePageId);
+  state.activatePromptVersionId = getSelectValue("#activate-prompt-version-id", state.activatePromptVersionId);
+  state.manualJobName = getInputValue("#manual-job-name", state.manualJobName).trim();
+  state.manualProcessingMode = getSelectValue("#manual-processing-mode", state.manualProcessingMode) as ProcessingMode;
+  state.manualRunMode = getSelectValue("#manual-run-mode", state.manualRunMode) as ManualRunMode;
+  state.manualTargetDate = getInputValue("#manual-target-date", state.manualTargetDate);
+  state.manualWindowStart = getInputValue("#manual-window-start", state.manualWindowStart);
+  state.manualWindowEnd = getInputValue("#manual-window-end", state.manualWindowEnd);
+  state.manualPublish = getCheckboxValue("#manual-publish", state.manualPublish);
+  state.manualSnapshotVersion = getInputValue("#manual-snapshot-version", state.manualSnapshotVersion).trim();
+  state.manualMaxConversations = getInputValue("#manual-max-conversations", state.manualMaxConversations).trim();
+  state.manualMaxMessagePagesPerConversation = getInputValue("#manual-max-message-pages", state.manualMaxMessagePagesPerConversation).trim();
+  state.manualWriteArtifacts = getCheckboxValue("#manual-write-artifacts", state.manualWriteArtifacts);
+  state.schedulerJobName = getInputValue("#scheduler-job-name", state.schedulerJobName).trim();
+  state.schedulerTargetDate = getInputValue("#scheduler-target-date", state.schedulerTargetDate);
+  state.schedulerProcessingMode = getSelectValue("#scheduler-processing-mode", state.schedulerProcessingMode) as ProcessingMode;
+  state.schedulerIsPublished = getCheckboxValue("#scheduler-is-published", state.schedulerIsPublished);
+  state.schedulerSnapshotVersion = getInputValue("#scheduler-snapshot-version", state.schedulerSnapshotVersion).trim();
+  state.schedulerMaxConversations = getInputValue("#scheduler-max-conversations", state.schedulerMaxConversations).trim();
+  state.schedulerMaxMessagePagesPerConversation = getInputValue("#scheduler-max-message-pages", state.schedulerMaxMessagePagesPerConversation).trim();
+  state.runId = getInputValue("#run-id", state.runId).trim();
 }
 
-function syncJobForm() {
-  state.jobKind = getSelectValue("#job-kind", state.jobKind) as JobKind;
-  state.jobName = getInputValue("#job-name", state.jobName).trim();
-  state.targetDate = getInputValue("#target-date", state.targetDate).trim();
-  state.snapshotVersion = getInputValue("#snapshot-version", state.snapshotVersion).trim();
-  state.maxConversations = getInputValue("#max-conversations", state.maxConversations).trim();
+async function refreshConnectedPages(preferredId?: string) {
+  const data = await requestJson<{ pages: ConnectedPage[] }>("GET", "/chat-extractor/control-center/pages");
+  state.connectedPagesResponse = data;
+  state.connectedPages = Array.isArray(data.pages) ? data.pages.filter(isConnectedPage) : [];
+  const selectedId = preferredId || state.selectedConnectedPageId;
+  const page = state.connectedPages.find((item) => item.id === selectedId) ?? state.connectedPages[0] ?? null;
+  setSelectedConnectedPage(page);
 }
 
-function buildJobPayload() {
-  const pageBundle = buildPageBundle();
-
-  if (state.jobKind === "manual") {
-    return {
-      kind: "manual",
-      page_bundle: pageBundle,
-      job: {
-        job_name: state.jobName,
-        target_date: state.targetDate,
-        publish: state.publish,
-        ...(state.snapshotVersion ? { snapshot_version: readPositiveInt(state.snapshotVersion, 1) } : {}),
-        ...(state.maxConversations ? { max_conversations: readNonNegativeInt(state.maxConversations, 0) } : {})
-      }
-    };
-  }
-
-  if (state.jobKind === "onboarding") {
-    return {
-      kind: "onboarding",
-      page_bundle: pageBundle,
-      job: {
-        job_name: state.jobName,
-        target_date: state.targetDate,
-        publish: false,
-        initial_conversation_limit_override: readPositiveInt(state.initialConversationLimit, 25),
-        ...(state.snapshotVersion ? { snapshot_version: readPositiveInt(state.snapshotVersion, 1) } : {})
-      }
-    };
-  }
-
-  return {
-    kind: "scheduler",
-    page_bundles: [pageBundle],
-    job: {
-      job_name: state.jobName,
-      target_date: state.targetDate,
-      is_published: state.publish,
-      ...(state.snapshotVersion ? { snapshot_version: readPositiveInt(state.snapshotVersion, 1) } : {}),
-      ...(state.maxConversations ? { max_conversations: readNonNegativeInt(state.maxConversations, 0) } : {})
+async function refreshSelectedConnectedPage(pageId: string) {
+  const data = await requestJson<{ page: ConnectedPage }>("GET", `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}`);
+  state.connectedPageResponse = data;
+  if (isConnectedPage(data.page)) {
+    const index = state.connectedPages.findIndex((item) => item.id === data.page.id);
+    if (index >= 0) {
+      state.connectedPages[index] = data.page;
     }
-  };
-}
-
-function buildPageBundle() {
-  const page = ensureRegisteredPage();
-  return {
-    page: {
-      organization_id: page.organizationId,
-      page_slug: page.pageSlug,
-      page_id: page.pageId,
-      page_name: page.pageName,
-      user_access_token: page.userAccessToken,
-      business_timezone: page.businessTimezone,
-      initial_conversation_limit: page.initialConversationLimit,
-      auto_scraper: page.autoScraper,
-      auto_ai_analysis: page.autoAiAnalysis,
-      bot_signatures: []
-    },
-    tag_rules: [],
-    opening_rules: [],
-    customer_directory: [],
-    bot_signatures: []
-  };
-}
-
-function ensureRegisteredPage() {
-  syncPageForm();
-  if (!state.registeredPage) {
-    throw new Error("Cần register page trước khi preview hoặc execute.");
+    setSelectedConnectedPage(data.page);
   }
-  return state.registeredPage;
 }
 
-async function requestJson(path: string, init: RequestInit = {}) {
+async function loadPrompts(pageId: string) {
+  const data = await requestJson<PromptListResponse>("GET", `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}/prompts`);
+  state.promptsResponse = data;
+  state.promptsData = isPromptListResponse(data) ? data : null;
+  state.activatePromptVersionId = state.promptsData?.activePromptVersionId ?? state.promptsData?.prompts[0]?.id ?? "";
+}
+
+function setSelectedConnectedPage(page: ConnectedPage | null) {
+  state.selectedConnectedPage = page;
+  state.selectedConnectedPageId = page?.id ?? "";
+  if (!page) {
+    state.promptsData = null;
+    state.promptsResponse = null;
+    state.activatePromptVersionId = "";
+    return;
+  }
+  state.patchBusinessTimezone = page.businessTimezone;
+  state.patchAutoScraperEnabled = page.autoScraperEnabled;
+  state.patchAutoAiAnalysisEnabled = page.autoAiAnalysisEnabled;
+  state.patchIsActive = page.isActive;
+  state.tagMappingDraft = stringifyJson(page.activeTagMappingJson ?? []);
+  state.openingRulesDraft = stringifyJson(page.activeOpeningRulesJson ?? []);
+  state.botSignaturesDraft = stringifyJson(page.activeBotSignaturesJson ?? []);
+  if (state.promptsData?.connectedPageId !== page.id) {
+    state.promptsData = null;
+    state.promptsResponse = null;
+  }
+  state.activatePromptVersionId = page.activePromptVersionId ?? "";
+  if (!state.cloneSourcePageId || state.cloneSourcePageId === page.id) {
+    state.cloneSourcePageId = state.connectedPages.find((item) => item.id !== page.id)?.id ?? "";
+  }
+}
+
+function buildOnboardingPayload() {
+  return {
+    targetDate: requireDate(state.onboardingTargetDate, "Cần chọn target date cho onboarding."),
+    initialConversationLimit: readPositiveInt(state.onboardingInitialConversationLimit, "Initial conversation limit phải là số nguyên dương."),
+    processingMode: state.onboardingProcessingMode
+  };
+}
+
+function buildManualPayload() {
+  const pageId = requireSelectedConnectedPageId();
+  const job: Record<string, JsonValue> = {
+    jobName: assertAndReturn(state.manualJobName, "Cần nhập tên job manual."),
+    processingMode: state.manualProcessingMode,
+    runMode: state.manualRunMode,
+    publish: state.manualPublish
+  };
+
+  if (state.manualRunMode === "backfill_day") {
+    job.targetDate = requireDate(state.manualTargetDate, "Cần chọn target date cho manual run.");
+  } else {
+    job.requestedWindowStartAt = assertAndReturn(state.manualWindowStart, "Cần nhập requested window start.");
+    job.requestedWindowEndExclusiveAt = assertAndReturn(state.manualWindowEnd, "Cần nhập requested window end.");
+  }
+
+  appendOptionalInt(job, "snapshotVersion", state.manualSnapshotVersion, true);
+  appendOptionalInt(job, "maxConversations", state.manualMaxConversations, false);
+  appendOptionalInt(job, "maxMessagePagesPerConversation", state.manualMaxMessagePagesPerConversation, false);
+
+  return {
+    kind: "manual",
+    connectedPageId: pageId,
+    job
+  };
+}
+
+function buildSchedulerPayload() {
+  const payload: Record<string, JsonValue> = {
+    jobName: assertAndReturn(state.schedulerJobName, "Cần nhập tên scheduler job."),
+    targetDate: requireDate(state.schedulerTargetDate, "Cần chọn target date cho scheduler."),
+    processingMode: state.schedulerProcessingMode,
+    isPublished: state.schedulerIsPublished
+  };
+  appendOptionalInt(payload, "snapshotVersion", state.schedulerSnapshotVersion, true);
+  appendOptionalInt(payload, "maxConversations", state.schedulerMaxConversations, false);
+  appendOptionalInt(payload, "maxMessagePagesPerConversation", state.schedulerMaxMessagePagesPerConversation, false);
+  return payload;
+}
+
+async function requestJson<T>(method: "GET" | "POST" | "PATCH", path: string, body?: unknown) {
   const response = await fetch(`${normalizeBaseUrl(state.apiBaseUrl)}${path}`, {
-    ...init,
+    method,
     headers: {
       Accept: "application/json",
-      ...(init.method && init.method !== "GET" ? { "Content-Type": "application/json" } : {}),
-      ...(init.headers ?? {})
-    }
+      ...(method === "GET" ? {} : { "Content-Type": "application/json" })
+    },
+    ...(body === undefined ? {} : { body: JSON.stringify(body) })
   });
-
   const raw = await response.text();
   const parsed = raw ? safeParseJson(raw) : null;
+
   if (!response.ok) {
-    throw new Error(`${response.status} ${response.statusText}\n${typeof parsed === "string" ? parsed : JSON.stringify(parsed, null, 2)}`);
-  }
-  return parsed as JsonValue;
-}
-
-function renderPageOptions() {
-  if (state.listedPages.length === 0) {
-    return `<option value="">chưa có page</option>`;
-  }
-  return state.listedPages
-    .map((page) => `<option value="${escapeAttribute(page.pageId)}" ${page.pageId === state.selectedPageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`)
-    .join("");
-}
-
-function renderJobKindOptions() {
-  return (["manual", "onboarding", "scheduler"] as const)
-    .map((value) => `<option value="${value}" ${value === state.jobKind ? "selected" : ""}>${value}</option>`)
-    .join("");
-}
-
-function renderJsonBlock(value: JsonValue | null) {
-  return `<pre class="json-output compact-output">${escapeHtml(value === null ? "Chưa có dữ liệu." : JSON.stringify(value, null, 2))}</pre>`;
-}
-
-function selectedPageLabel() {
-  const selectedPage = state.listedPages.find((page) => page.pageId === state.selectedPageId);
-  if (state.registeredPage) {
-    return state.registeredPage.pageName;
-  }
-  return selectedPage?.pageName ?? "chưa chọn";
-}
-
-function readHealthStatus() {
-  if (!state.health || typeof state.health !== "object" || Array.isArray(state.health)) {
-    return "chưa kiểm tra";
+    throw new Error(`${response.status} ${response.statusText}\n${formatJson(parsed)}`);
   }
 
-  const totals = (state.health as { totals?: { failed?: number } }).totals;
-  if (typeof totals?.failed === "number" && totals.failed > 0) {
-    return "có lỗi gần đây";
-  }
-
-  return "ổn định";
+  return parsed as T;
 }
 
-function renderModuleCard(label: string, value: string, hint: string) {
+function renderPancakePanel() {
   return `
-    <article class="module-card">
-      <span class="module-label">${escapeHtml(label)}</span>
-      <strong class="module-value">${escapeHtml(value)}</strong>
-      <span class="module-hint">${escapeHtml(hint)}</span>
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="panel-kicker">Bước 1</p>
+          <h2>List page từ token và register</h2>
+        </div>
+      </div>
+      <label class="field">
+        <span>User access token</span>
+        <input id="token-input" type="password" value="${escapeAttribute(state.tokenInput)}" placeholder="Dán token Pancake" />
+      </label>
+      <div class="button-row">
+        <button class="button button-primary" data-action="list-pages">List pages</button>
+        <button class="button" data-action="load-connected-pages">Reload page đã lưu</button>
+      </div>
+      <label class="field">
+        <span>Page từ Pancake</span>
+        <select id="selected-pancake-page-id">${renderPancakePageOptions()}</select>
+      </label>
+      <div class="grid-two">
+        <label class="field">
+          <span>Business timezone</span>
+          <input id="register-business-timezone" type="text" value="${escapeAttribute(state.registerBusinessTimezone)}" />
+        </label>
+        <label class="check-field">
+          <input id="register-auto-scraper" type="checkbox" ${state.registerAutoScraperEnabled ? "checked" : ""} />
+          <span>Auto scraper</span>
+        </label>
+      </div>
+      <label class="check-field">
+        <input id="register-auto-ai" type="checkbox" ${state.registerAutoAiAnalysisEnabled ? "checked" : ""} />
+        <span>Auto AI analysis</span>
+      </label>
+      <button class="button button-primary" data-action="register-page">Register page</button>
+    </section>
+  `;
+}
+
+function renderConnectedPagesPanel(selectedPage: ConnectedPage | null) {
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="panel-kicker">Bước 2</p>
+          <h2>Page đã đăng ký</h2>
+        </div>
+        <span class="badge">${state.connectedPages.length} page</span>
+      </div>
+      <label class="field">
+        <span>Connected page</span>
+        <select id="selected-connected-page-id">${renderConnectedPageOptions()}</select>
+      </label>
+      <div class="facts compact-facts">
+        <div><strong>ID</strong><span>${escapeHtml(selectedPage?.id ?? "-")}</span></div>
+        <div><strong>Pancake</strong><span>${escapeHtml(selectedPage?.pancakePageId ?? "-")}</span></div>
+        <div><strong>Updated</strong><span>${escapeHtml(selectedPage?.updatedAt ?? "-")}</span></div>
+      </div>
+      <div class="button-row">
+        <button class="button" data-action="load-connected-page">Tải detail</button>
+        <button class="button" data-action="load-prompts">Tải prompts</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderPageConfigPanel(selectedPage: ConnectedPage | null) {
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="panel-kicker">Fine-tune</p>
+          <h2>JSON config của page</h2>
+        </div>
+        <span class="badge">${selectedPage?.isActive ? "active" : "inactive"}</span>
+      </div>
+      <div class="grid-two">
+        <label class="field">
+          <span>Business timezone</span>
+          <input id="patch-business-timezone" type="text" value="${escapeAttribute(state.patchBusinessTimezone)}" />
+        </label>
+        <label class="check-field">
+          <input id="patch-is-active" type="checkbox" ${state.patchIsActive ? "checked" : ""} />
+          <span>Page active</span>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label class="check-field">
+          <input id="patch-auto-scraper" type="checkbox" ${state.patchAutoScraperEnabled ? "checked" : ""} />
+          <span>Auto scraper</span>
+        </label>
+        <label class="check-field">
+          <input id="patch-auto-ai" type="checkbox" ${state.patchAutoAiAnalysisEnabled ? "checked" : ""} />
+          <span>Auto AI analysis</span>
+        </label>
+      </div>
+      <label class="field">
+        <span>Tag mapping JSON</span>
+        <textarea id="tag-mapping-draft" class="json-editor json-editor-sm">${escapeHtml(state.tagMappingDraft)}</textarea>
+      </label>
+      <label class="field">
+        <span>Opening rules JSON</span>
+        <textarea id="opening-rules-draft" class="json-editor json-editor-sm">${escapeHtml(state.openingRulesDraft)}</textarea>
+      </label>
+      <label class="field">
+        <span>Bot signatures JSON</span>
+        <textarea id="bot-signatures-draft" class="json-editor json-editor-sm">${escapeHtml(state.botSignaturesDraft)}</textarea>
+      </label>
+      <button class="button button-primary" data-action="save-page-config">Lưu config page</button>
+    </section>
+  `;
+}
+
+function renderOnboardingPanel(selectedPage: ConnectedPage | null) {
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="panel-kicker">Onboarding</p>
+          <h2>Sample run đầu tiên</h2>
+        </div>
+      </div>
+      <div class="grid-two">
+        <label class="field">
+          <span>Target date</span>
+          <input id="onboarding-target-date" type="date" value="${escapeAttribute(state.onboardingTargetDate)}" />
+        </label>
+        <label class="field">
+          <span>Initial conversation limit</span>
+          <input id="onboarding-initial-limit" type="number" min="1" value="${escapeAttribute(state.onboardingInitialConversationLimit)}" />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label class="field">
+          <span>Processing mode</span>
+          <select id="onboarding-processing-mode">${renderProcessingModeOptions(state.onboardingProcessingMode)}</select>
+        </label>
+        <label class="check-field">
+          <input id="onboarding-write-artifacts" type="checkbox" ${state.onboardingWriteArtifacts ? "checked" : ""} />
+          <span>Write artifacts khi execute</span>
+        </label>
+      </div>
+      <div class="button-row">
+        <button class="button" data-action="preview-onboarding">Preview onboarding</button>
+        <button class="button button-primary" data-action="execute-onboarding">Execute onboarding</button>
+      </div>
+      <p class="helper-text">Artifacts hiện có: ${escapeHtml(formatInlineJson(selectedPage?.onboardingStateJson))}</p>
+    </section>
+  `;
+}
+
+function renderPromptPanel(selectedPage: ConnectedPage | null) {
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="panel-kicker">Prompt</p>
+          <h2>Tạo, clone, activate</h2>
+        </div>
+      </div>
+      <label class="field">
+        <span>Prompt text</span>
+        <textarea id="prompt-text-draft" class="json-editor prompt-editor">${escapeHtml(state.promptTextDraft)}</textarea>
+      </label>
+      <div class="grid-two">
+        <label class="field">
+          <span>Notes</span>
+          <input id="prompt-notes-draft" type="text" value="${escapeAttribute(state.promptNotesDraft)}" placeholder="Ghi chú version" />
+        </label>
+        <label class="field">
+          <span>Clone từ page</span>
+          <select id="clone-source-page-id">${renderCloneSourceOptions(selectedPage?.id ?? "")}</select>
+        </label>
+      </div>
+      <div class="button-row">
+        <button class="button" data-action="load-prompts">Reload prompts</button>
+        <button class="button button-primary" data-action="create-prompt">Tạo prompt</button>
+        <button class="button" data-action="clone-prompt">Clone prompt</button>
+      </div>
+      <div class="grid-two">
+        <label class="field">
+          <span>Version để activate</span>
+          <select id="activate-prompt-version-id">${renderPromptVersionOptions()}</select>
+        </label>
+        <div class="stack-end">
+          <button class="button button-primary" data-action="activate-prompt">Activate version</button>
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function renderManualRunPanel(selectedPage: ConnectedPage | null) {
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="panel-kicker">Run thủ công</p>
+          <h2>Manual preview / execute</h2>
+        </div>
+      </div>
+      <div class="grid-two">
+        <label class="field">
+          <span>Job name</span>
+          <input id="manual-job-name" type="text" value="${escapeAttribute(state.manualJobName)}" />
+        </label>
+        <label class="field">
+          <span>Processing mode</span>
+          <select id="manual-processing-mode">${renderProcessingModeOptions(state.manualProcessingMode)}</select>
+        </label>
+      </div>
+      <div class="grid-two">
+        <label class="field">
+          <span>Run mode</span>
+          <select id="manual-run-mode">${renderManualRunModeOptions()}</select>
+        </label>
+        <label class="check-field">
+          <input id="manual-publish" type="checkbox" ${state.manualPublish ? "checked" : ""} />
+          <span>Publish</span>
+        </label>
+      </div>
+      ${
+        state.manualRunMode === "backfill_day"
+          ? `
+        <label class="field">
+          <span>Target date</span>
+          <input id="manual-target-date" type="date" value="${escapeAttribute(state.manualTargetDate)}" />
+        </label>
+      `
+          : `
+        <div class="grid-two">
+          <label class="field">
+            <span>Window start (ISO)</span>
+            <input id="manual-window-start" type="text" value="${escapeAttribute(state.manualWindowStart)}" placeholder="2026-04-01T00:00:00+07:00" />
+          </label>
+          <label class="field">
+            <span>Window end exclusive (ISO)</span>
+            <input id="manual-window-end" type="text" value="${escapeAttribute(state.manualWindowEnd)}" placeholder="2026-04-02T00:00:00+07:00" />
+          </label>
+        </div>
+      `
+      }
+      <div class="grid-three">
+        <label class="field">
+          <span>Snapshot version</span>
+          <input id="manual-snapshot-version" type="number" min="1" value="${escapeAttribute(state.manualSnapshotVersion)}" placeholder="tuỳ chọn" />
+        </label>
+        <label class="field">
+          <span>Max conversations</span>
+          <input id="manual-max-conversations" type="number" min="0" value="${escapeAttribute(state.manualMaxConversations)}" placeholder="tuỳ chọn" />
+        </label>
+        <label class="field">
+          <span>Max message pages / conversation</span>
+          <input id="manual-max-message-pages" type="number" min="0" value="${escapeAttribute(state.manualMaxMessagePagesPerConversation)}" placeholder="tuỳ chọn" />
+        </label>
+      </div>
+      <label class="check-field">
+        <input id="manual-write-artifacts" type="checkbox" ${state.manualWriteArtifacts ? "checked" : ""} />
+        <span>Write artifacts khi execute</span>
+      </label>
+      <div class="button-row">
+        <button class="button" data-action="preview-manual">Preview manual</button>
+        <button class="button button-primary" data-action="execute-manual">Execute manual</button>
+      </div>
+      <p class="helper-text">Page chạy: ${escapeHtml(selectedPage?.pageName ?? "chưa chọn")}</p>
+    </section>
+  `;
+}
+
+function renderSchedulerPanel() {
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="panel-kicker">Scheduler</p>
+          <h2>Daily scheduler preview / execute</h2>
+        </div>
+      </div>
+      <div class="grid-two">
+        <label class="field">
+          <span>Job name</span>
+          <input id="scheduler-job-name" type="text" value="${escapeAttribute(state.schedulerJobName)}" />
+        </label>
+        <label class="field">
+          <span>Target date</span>
+          <input id="scheduler-target-date" type="date" value="${escapeAttribute(state.schedulerTargetDate)}" />
+        </label>
+      </div>
+      <div class="grid-two">
+        <label class="field">
+          <span>Processing mode</span>
+          <select id="scheduler-processing-mode">${renderProcessingModeOptions(state.schedulerProcessingMode)}</select>
+        </label>
+        <label class="check-field">
+          <input id="scheduler-is-published" type="checkbox" ${state.schedulerIsPublished ? "checked" : ""} />
+          <span>Published scheduler</span>
+        </label>
+      </div>
+      <div class="grid-three">
+        <label class="field">
+          <span>Snapshot version</span>
+          <input id="scheduler-snapshot-version" type="number" min="1" value="${escapeAttribute(state.schedulerSnapshotVersion)}" placeholder="tuỳ chọn" />
+        </label>
+        <label class="field">
+          <span>Max conversations</span>
+          <input id="scheduler-max-conversations" type="number" min="0" value="${escapeAttribute(state.schedulerMaxConversations)}" placeholder="tuỳ chọn" />
+        </label>
+        <label class="field">
+          <span>Max message pages / conversation</span>
+          <input id="scheduler-max-message-pages" type="number" min="0" value="${escapeAttribute(state.schedulerMaxMessagePagesPerConversation)}" placeholder="tuỳ chọn" />
+        </label>
+      </div>
+      <div class="button-row">
+        <button class="button" data-action="preview-scheduler">Preview scheduler</button>
+        <button class="button button-primary" data-action="execute-scheduler">Execute scheduler</button>
+      </div>
+    </section>
+  `;
+}
+
+function renderAuditPanel() {
+  return `
+    <section class="panel">
+      <div class="panel-header">
+        <div>
+          <p class="panel-kicker">Audit</p>
+          <h2>Run detail</h2>
+        </div>
+      </div>
+      <label class="field">
+        <span>Run ID</span>
+        <input id="run-id" type="text" value="${escapeAttribute(state.runId)}" placeholder="uuid hoặc run id" />
+      </label>
+      <button class="button" data-action="load-run">Tải run detail</button>
+    </section>
+  `;
+}
+
+function renderSelectedPageSummary(page: ConnectedPage | null) {
+  if (!page) {
+    return `<p class="empty-state">Chưa có connected page. Hãy tải page đã đăng ký hoặc register một page mới.</p>`;
+  }
+
+  return `
+    <div class="facts">
+      <div><strong>Page</strong><span>${escapeHtml(page.pageName)}</span></div>
+      <div><strong>Pancake ID</strong><span>${escapeHtml(page.pancakePageId)}</span></div>
+      <div><strong>Timezone</strong><span>${escapeHtml(page.businessTimezone)}</span></div>
+      <div><strong>Auto flags</strong><span>${page.autoScraperEnabled ? "scraper on" : "scraper off"} / ${page.autoAiAnalysisEnabled ? "ai on" : "ai off"}</span></div>
+      <div><strong>Prompt active</strong><span>${escapeHtml(page.activePromptVersionId ?? "chưa có")}</span></div>
+      <div><strong>Onboarding state</strong><span>${escapeHtml(formatInlineJson(page.onboardingStateJson))}</span></div>
+      <div><strong>Created</strong><span>${escapeHtml(page.createdAt)}</span></div>
+      <div><strong>Updated</strong><span>${escapeHtml(page.updatedAt)}</span></div>
+    </div>
+  `;
+}
+
+function renderResponsePanel(title: string, value: unknown) {
+  return `
+    <section class="panel response-panel">
+      <div class="panel-header">
+        <div>
+          <p class="panel-kicker">Raw response</p>
+          <h2>${escapeHtml(title)}</h2>
+        </div>
+      </div>
+      <pre class="json-output">${escapeHtml(formatJson(value))}</pre>
+    </section>
+  `;
+}
+
+function renderMetricCard(label: string, value: string, hint: string) {
+  return `
+    <article class="metric-card">
+      <span class="metric-label">${escapeHtml(label)}</span>
+      <strong class="metric-value">${escapeHtml(value)}</strong>
+      <span class="metric-hint">${escapeHtml(hint)}</span>
     </article>
   `;
 }
 
-function getInputValue(selector: string, fallback: string) {
-  return document.querySelector<HTMLInputElement>(selector)?.value ?? fallback;
+function renderPancakePageOptions() {
+  if (state.listedPancakePages.length === 0) {
+    return `<option value="">chưa có page từ token</option>`;
+  }
+  return state.listedPancakePages
+    .map((page) => `<option value="${escapeAttribute(page.pageId)}" ${page.pageId === state.selectedPancakePageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`)
+    .join("");
 }
 
-function getSelectValue(selector: string, fallback: string) {
-  return document.querySelector<HTMLSelectElement>(selector)?.value ?? fallback;
+function renderConnectedPageOptions() {
+  if (state.connectedPages.length === 0) {
+    return `<option value="">chưa có connected page</option>`;
+  }
+  return state.connectedPages
+    .map((page) => `<option value="${escapeAttribute(page.id)}" ${page.id === state.selectedConnectedPageId ? "selected" : ""}>${escapeHtml(page.pageName)} (${escapeHtml(page.businessTimezone)})</option>`)
+    .join("");
 }
 
-function isListedPage(value: JsonValue): value is ListedPage {
-  return !!value && typeof value === "object" && !Array.isArray(value) && typeof (value as { pageId?: unknown }).pageId === "string" && typeof (value as { pageName?: unknown }).pageName === "string";
+function renderCloneSourceOptions(currentPageId: string) {
+  const options = state.connectedPages.filter((page) => page.id !== currentPageId);
+  if (options.length === 0) {
+    return `<option value="">không có page nguồn</option>`;
+  }
+  return options
+    .map((page) => `<option value="${escapeAttribute(page.id)}" ${page.id === state.cloneSourcePageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`)
+    .join("");
 }
 
-function readPositiveInt(value: string, fallback: number) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+function renderPromptVersionOptions() {
+  const prompts = state.promptsData?.prompts ?? [];
+  if (prompts.length === 0) {
+    return `<option value="">chưa tải prompt versions</option>`;
+  }
+  return prompts
+    .map((prompt) => `<option value="${escapeAttribute(prompt.id)}" ${prompt.id === state.activatePromptVersionId ? "selected" : ""}>v${prompt.versionNo} - ${escapeHtml(prompt.id)}</option>`)
+    .join("");
 }
 
-function readNonNegativeInt(value: string, fallback: number) {
-  const parsed = Number.parseInt(value, 10);
-  return Number.isFinite(parsed) && parsed >= 0 ? parsed : fallback;
+function renderProcessingModeOptions(selected: ProcessingMode) {
+  return (["etl_only", "etl_and_ai"] as const)
+    .map((value) => `<option value="${value}" ${value === selected ? "selected" : ""}>${value}</option>`)
+    .join("");
+}
+
+function renderManualRunModeOptions() {
+  return ([
+    { value: "backfill_day", label: "full-day" },
+    { value: "manual_range", label: "khoảng thời gian" }
+  ] as const)
+    .map((item) => `<option value="${item.value}" ${item.value === state.manualRunMode ? "selected" : ""}>${item.label}</option>`)
+    .join("");
+}
+
+function getSelectedPancakePage() {
+  return state.listedPancakePages.find((page) => page.pageId === state.selectedPancakePageId) ?? null;
+}
+
+function getSelectedConnectedPage() {
+  return state.selectedConnectedPage ?? state.connectedPages.find((page) => page.id === state.selectedConnectedPageId) ?? null;
+}
+
+function readHealthLabel() {
+  if (!isRecord(state.healthResponse)) {
+    return "chưa kiểm tra";
+  }
+  const status = typeof state.healthResponse.status === "string" ? state.healthResponse.status : null;
+  return status ?? "đã tải";
+}
+
+function requireSelectedConnectedPageId() {
+  return assertAndReturn(state.selectedConnectedPageId, "Cần chọn connected page.");
+}
+
+function parseJsonDraft(label: string, raw: string) {
+  try {
+    return JSON.parse(raw) as JsonValue;
+  } catch (error) {
+    throw new Error(`${label} không phải JSON hợp lệ.\n${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+function appendOptionalInt(target: Record<string, JsonValue>, key: string, raw: string, positiveOnly: boolean) {
+  if (!raw.trim()) {
+    return;
+  }
+  const value = positiveOnly ? readPositiveInt(raw, `${key} phải là số nguyên dương.`) : readNonNegativeInt(raw, `${key} phải là số nguyên không âm.`);
+  target[key] = value;
+}
+
+function readPositiveInt(raw: string, errorMessage: string) {
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(errorMessage);
+  }
+  return value;
+}
+
+function readNonNegativeInt(raw: string, errorMessage: string) {
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isFinite(value) || value < 0) {
+    throw new Error(errorMessage);
+  }
+  return value;
+}
+
+function requireDate(value: string, errorMessage: string) {
+  return assertAndReturn(value, errorMessage);
+}
+
+function assertNonEmpty(value: string, errorMessage: string) {
+  if (!value.trim()) {
+    throw new Error(errorMessage);
+  }
+}
+
+function assertAndReturn(value: string, errorMessage: string) {
+  assertNonEmpty(value, errorMessage);
+  return value.trim();
+}
+
+function extractPancakePages(payload: unknown) {
+  const items = Array.isArray(payload) ? payload : isRecord(payload) && Array.isArray(payload.pages) ? payload.pages : [];
+  return items.flatMap((item) => {
+    if (!isRecord(item)) {
+      return [];
+    }
+    const pageId = typeof item.pageId === "string" ? item.pageId : typeof item.id === "string" ? item.id : null;
+    const pageName = typeof item.pageName === "string" ? item.pageName : typeof item.name === "string" ? item.name : null;
+    return pageId && pageName ? [{ pageId, pageName }] : [];
+  });
+}
+
+function isConnectedPage(value: unknown): value is ConnectedPage {
+  return (
+    isRecord(value) &&
+    typeof value.id === "string" &&
+    typeof value.pancakePageId === "string" &&
+    typeof value.pageName === "string" &&
+    typeof value.businessTimezone === "string" &&
+    typeof value.autoScraperEnabled === "boolean" &&
+    typeof value.autoAiAnalysisEnabled === "boolean" &&
+    typeof value.isActive === "boolean" &&
+    typeof value.createdAt === "string" &&
+    typeof value.updatedAt === "string"
+  );
+}
+
+function isPromptListResponse(value: unknown): value is PromptListResponse {
+  return isRecord(value) && typeof value.connectedPageId === "string" && Array.isArray(value.prompts);
+}
+
+function stringifyJson(value: JsonValue) {
+  return JSON.stringify(value, null, 2);
+}
+
+function formatJson(value: unknown) {
+  if (value === null || value === undefined) {
+    return "Chưa có dữ liệu.";
+  }
+  if (typeof value === "string") {
+    return value;
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function formatInlineJson(value: unknown) {
+  const formatted = formatJson(value);
+  return formatted.length > 140 ? `${formatted.slice(0, 137)}...` : formatted;
+}
+
+function safeParseJson(raw: string) {
+  try {
+    return JSON.parse(raw) as unknown;
+  } catch {
+    return raw;
+  }
 }
 
 function normalizeBaseUrl(value: string) {
   return value.trim().replace(/\/+$/, "") || "http://localhost:3000";
 }
 
-function safeParseJson(raw: string) {
-  try {
-    return JSON.parse(raw) as JsonValue;
-  } catch {
-    return raw;
-  }
+function todayInputValue() {
+  const now = new Date();
+  const offset = now.getTimezoneOffset();
+  const local = new Date(now.getTime() - offset * 60_000);
+  return local.toISOString().slice(0, 10);
+}
+
+function getInputValue(selector: string, fallback: string) {
+  const element = document.querySelector<HTMLInputElement>(selector);
+  return element?.value ?? fallback;
+}
+
+function getTextareaValue(selector: string, fallback: string) {
+  const element = document.querySelector<HTMLTextAreaElement>(selector);
+  return element?.value ?? fallback;
+}
+
+function getSelectValue(selector: string, fallback: string) {
+  const element = document.querySelector<HTMLSelectElement>(selector);
+  return element?.value ?? fallback;
+}
+
+function getCheckboxValue(selector: string, fallback: boolean) {
+  const element = document.querySelector<HTMLInputElement>(selector);
+  return element?.checked ?? fallback;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function escapeHtml(value: string) {

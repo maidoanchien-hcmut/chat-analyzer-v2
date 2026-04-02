@@ -1,8 +1,8 @@
 import { describe, expect, it } from "bun:test";
-import { buildOnboardingArtifacts } from "./seam1.artifacts.ts";
+import { buildOnboardingArtifacts } from "./chat_extractor.artifacts.ts";
 
 describe("buildOnboardingArtifacts", () => {
-  it("aggregates tags and opening candidates from seam 1 evidence", () => {
+  it("aggregates tags and opening candidates from chat-extractor evidence", () => {
     const artifacts = buildOnboardingArtifacts([
       {
         conversationId: "conv-1",

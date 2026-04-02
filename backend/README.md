@@ -11,16 +11,33 @@ bunx prisma generate
 bun run dev
 ```
 
-Seam 1 hiện chạy bằng HTTP request trực tiếp từ frontend hoặc client bất kỳ. Backend không còn giữ control-plane JSON runtime cho page/job input.
+`chat-extractor` hiện chạy bằng HTTP request trực tiếp từ frontend hoặc client bất kỳ. Backend không còn giữ control-plane JSON runtime cho page/job input.
 
-Unauthenticated local endpoints for Seam 1:
+Unauthenticated local endpoints for `chat-extractor`:
 
-- `POST /seam1/pages/list-from-token`
-- `POST /seam1/control-center/pages/register`
-- `GET /seam1/health/summary`
-- `GET /seam1/runs/:id`
-- `POST /seam1/jobs/preview`
-- `POST /seam1/jobs/execute`
+- `POST /chat-extractor/pages/list-from-token`
+- `GET /chat-extractor/control-center/pages`
+- `GET /chat-extractor/control-center/pages/:id`
+- `POST /chat-extractor/control-center/pages/register`
+- `PATCH /chat-extractor/control-center/pages/:id`
+- `POST /chat-extractor/control-center/pages/:id/onboarding/preview`
+- `POST /chat-extractor/control-center/pages/:id/onboarding/execute`
+- `GET /chat-extractor/control-center/pages/:id/prompts`
+- `POST /chat-extractor/control-center/pages/:id/prompts`
+- `POST /chat-extractor/control-center/pages/:id/prompts/clone`
+- `POST /chat-extractor/control-center/pages/:id/prompts/:promptVersionId/activate`
+- `GET /chat-extractor/health/summary`
+- `GET /chat-extractor/runs/:id`
+- `POST /chat-extractor/jobs/preview`
+- `POST /chat-extractor/jobs/execute`
+- `POST /chat-extractor/jobs/scheduler/preview`
+- `POST /chat-extractor/jobs/scheduler/execute`
+
+Control-plane source of truth:
+
+- `connected_page` giữ config page vận hành.
+- `page_prompt_version` giữ version prompt theo page.
+- `etl_run` nhận thêm `connected_page_id`, `processing_mode`, `run_params_json` để audit onboarding/manual/scheduler từ DB-backed control-plane.
 
 Prisma local flow:
 

@@ -2,6 +2,7 @@ package config
 
 import (
 	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -19,15 +20,18 @@ func DefaultBusinessTimezone() string {
 }
 
 type Config struct {
+	ConnectedPageID                string
 	UserAccessToken                string
 	DatabaseURL                    string
 	PageID                         string
 	BusinessDay                    time.Time
 	BusinessTimezone               string
 	RunMode                        string
+	ProcessingMode                 string
 	RunGroupID                     string
 	SnapshotVersion                int
 	IsPublished                    bool
+	RunParamsJSON                  json.RawMessage
 	RequestedWindowStartAt         *time.Time
 	RequestedWindowEndExclusiveAt  *time.Time
 	WindowStartAt                  *time.Time
@@ -55,6 +59,7 @@ func Load() (Config, error) {
 		DatabaseURL:      strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		BusinessTimezone: defaultBusinessTimezone,
 		RunMode:          "scheduled_daily",
+		ProcessingMode:   "etl_only",
 		SnapshotVersion:  1,
 		RequestTimeout:   time.Duration(timeoutSeconds) * time.Second,
 	}, nil
@@ -72,6 +77,12 @@ func (c Config) Validate() error {
 	}
 	if c.RunMode == "" {
 		return errors.New("run_mode is required")
+	}
+	if c.ProcessingMode == "" {
+		return errors.New("processing_mode is required")
+	}
+	if c.ProcessingMode != "etl_only" && c.ProcessingMode != "etl_and_ai" {
+		return errors.New("processing_mode must be etl_only or etl_and_ai")
 	}
 	if c.SnapshotVersion <= 0 {
 		return errors.New("snapshot_version must be >= 1")

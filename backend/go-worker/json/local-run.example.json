@@ -1,4 +1,7 @@
 {
+  "connected_page_id": "your-connected-page-uuid",
+  "processing_mode": "etl_only",
+  "run_params_json": {},
   "user_access_token": "your-user-access-token",
   "page_id": "your-page-id",
   "target_date": "2026-03-31",

@@ -34,6 +34,27 @@ Mọi dữ liệu vận hành thật của page phải nằm trong DB:
 
 Frontend không giữ config như một nguồn sự thật lâu dài. Frontend chỉ gửi HTTP request và hiển thị trạng thái.
 
+### 1a. Hard constraint về tenant model
+
+Repo này và tính năng này chỉ phục vụ một công ty duy nhất.
+
+Hệ quả thiết kế bắt buộc:
+
+- không có multi-tenant
+- không có `organization_id`
+- không có `company_id`
+- không có `workspace_id`
+- không có lớp ownership riêng cho sales team hay CSKH team trong schema control-plane
+
+Mô hình đúng là:
+
+- một công ty duy nhất
+- công ty đó có nhiều team nội bộ
+- một team có thể dùng nhiều page Pancake
+- page Pancake là index vận hành chính của control-plane
+
+Mọi agent về sau phải coi đây là hard constraint. Không được tự thêm tenant/org abstraction nếu user không yêu cầu lại một cách tường minh.
+
 ### 2. Không lưu `initial_conversation_limit` trong page config
 
 `initial_conversation_limit` chỉ thuộc về onboarding run đầu tiên.
@@ -156,12 +177,12 @@ Không có bước nào bị khóa vĩnh viễn sau onboarding.
 
 ### A. Register page
 
-`POST /seam1/pages/list-from-token`
+`POST /chat-extractor/pages/list-from-token`
 
 - input: `user_access_token`
 - output: danh sách page thật từ Pancake
 
-`POST /seam1/control-center/pages/register`
+`POST /chat-extractor/control-center/pages/register`
 
 - input:
   - `pancake_page_id`
@@ -173,14 +194,14 @@ Không có bước nào bị khóa vĩnh viễn sau onboarding.
 
 ### B. Onboarding sample
 
-`POST /seam1/control-center/pages/:id/onboarding/preview`
+`POST /chat-extractor/control-center/pages/:id/onboarding/preview`
 
 - input:
   - `target_date`
   - `initial_conversation_limit`
   - `processing_mode = etl_only | etl_and_ai`
 
-`POST /seam1/control-center/pages/:id/onboarding/execute`
+`POST /chat-extractor/control-center/pages/:id/onboarding/execute`
 
 - backend tạo `etl_run` với:
   - `run_mode = onboarding_sample`
@@ -192,7 +213,7 @@ Không có bước nào bị khóa vĩnh viễn sau onboarding.
 
 ### C. Fine-tune config
 
-`PATCH /seam1/control-center/pages/:id`
+`PATCH /chat-extractor/control-center/pages/:id`
 
 Cho phép update:
 
@@ -207,26 +228,26 @@ Artifacts onboarding gần nhất được lưu ngay trên `connected_page.onboa
 
 ### D. Prompt management
 
-`GET /seam1/control-center/pages/:id/prompts`
+`GET /chat-extractor/control-center/pages/:id/prompts`
 
-`POST /seam1/control-center/pages/:id/prompts`
+`POST /chat-extractor/control-center/pages/:id/prompts`
 
 - tạo draft version mới
 
-`POST /seam1/control-center/pages/:id/prompts/clone`
+`POST /chat-extractor/control-center/pages/:id/prompts/clone`
 
 - lấy active prompt của page khác
 - tạo version mới cho page hiện tại
 
-`POST /seam1/control-center/pages/:id/prompts/:promptVersionId/activate`
+`POST /chat-extractor/control-center/pages/:id/prompts/:promptVersionId/activate`
 
 - set prompt version active cho page
 
 ### E. Manual run
 
-`POST /seam1/jobs/preview`
+`POST /chat-extractor/jobs/preview`
 
-`POST /seam1/jobs/execute`
+`POST /chat-extractor/jobs/execute`
 
 Input phải chọn rõ:
 

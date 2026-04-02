@@ -19,6 +19,9 @@ type CustomerDirectoryEntry = controlplane.CustomerDirectoryEntry
 type BotSignature = controlplane.BotSignature
 
 type Request struct {
+	ConnectedPageID                string                   `json:"connected_page_id"`
+	ProcessingMode                 string                   `json:"processing_mode"`
+	RunParamsJSON                  json.RawMessage          `json:"run_params_json"`
 	UserAccessToken                string                   `json:"user_access_token"`
 	PageID                         string                   `json:"page_id"`
 	TargetDate                     string                   `json:"target_date"`
@@ -64,6 +67,10 @@ func (r Request) Apply(cfg *config.Config) error {
 	if runMode == "" {
 		runMode = defaultRunMode
 	}
+	processingMode := strings.TrimSpace(r.ProcessingMode)
+	if processingMode == "" {
+		processingMode = "etl_only"
+	}
 	businessTimezone := strings.TrimSpace(r.BusinessTimezone)
 	if businessTimezone == "" {
 		businessTimezone = config.DefaultBusinessTimezone()
@@ -94,14 +101,17 @@ func (r Request) Apply(cfg *config.Config) error {
 		return err
 	}
 
+	cfg.ConnectedPageID = strings.TrimSpace(r.ConnectedPageID)
 	cfg.UserAccessToken = strings.TrimSpace(r.UserAccessToken)
 	cfg.PageID = strings.TrimSpace(r.PageID)
 	cfg.BusinessDay = businessDay
 	cfg.BusinessTimezone = businessTimezone
 	cfg.RunMode = runMode
+	cfg.ProcessingMode = processingMode
 	cfg.RunGroupID = strings.TrimSpace(r.RunGroupID)
 	cfg.SnapshotVersion = snapshotVersion
 	cfg.IsPublished = r.IsPublished
+	cfg.RunParamsJSON = append(json.RawMessage(nil), r.RunParamsJSON...)
 	cfg.RequestedWindowStartAt = requestedWindowStartAt
 	cfg.RequestedWindowEndExclusiveAt = requestedWindowEndExclusiveAt
 	cfg.WindowStartAt = windowStartAt

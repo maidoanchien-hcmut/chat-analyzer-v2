@@ -156,7 +156,7 @@ func failRun(
 }
 
 func applyFlags(cfg *config.Config) error {
-	databaseURL := flag.String("database-url", cfg.DatabaseURL, "PostgreSQL connection string for direct Seam 1 load")
+	databaseURL := flag.String("database-url", cfg.DatabaseURL, "PostgreSQL connection string for direct chat-extractor load")
 	jobFile := flag.String("job-file", "", "Path to a JSON job payload emitted by backend orchestration")
 	jobJSON := flag.String("job-json", "", "Inline JSON job payload emitted by backend orchestration")
 	userAccessToken := flag.String("user-access-token", "", "Pancake user access token for local/manual runs")
