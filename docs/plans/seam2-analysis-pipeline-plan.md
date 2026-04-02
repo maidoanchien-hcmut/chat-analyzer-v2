@@ -1,459 +1,262 @@
 # Seam 2 Analysis Pipeline Plan
 
-**Goal:** Khoá thiết kế Seam 2 theo hướng lean để hệ thống tự động chạy phân tích AI mỗi ngày sau khi Seam 1 publish snapshot, đồng thời cho phép IT chạy tay theo ngày hoặc theo slice tuỳ chỉnh mà không làm bẩn số official.
-**Architecture:** `backend/` là owner của orchestration, persistence, publish gate và read API; `service/` là owner của AI runtime nhưng phải đi bằng code-based Google ADK trong [docs/adk-docs](D:/Code/chat-analyzer-v2/docs/adk-docs), không đi theo kiểu tự viết model caller/framework riêng; `frontend/` là owner của UI vận hành cho IT. Phase này dùng đúng 3 bảng: `analysis_job`, `analysis_profile_version`, `analysis_slice`.
+**Goal:** Khoá Seam 2 theo hướng insight-first để trả lời đúng nhu cầu của BoD: inbox mới bắt đầu bằng gì, inbox tái khám bắt đầu bằng gì, khách đang quan tâm gì, tâm trạng ra sao, kết quả chốt theo ngày, và feedback coaching cho phản hồi của nhân viên.
+**Architecture:** `backend/` là owner của orchestration, persistence, publish gate và read API; `service/` là owner của AI runtime và phải dùng code-based Google ADK qua gRPC; `frontend/` là owner của UI vận hành và màn đọc kết quả.
+**Storage Scope:** Seam 2 chỉ giữ 2 bảng lưu trữ business-facing là `analysis_run` và `analysis_result`.
 
-**Intent:** Giữ một bảng output duy nhất cho phân tích AI nhưng không hy sinh run control, prompt versioning, workflow criteria theo page, manual rerun và audit.
-**Observable Delta:** Sau khi có Seam 1 snapshot official của ngày `D`, hệ thống tạo đúng một scheduled job cho `page_id + target_date`, compile prompt thành text thuần, chạy phân tích theo batch, chỉ publish khi coverage hoàn tất, và nếu fail thì chỉ lưu log. IT có thể chỉnh tiêu chí quy trình của từng page, xem preview prompt text, chạy manual day hoặc manual custom slice, và mọi rerun đều tạo record mới.
-**Allowed Mechanism:** Postgres 17 với 3 bảng `analysis_job`, `analysis_profile_version`, `analysis_slice`; internal bulk contract giữa `backend/` và `service/`; UI versioned cho profile prompt theo page; publish/supersede semantics ở `backend/`; `service/` dùng code-based Google ADK với `LlmAgent` + `Runner`, và khi orchestration state phức tạp thì dùng `CustomAgent` hoặc thin coordinator bao quanh ADK runtime.
-**Forbidden Shortcuts:** Không thêm bảng output thứ hai cho summary, không cho scheduled retry sinh scheduled job mới trong cùng ngày, không lưu prompt chỉ ở code hoặc env, không cho custom slice tự thành official, không publish partial result, không để dashboard đọc lẫn official và diagnostic, không gọi Gemini trực tiếp theo kiểu bypass ADK, và không dùng `Agent Config` YAML làm production path.
-**Proof Obligations:** Chứng minh được one-scheduled-run-per-day, prompt luôn compile thành text thuần trước khi gọi model, `service/` chạy bằng Google ADK thay vì direct SDK caller, chỉ có một bảng output `analysis_slice`, scheduled failure không publish, manual rerun tạo record mới, và UI cho IT chỉnh workflow prompt theo page có preview/audit được.
+**Intent:** Không biến Seam 2 thành generic AI platform. Scheduled official v1 chỉ phân tích đúng một `conversation_day` tại một thời điểm và chỉ sinh ra các chiều business đang cần cho dashboard và coaching, với đúng một giá trị cho mỗi chiều trên mỗi unit.
+**Observable Delta:** Sau khi Seam 1 publish snapshot ngày `D`, hệ thống tạo đúng một scheduled `analysis_run` cho `etl_run` đó, lấy mọi `conversation_day` của ngày làm unit, gọi AI service qua gRPC theo batch, ghi một `analysis_result` cho mỗi unit, và publish cả ngày khi mọi unit đã terminal ở `succeeded` hoặc `unknown`.
+**Allowed Mechanism:** Postgres 17 với `analysis_run` + `analysis_result`; gRPC nội bộ giữa `backend/` và `service/`; code-based Google ADK trong `service/`; prompt editor theo page nằm ở config domain khác, còn `analysis_run` chỉ snapshot prompt thực tế đã dùng để audit.
+**Forbidden Shortcuts:** Không thêm bảng output thứ ba cho summary/profile; không cho AI override label official của Seam 1; không coi Pancake tag là truth; không nhầm batch với analysis grain; không để ADK session thành business persistence; không dùng `Agent Config` YAML làm production path.
 
-**Proof Ownership:**
+## Bất Biến Cốt Lõi
 
-- Architect-owned proof: chỉ có 3 bảng và boundary rõ ràng; `analysis_slice` là output owner duy nhất; `analysis_profile_version` đủ để chứa model + prompt + rubric + schema cho một page; `service/` chỉ là ADK runtime của Seam 2 chứ không phải một framework AI tổng quát mới.
-- Executor-owned proof: scheduler idempotent, retry không sinh scheduled job mới, prompt builder preview đúng text gửi model, ADK `Runner` chạy được structured analysis flow, manual run và publish/supersede đúng state machine.
-- Escalation trigger: nếu cần nhiều bảng output khác nhau cho một lần inference, nếu custom slice phải trở thành official chain mặc định, hoặc nếu cần tách riêng global baseline và page workflow profile ngay phase đầu.
+- Scheduled official flow có analysis grain là đúng `1 conversation_day = 1 unit`.
+- Mỗi unit phải bao gồm toàn bộ message thuộc `conversation_day` đó.
+- `inbox mới / inbox cũ` là truth của Seam 1, AI không được override.
+- `tái khám` trên dashboard phải resolve theo thứ tự ưu tiên:
+  - label/evidence từ Seam 1
+  - suy luận từ nội dung thật của `conversation_day`
+  - tag vận hành từ Pancake
+  - `unknown`
+- Tag Pancake kiểu `KH mới`, `KH tái khám` chỉ là tín hiệu vận hành có độ tin cậy thấp.
+- Scheduled Seam 2 không lưu final official journey label; nó chỉ lưu `content_customer_type` do AI suy luận từ nội dung.
+- Mọi chiều BI của một unit phải là scalar dimension, không phải array.
+- Batch chỉ là execution grouping để tiết kiệm RPM/token.
+- Unit fail phải bị terminalize thành `unknown`; không được treo vô hạn.
+- Ngày vẫn được publish nếu mọi unit đều đã terminal, kể cả có unit `unknown`.
+- `pilot` và `manual_slice` là một; run mode chỉ cần `manual_slice`.
 
-**Not Done Until:** IT quản lý được profile phân tích theo page, xem được compiled prompt text, scheduled daily chỉ chạy đúng một lần cho mỗi page/ngày, ngày lỗi chỉ có log chứ không có official row, manual rerun tạo row mới, và dashboard official chỉ đọc published rows.
+## Seam 2 Thực Sự Phân Tích Gì
 
-**Solution Integrity Check:**
+Scheduled v1 chỉ phân tích các chiều sau cho mỗi `conversation_day`, và mỗi chiều chỉ có đúng một giá trị:
 
-- Least-painful patch: chỉ có `analysis_job` và `analysis_slice`, còn prompt/model/schema/workflow criteria nằm raw trong code hoặc nhét vào `analysis_job`.
-- Why rejected: không có versioned profile để audit, không có preview/publish flow cho prompt theo page, và manual rerun sẽ rất khó giải thích vì config dùng lúc chạy không có owner rõ ràng.
-- Long-lived owner-clean route: 4 bảng với run owner, global prompt owner, page workflow owner và output owner tách riêng.
-- Why deferred: tách owner tốt hơn nhưng quá nhiều bảng cho phase đầu, trong khi nghiệp vụ hiện tại chỉ cần một profile version hoàn chỉnh cho từng page.
-- Chosen route: 3 bảng với `analysis_profile_version` là bảng gộp, chứa luôn model, prompt chung, workflow prompt theo page, output schema và batch policy.
+- `opening_theme`
+  - cuộc hội thoại ngày đó thực chất bắt đầu bằng nội dung gì
+- `customer_mood`
+  - tâm trạng khách trong ngày
+- `primary_need`
+  - nhu cầu hoặc dịch vụ chính khách đang quan tâm
+- `primary_topic`
+  - chủ đề quan tâm chính của khách trong ngày
+- `content_customer_type`
+  - AI suy luận từ nội dung xem đây giống `kh_moi`, `tai_kham`, hay `unknown`
+- `closing_outcome_as_of_day`
+  - trạng thái chốt đơn / chốt hẹn tính tới hết ngày đó
+- `response_quality_label`
+  - đánh giá tổng quan về chất lượng phản hồi phía nhân viên trong unit
+  - đây là một dimension BI, không phải scorecard kỷ luật
 
-**Temporary Bridge Policy:**
+Phần coaching không phải dimension, chỉ là supporting text đi kèm:
 
-- Allowed temporary bridges: `analysis_job.log_json` giữ event log rút gọn; manual custom slice phase đầu chỉ hỗ trợ một `conversation_id` trong một window; `analysis_profile_version` gộp cả prompt chung và workflow prompt page-specific vào cùng một row.
-- Why temporary: giảm số bảng ngay phase đầu mà vẫn giữ được owner rõ ràng và audit đủ dùng.
-- Removal point: khi hệ thống lớn hơn và cần tách global baseline khỏi page workflow prompt, có thể tách `analysis_profile_version` thành 2 bảng sau.
-- Final acceptance rule: không còn path official nào phụ thuộc vào prompt text không versioned hoặc script chạy ad-hoc ngoài `analysis_job`.
+- `response_quality_issue_text`
+  - lỗi chính hoặc điểm cần cải thiện nổi bật nhất
+- `response_quality_improvement_text`
+  - gợi ý cải thiện ngắn, dễ hành động
 
-## Bất Biến Của Seam 2
+## Tại Sao Chốt 2 Bảng
 
-- Chỉ có một bảng output business-facing: `analysis_slice`.
-- Mỗi `analysis_slice` đại diện cho đúng một conversation trong đúng một slice:
-  - `conversation_day`
-  - hoặc `custom_window`
-- `analysis_slice` phải chứa cả:
-  - kết quả phân tích của slice
-  - `state_summary_json` để carry-forward
-- Scheduled daily chỉ có đúng một logical job cho mỗi `page_id + target_date`.
-- Retry của scheduled daily chỉ tăng attempt trong cùng `analysis_job`.
-- Nếu scheduled daily fail hoặc incomplete sau retry budget:
-  - không publish
-  - chỉ giữ log
-  - muốn chạy lại thì IT chạy manual
-- Manual rerun luôn tạo `analysis_job` mới và row `analysis_slice` mới.
-- Prompt builder phải compile ra text thuần trước khi gọi model.
-- Previous summary chỉ được đọc từ row `published` gần nhất cùng `conversation_id` và cùng `analysis_profile_version_id`.
+### Không chọn 3 bảng trở lên
 
-## Tại Sao Chốt 3 Bảng
+- Tách thêm profile/config tables làm Seam 2 drift sang hướng generic platform.
+- Nhu cầu hiện tại chưa cần owner riêng cho summary/profile/output.
+- Phần prompt editor vẫn cần, nhưng không nhất thiết phải nằm trong 2 bảng run/result của Seam 2.
 
-### Phương án 2 bảng
+### Phương án chọn
 
-- `analysis_job`
-- `analysis_slice`
-
-Ưu điểm:
-
-- Ít bảng nhất.
-
-Nhược điểm:
-
-- Không có owner cho prompt/model/schema/rubric theo page.
-- Không có draft/publish/profile preview cho IT.
-- Không audit được vì sao 2 lần chạy cùng ngày cho output khác nhau.
-
-### Phương án 4 bảng
-
-- `analysis_job`
-- một bảng config chung
-- một bảng workflow config theo page
-- `analysis_slice`
-
-Ưu điểm:
-
-- Owner boundary sạch hơn.
-- Dễ mở rộng về sau.
-
-Nhược điểm:
-
-- Nặng quá cho phase đầu.
-- Tăng số join và số state operator phải hiểu.
-
-### Phương án chọn: 3 bảng
-
-- `analysis_job`
-- `analysis_profile_version`
-- `analysis_slice`
-
-Lý do:
-
-- Vẫn đủ owner cho run, config và output.
-- Vẫn cho IT chỉnh prompt theo page, preview text và publish version.
-- Giảm số bảng mà không rơi về kiểu “prompt nằm lung tung”.
+- `analysis_run`
+  - chỉ track run
+  - snapshot prompt/model/schema đã dùng
+- `analysis_result`
+  - một row cho một unit phân tích
+  - chỉ giữ output AI thật sự cần cho dashboard và coaching
 
 ## Boundary Và Owner
 
 ### `backend/`
 
-- owner của 3 bảng Seam 2 trong Postgres
-- owner của scheduler, idempotency, publish gate, supersede flow
-- owner của internal manifest đọc từ Seam 1 published snapshot
-- owner của read API cho dashboard và màn vận hành
+- owner của `analysis_run` và `analysis_result`
+- owner của scheduler, idempotency, publish gate và read API
+- owner của read model join với Seam 1 để ra dashboard official
+- owner của final precedence rule cho `tái khám`
+- owner của gRPC client gọi `service/`
 
 ### `service/`
 
 - owner của prompt builder text-only
-- owner của ADK runtime cho Seam 2
-- owner của batch planning, ADK runner execution, validation, retry nội bộ
-- dùng code-based Google ADK theo local docs, không dùng direct Gemini caller làm production path
-- dùng `LlmAgent` để sinh output structured
-- khi orchestration state hoặc retry flow phức tạp thì dùng `CustomAgent` hoặc thin coordinator bao quanh `Runner`
-- không đọc Seam 1 bằng REST per-thread
-- không tự publish official row
+- owner của ADK runtime
+- owner của batch planning, retry, validation
+- không own business persistence
+- nhận payload qua gRPC và trả per-unit result qua gRPC
 
 ### `frontend/`
 
-- UI quản lý `analysis_profile_version`
-- UI chạy manual analysis job
-- UI xem history/log/cost/coverage
+- UI xem lịch sử run
+- UI manual rerun
+- UI đọc kết quả và feedback coaching
+- UI chỉnh prompt theo page ở config domain khác; khi chạy, effective prompt phải được snapshot vào `analysis_run`
 
-## Làm Tới Đâu Trong Phase Này
+## Thiết Kế 2 Bảng
 
-Phase này làm tới mức production path hoàn chỉnh của Seam 2, nhưng scope của `service/` bị chốt như sau:
+### `analysis_run`
 
-- Có làm:
-  - scheduler + manual run ở `backend/`
-  - profile prompt theo page ở `backend/` + `frontend/`
-  - prompt builder text-only
-  - ADK-based analysis runtime trong `service/`
-  - batch execution
-  - structured output validation
-  - publish/supersede
-  - official read model
-- Không làm:
-  - một agent platform tổng quát cho nhiều use case AI
-  - persistence business dựa vào ADK session state
-  - production path dựa trên `Agent Config` YAML
-  - direct Gemini SDK flow bypass ADK
+Đây là bảng track run, không duplicate những cột có thể join từ Seam 1.
 
-Nói ngắn gọn:
+Nó chỉ nên giữ:
 
-- `backend/` làm hết owner của dữ liệu và vận hành.
-- `service/` chỉ làm AI execution path của Seam 2 bằng ADK.
-- ADK session state chỉ là runtime state, không phải source of truth lâu dài.
-
-## Thiết Kế 3 Bảng
-
-### `analysis_profile_version`
-
-Đây là bảng gộp của phase đầu, chứa:
-
-- `page_id`
-- `name`
-- `version`
-- `status`
-- `is_active`
-- `model_name`
-- `core_instruction_text`
-- `workflow_prompt_text`
-- `compiled_prompt_text`
-- `output_schema_version`
-- `output_schema_json`
-- `batch_policy_json`
+- loại run
+- reference tới scope Seam 1 hoặc manual scope
+- status / publish outcome
+- model / prompt / schema snapshot
+- retry / coverage / log
 - audit fields
 
-Ý nghĩa:
+### `analysis_result`
 
-- một row là một “gói phân tích” hoàn chỉnh cho một page
-- scheduled daily luôn dùng đúng row active của page tại thời điểm tạo job
-- nếu profile đổi sau đó thì scheduled job cũ không đổi theo
+Đây là output table duy nhất của Seam 2.
 
-### `analysis_job`
+Mỗi row tương ứng:
 
-Đây là owner của:
+- một `conversation_day`
+- hoặc một `manual_slice`
 
-- scheduled daily
-- manual day
-- manual custom slice
-- retry
-- coverage
-- log
-- publish outcome
+Nó chỉ nên giữ:
 
-Rule chốt:
-
-- scheduled daily unique theo `page_id + target_date`
-- retry không tạo row scheduled thứ hai
-- manual run không bị ràng buộc uniqueness đó
-
-### `analysis_slice`
-
-Đây là bảng output duy nhất, chứa:
-
-- scope của slice
-- provenance của job/profile/model/schema
-- `analysis_json`
-- `state_summary_json`
-- `quality_eval_json`
-- `usage_json`
-- publish/supersede state
-
-Không có bảng `conversation_state_summary` riêng.
+- reference tới unit nguồn
+- trạng thái publish / terminal
+- các scalar dimension cho BI
+- 1-2 short text cho coaching giải thích
+- failure info khi unit rơi về `unknown`
 
 ## Luồng Scheduled Daily
 
-1. Seam 1 full-day run của `page_id`, `target_date` được publish.
-2. `backend/` kiểm tra đã có scheduled `analysis_job` cho `page_id + target_date` chưa.
+1. Seam 1 publish một `etl_run` official cho ngày `D`.
+2. `backend/` kiểm tra đã có scheduled `analysis_run` cho `etl_run` đó chưa.
 3. Nếu chưa có:
-   - tạo `analysis_job`
-   - freeze `analysis_profile_version_id` active của page vào job
-4. `backend/` materialize `source_manifest_json` từ published snapshot Seam 1.
-5. `service/` đọc manifest và `analysis_profile_version`.
-6. Prompt builder compile text thuần cho từng batch rồi truyền text đó vào ADK runtime.
-7. ADK `Runner` chạy `LlmAgent` structured-analysis theo batch policy.
-8. Response hợp lệ được ghi thành `analysis_slice` với `publish_state = staged`.
-9. Khi toàn bộ slice planned đều xong:
-   - promote cả job sang `published`
-   - promote rows của job sang `publish_state = published`
-10. Nếu fail hoặc incomplete sau retry budget:
-   - job = `failed`
-   - `publish_outcome = skipped_due_to_failure`
-   - không có row official nào được publish
+   - tạo `analysis_run`
+   - snapshot `model_name`, prompt, output schema đang active
+4. `backend/` lấy toàn bộ `conversation_day` thuộc `etl_run` và gọi `service/` qua gRPC.
+5. `service/` chia unit thành execution batches.
+6. Prompt builder compile text thuần cho từng unit hoặc batch unit.
+7. ADK `Runner` chạy `LlmAgent` structured-output.
+8. `service/` trả per-unit result cho `backend/`.
+9. `backend/` ghi một `analysis_result` cho mỗi unit với:
+   - `result_status = succeeded`
+   - hoặc `result_status = unknown`
+10. Khi mọi unit đã terminal:
+   - nếu không có unknown thì `publish_outcome = published_clean`
+   - nếu có unknown thì `publish_outcome = published_with_unknowns`
+   - promote kết quả của run sang `publish_state = published`
+11. Chỉ khi còn unit chưa terminal thì ngày đó mới không publish.
 
 ## Retry, Failure Và Manual Run
 
 ### Scheduled Daily
 
-- retry nằm trong cùng `analysis_job`
-- hỗ trợ backoff, jitter, dynamic batch downshift
-- không tạo scheduled job mới trong ngày
+- retry nằm trong cùng `analysis_run`
+- có backoff, jitter, batch downshift
+- không tạo scheduled run thứ hai cho cùng `etl_run`
 
-### Nếu Fail Hoặc Không Phân Tích Hết
+### Nếu Unit Fail
 
-- bỏ qua ngày đó
-- chỉ giữ log và metrics
-- không publish partial
+- row của unit đó vẫn được ghi
+- các chiều chính rơi về `unknown`
+- `failure_info_json` giữ lý do fail
+- ngày vẫn được publish nếu mọi unit khác đã terminal
 
-### Manual Day
+### `manual_day`
 
-- tạo `analysis_job` mới với `run_mode = manual_day`
-- tạo row `analysis_slice` mới
-- mặc định là `diagnostic` hoặc `staged`
-- nếu IT publish:
-  - row official cũ của cùng `conversation_day_id` chuyển `superseded`
-  - row mới thành `published`
+- chạy lại cho một `etl_run` hoặc một ngày cụ thể
+- tạo `analysis_run` mới và `analysis_result` mới
+- có thể publish để supersede official cũ
 
-### Manual Custom Slice
+### `manual_slice`
 
-- `run_mode = manual_custom_slice`
-- phase đầu chỉ hỗ trợ một `conversation_id` + một custom window
-- output mặc định là `diagnostic`
-- không tự nối vào official summary chain
+- chính là use case pilot/debug hiện tại
+- mặc định là `diagnostic`
+- không tự đi vào official dashboard
 
-## Prompt Builder Phải Là Text Thuần
+## Prompt Và Tracking
 
-### Input
+- Prompt editor theo page vẫn cần, nhưng không tính là một trong 2 bảng lưu trữ của Seam 2.
+- Khi run bắt đầu, `backend/` phải snapshot effective prompt vào `analysis_run`.
+- Prompt gửi model luôn phải là text thuần.
+- Audit tối thiểu ở mức run/result:
+  - `analysis_run.model_name`
+  - `analysis_run.prompt_version`
+  - `analysis_run.prompt_snapshot_json`
+  - `analysis_run.output_schema_version`
+  - `analysis_result.prompt_hash`
+- Raw prompt đầy đủ chỉ giữ khi debug, sampled audit hoặc unit fail.
 
-- `analysis_profile_version.core_instruction_text`
-- `analysis_profile_version.workflow_prompt_text`
-- `analysis_profile_version.output_schema_json`
-- previous published `state_summary_json` cùng `analysis_profile_version_id` nếu có
-- evidence từ Seam 1 của slice
+## Rule Ưu Tiên Dữ Liệu
 
-### Output
+### `inbox mới / inbox cũ`
 
-- `compiled_instruction_text`
-- `prompt_hash`
-- `prompt_builder_trace_json`
+- chỉ lấy từ Seam 1
+- không lưu lại ở `analysis_result`
 
-### Rule
+### `tái khám`
 
-- request cuối cùng gửi vào ADK agent phải là text thuần
-- UI phải preview được đúng text đó trước khi publish profile mới
-- nếu đổi profile thì hash đổi theo
+- dashboard official resolve theo precedence:
+  - Seam 1
+  - `analysis_result.content_customer_type`
+  - Pancake operational tag
+  - `unknown`
 
-## Ràng Buộc ADK Cho Service
+### Tag Pancake
 
-### Chốt Công Nghệ
+- là hint có độ tin cậy thấp
+- không được override nội dung chat thật khi 2 nguồn mâu thuẫn
 
-- `service/` phải dùng code-based Google ADK theo local docs trong [llm-agents.md](D:/Code/chat-analyzer-v2/docs/adk-docs/llm-agents.md) và [custom-agents.md](D:/Code/chat-analyzer-v2/docs/adk-docs/custom-agents.md).
-- Không lấy `Agent Config` YAML làm production path vì local docs của repo đã ghi nó là experimental trong [config.md](D:/Code/chat-analyzer-v2/docs/adk-docs/config.md).
+## Output Shape Gợi Ý
 
-### Agent Shape Gợi Ý
-
-- một `LlmAgent` dùng `output_schema` để sinh JSON output cho từng slice hoặc từng batch slice
-- một `Runner` để chạy agent theo job/batch
-- một `CustomAgent` hoặc thin coordinator nếu cần stateful orchestration như:
-  - retry theo batch
-  - split batch khi parse fail
-  - mapping `slice_ref -> output row`
-  - carry previous summary vào đúng request
-
-### Hệ Quả Thiết Kế
-
-- agent structured-output không kiêm tool-calling trong cùng bước phân tích chính
-- manifest, transcript, previous summary và profile prompt phải được chuẩn bị ngoài agent rồi mới đưa vào prompt text
-- ADK session state chỉ dùng cho runtime coordination; source of truth chính thức vẫn là Postgres qua `analysis_job` và `analysis_slice`
-- phase đầu nên chốt `model_name` là Gemini-family model id để khớp hướng ADK/Gemini của repo
-
-## UI Cho IT
-
-### Màn `Analysis Profile`
-
-- tạo draft profile cho từng page
-- chọn `model_name`
-- chỉnh prompt chung + workflow prompt của page
-- chỉnh output schema
-- chỉnh batch policy
-- preview compiled prompt text
-- publish/archive profile
-
-### Màn `Analysis History`
-
-- danh sách `analysis_job`
-- filter theo page, ngày, run mode, status
-- xem coverage, attempts, cost, error summary
-- mở log để audit ngày fail
-- chạy manual day hoặc manual custom slice
-
-### Màn `Prompt Sandbox`
-
-- chọn sample published conversation-day từ Seam 1
-- render preview prompt text theo profile đang chọn
-- giúp IT chỉnh tiêu chí đánh giá chất lượng trước khi publish
-
-## Batch Strategy
-
-- group batch theo:
-  - `page_id`
-  - `analysis_profile_version_id`
-  - `run_mode`
-  - `model_name`
-- batch size bị chặn bởi:
-  - `max_slices_per_request`
-  - `max_input_tokens`
-  - `max_output_tokens`
-- khi response invalid:
-  - retry
-  - giảm batch size
-  - isolate slice lỗi
-- scheduled daily không được publish partial
-
-## Policy Chống Drift
-
-- Trend official dài hạn chỉ nên so trong cùng `analysis_profile_version_id`.
-- Nếu đổi profile active cho page:
-  - chain summary cũ không nối sang profile mới
-  - muốn trend sạch thì phải backfill hoặc chấp nhận có mốc cutover
-- Dashboard official phải hiển thị rõ nếu có đổi profile làm ranh giới so sánh.
-
-## Output Shape Gợi Ý Trong `analysis_slice`
-
-### `analysis_json`
+### Cột first-class trong `analysis_result`
 
 - `opening_theme`
+- `customer_mood`
 - `primary_need`
-- `revisit_evidence`
-- `care_stage`
-- `closing_outcome_as_of_slice`
-- `risk_flags`
-- `recommendation`
-- `confidence`
-- `manual_review_required`
+- `primary_topic`
+- `content_customer_type`
+- `closing_outcome_as_of_day`
+- `response_quality_label`
 
-### `state_summary_json`
+### Supporting text trong `analysis_result`
 
-- `latest_customer_goal`
-- `care_stage`
-- `appointment_state`
-- `known_constraints`
-- `open_questions`
-- `unresolved_objections`
-- `risk_flags_open`
-- `last_known_sentiment`
-- `promised_follow_up`
-
-### `quality_eval_json`
-
-- `workflow_adherence_score`
-- `workflow_adherence_reasons`
-- `sales_effectiveness_score`
-- `sales_effectiveness_reasons`
-- `missed_steps`
-- `coaching_actions`
-
-## Gợi Ý Thêm Từ Insight
-
-- Tách chất lượng thành 2 trục:
-  - `workflow_adherence`
-  - `sales_effectiveness`
-- Giữ `manual_review_required` để filter case confidence thấp.
-- Màn history nên có:
-  - cost theo ngày
-  - tỷ lệ fail
-  - latency
-  - coverage
-- Nên có read model riêng cho dashboard official để hard-code rule chỉ đọc `published`.
+- `response_quality_issue_text`
+- `response_quality_improvement_text`
 
 ## Kế Hoạch Triển Khai
 
-### Task 1: Chốt schema 3 bảng
+### Task 1
 
-- `analysis_job`
-- `analysis_profile_version`
-- `analysis_slice`
+- chốt gRPC contract `backend` <-> `service`
 
-### Task 2: Chốt internal contract `backend` <-> `service`
+### Task 2
 
-- manifest read
-- staged write
-- job status update
-- contract này phải phản ánh rõ `service/` là ADK runtime, không phải raw model proxy
+- chốt schema 2 bảng `analysis_run` và `analysis_result`
 
-### Task 3: Xây prompt builder text-only + preview flow
+### Task 3
 
-- compile deterministic
-- preview đúng text thật
+- build prompt builder text-only + snapshot policy
 
-### Task 4: Xây ADK runtime + batch runner + retry policy
+### Task 4
 
-- `LlmAgent`
-- `Runner`
-- nếu cần thì `CustomAgent` hoặc thin coordinator
-- rate limit
-- batch downshift
-- isolate lỗi
+- build ADK runtime + batch runner + retry policy
 
-### Task 5: Xây scheduler + publish/supersede flow
+### Task 5
 
-- one scheduled run per day
-- no partial publish
-- manual rerun tạo row mới
+- build scheduler + publish/supersede flow
 
-### Task 6: Xây UI cho IT
+### Task 6
 
-- profile editor
-- prompt preview
-- history
-- manual run
-
-### Task 7: Xây official read model
-
-- chỉ đọc `published`
-- không trộn diagnostic
-- không trộn ngày fail
+- build read model join Seam 1 + Seam 2 theo precedence rule
 
 ## Chốt Cuối
 
-- Phase đầu nên dùng đúng 3 bảng.
-- `analysis_profile_version` là bảng gộp hợp lý cho hiện tại.
-- `analysis_slice` là output table duy nhất.
-- Scheduled daily chỉ chạy đúng một lần mỗi ngày cho mỗi page; retry vẫn nằm trong cùng job.
-- Nếu fail thì bỏ qua ngày đó, chỉ giữ log.
-- Manual rerun luôn tạo record mới.
+- Seam 2 scheduled v1 không phải generic AI analysis.
+- Nó chỉ phân tích những gì BoD đang cần để đọc hiện trạng và coaching.
+- `analysis_run` chỉ track run.
+- `analysis_result` là output table duy nhất.
+- `manual_slice` và `pilot` là một.
+- `tái khám` phải luôn ưu tiên Seam 1 và nội dung chat thật hơn Pancake tag vận hành.

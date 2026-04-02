@@ -1,11 +1,11 @@
-import { env } from "../config/env.ts";
+import { dbEnv } from "../config/db-env.ts";
 import { PrismaClient } from "@prisma/client";
 
 declare global {
   var __chatAnalyzerPrisma__: PrismaClient | undefined;
 }
 
-process.env.DATABASE_URL = env.databaseUrl;
+process.env.DATABASE_URL = dbEnv.databaseUrl;
 
 export const prisma =
   globalThis.__chatAnalyzerPrisma__ ??

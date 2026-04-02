@@ -1,9 +1,8 @@
-import { cp, mkdir } from "node:fs/promises";
+import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 
 const frontendRoot = resolve(import.meta.dir, "..");
 const distDir = resolve(frontendRoot, "dist");
-const jsonDir = resolve(frontendRoot, "json");
 
 export async function buildFrontend() {
   await mkdir(distDir, { recursive: true });
@@ -23,7 +22,6 @@ export async function buildFrontend() {
   }
 
   await Bun.write(resolve(distDir, "index.html"), buildIndexHtml());
-  await cp(jsonDir, resolve(distDir, "json"), { recursive: true });
 
   return {
     distDir

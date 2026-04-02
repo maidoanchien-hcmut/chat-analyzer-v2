@@ -6,7 +6,6 @@
     "dev": "bun --watch src/server.ts",
     "start": "bun run src/server.ts",
     "typecheck": "tsc --noEmit",
-    "seam1:json": "bun run scripts/seam1-json.ts",
     "prisma:generate": "bunx prisma generate",
     "prisma:migrate": "bunx prisma migrate dev",
     "prisma:seed": "bun run prisma/seed.ts"

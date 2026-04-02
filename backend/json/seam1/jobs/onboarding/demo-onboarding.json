@@ -1,8 +1,0 @@
-{
-  "job_name": "demo-onboarding",
-  "page_slug": "demo-clinic",
-  "mode": "onboarding_sample",
-  "target_date": "2026-04-01",
-  "publish": false,
-  "initial_conversation_limit_override": 10
-}

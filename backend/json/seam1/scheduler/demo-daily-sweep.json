@@ -1,7 +1,0 @@
-{
-  "job_name": "demo-daily-sweep",
-  "target_date": "2026-04-01",
-  "page_slugs": [
-    "demo-clinic"
-  ]
-}

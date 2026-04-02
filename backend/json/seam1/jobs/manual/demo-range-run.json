@@ -1,8 +1,0 @@
-{
-  "job_name": "demo-range-run",
-  "page_slug": "demo-clinic",
-  "mode": "manual_extract",
-  "requested_window_start_at": "2026-04-01T10:00:00+07:00",
-  "requested_window_end_exclusive_at": "2026-04-02T03:00:00+07:00",
-  "publish": false
-}

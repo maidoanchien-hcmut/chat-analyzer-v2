@@ -62,11 +62,11 @@ func (c *Client) ListPages(ctx context.Context) ([]Page, error) {
 		return nil, err
 	}
 
-	var response listPagesResponse
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return nil, fmt.Errorf("decode list pages response: %w", err)
+	pages, err := decodeListPages(raw)
+	if err != nil {
+		return nil, err
 	}
-	return response.Pages, nil
+	return pages, nil
 }
 
 func (c *Client) GeneratePageAccessToken(ctx context.Context, pageID string) (string, error) {
@@ -295,4 +295,19 @@ func decodeTags(rawItems []json.RawMessage) ([]Tag, error) {
 		tags = append(tags, tag)
 	}
 	return tags, nil
+}
+
+func decodeListPages(raw []byte) ([]Page, error) {
+	var response listPagesResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, fmt.Errorf("decode list pages response: %w", err)
+	}
+
+	if len(response.Pages) > 0 {
+		return response.Pages, nil
+	}
+	if len(response.Categorized.Activated) > 0 {
+		return response.Categorized.Activated, nil
+	}
+	return []Page{}, nil
 }

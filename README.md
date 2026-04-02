@@ -3,7 +3,7 @@
 Monorepo cho ứng dụng chat-analyzer:
 
 - `backend/`: Bun + Elysia + Prisma + PostgreSQL + Redis, hiện expose các endpoint seam1/control-plane không yêu cầu đăng nhập.
-- `frontend/`: frontend standalone tối giản bằng HTML/CSS/TypeScript thuần, build và serve bằng Bun; giữ preset JSON cho Seam 1 ở `frontend/json/seam1`.
+- `frontend/`: frontend standalone tối giản bằng HTML/CSS/TypeScript thuần, build và serve bằng Bun; thao tác Seam 1 qua form HTTP trực tiếp.
 - `service/`: AI service sẽ nhận phần seam2 sau này.
 - `docs/`: tài liệu thiết kế và các matrix/schema liên quan.
 
@@ -61,17 +61,16 @@ bun run dev
 Endpoint chính:
 
 - [backend health](http://localhost:3000/health)
-- `POST /seam1/workspace`
-- `GET /seam1/control-center/pages`
-- `GET /seam1/control-center/pages/:pageSlug`
+- `POST /seam1/pages/list-from-token`
+- `POST /seam1/control-center/pages/register`
 - `GET /seam1/health/summary`
 - `GET /seam1/runs/:id`
-- `GET /seam1/jobs/:kind/:name/preview`
-- `POST /seam1/jobs/:kind/:name/execute`
+- `POST /seam1/jobs/preview`
+- `POST /seam1/jobs/execute`
 
 ## Frontend
 
-Frontend hiện là shell vận hành tối giản, không dùng framework và không có login. Các preset JSON để chạy Seam 1 nằm trong [frontend/json/seam1](D:/Code/chat-analyzer-v2/frontend/json/seam1) và được gửi sang backend qua `POST /seam1/workspace`.
+Frontend hiện là shell vận hành tối giản, không dùng framework và không có login. Luồng chính là HTTP tự nhiên: nhập token, list pages, register page trong memory, rồi preview/execute job trực tiếp sang backend.
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\frontend
@@ -91,10 +90,11 @@ bun run dev
 UI cho phép:
 
 - nhập base URL của backend
-- nạp preset JSON từ `frontend/json/seam1`
-- chỉnh trực tiếp payload JSON trong editor
-- gửi `list_pages_from_token`, `register_page`, `preview_job`, `execute_job`, `get_run` qua `POST /seam1/workspace`
-- xem response JSON thô ngay trên màn hình
+- dán `Pancake user access token` để list pages
+- chọn page, cấu hình timezone/page slug và register trong session hiện tại
+- preview và execute job `manual`, `onboarding`, `scheduler` qua HTTP body trực tiếp
+- tra cứu `etl_run` và health summary
+- xem response JSON thô ngay trên màn hình để audit
 
 ## Lệnh thường dùng
 
@@ -121,5 +121,5 @@ bun run dev
 ## Ghi chú
 
 - Repo standalone hiện không có đăng nhập, refresh session, role hay permission.
-- Các bảng auth cũ đã bị loại khỏi Prisma schema; dữ liệu seam1 và các JSON control-plane là trọng tâm runtime hiện tại.
+- Các bảng auth cũ đã bị loại khỏi Prisma schema; dữ liệu seam1 là trọng tâm runtime hiện tại.
 - `service/` chưa được nối vào frontend ở phase này; frontend mới chừa sẵn chỗ cho seam2.

@@ -120,7 +120,10 @@ type MessageContext struct {
 }
 
 type listPagesResponse struct {
-	Pages []Page `json:"pages"`
+	Pages       []Page `json:"pages"`
+	Categorized struct {
+		Activated []Page `json:"activated"`
+	} `json:"categorized"`
 }
 
 type listConversationsEnvelope struct {

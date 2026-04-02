@@ -26,6 +26,12 @@ export type RunCounts = {
   messageCount: number;
 };
 
+export type ConversationArtifactRow = {
+  conversationId: string;
+  currentTagsJson: unknown;
+  openingBlocksJson: unknown;
+};
+
 class Seam1Repository {
   async nextSnapshotVersion(pageId: string, targetDate: string): Promise<number> {
     const rows = await prisma.$queryRaw<Array<{ max_version: number | null }>>(Prisma.sql`
@@ -136,6 +142,18 @@ class Seam1Repository {
       conversationDayCount: Number(conversationRows[0]?.count ?? 0n),
       messageCount: Number(messageRows[0]?.count ?? 0n)
     };
+  }
+
+  async listConversationArtifacts(runId: string): Promise<ConversationArtifactRow[]> {
+    return prisma.$queryRaw<ConversationArtifactRow[]>(Prisma.sql`
+      SELECT
+        conversation_id AS "conversationId",
+        current_tags_json AS "currentTagsJson",
+        opening_blocks_json AS "openingBlocksJson"
+      FROM conversation_day
+      WHERE etl_run_id = ${runId}::uuid
+      ORDER BY conversation_id ASC
+    `);
   }
 }
 

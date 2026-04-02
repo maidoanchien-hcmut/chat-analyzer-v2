@@ -11,17 +11,16 @@ bunx prisma generate
 bun run dev
 ```
 
-Seam 1 input JSON hiện được frontend giữ ở [frontend/json/seam1](D:/Code/chat-analyzer-v2/frontend/json/seam1) và gửi sang backend như body của HTTP request.
+Seam 1 hiện chạy bằng HTTP request trực tiếp từ frontend hoặc client bất kỳ. Backend không còn giữ control-plane JSON runtime cho page/job input.
 
 Unauthenticated local endpoints for Seam 1:
 
-- `POST /seam1/workspace`
-- `GET /seam1/control-center/pages`
-- `GET /seam1/control-center/pages/:pageSlug`
+- `POST /seam1/pages/list-from-token`
+- `POST /seam1/control-center/pages/register`
 - `GET /seam1/health/summary`
 - `GET /seam1/runs/:id`
-- `GET /seam1/jobs/:kind/:name/preview`
-- `POST /seam1/jobs/:kind/:name/execute`
+- `POST /seam1/jobs/preview`
+- `POST /seam1/jobs/execute`
 
 Prisma local flow:
 

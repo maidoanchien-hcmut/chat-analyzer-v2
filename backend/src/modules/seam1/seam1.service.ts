@@ -1,71 +1,98 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { basename, resolve } from "node:path";
+import { resolve } from "node:path";
 import { AppError } from "../../core/errors.ts";
-import { seam1Repository } from "./seam1.repository.ts";
+import { buildOnboardingArtifacts } from "./seam1.artifacts.ts";
 import { splitRequestedWindowByTargetDate } from "./seam1.planner.ts";
-import {
-  botSignatureSchema,
-  customerDirectoryEntrySchema,
-  manualJobFileSchema,
-  onboardingJobFileSchema,
-  openingRuleSchema,
-  pageConfigFileSchema,
-  schedulerJobFileSchema,
-  tagRuleSchema,
+import type {
+  ExecuteJobBody,
+  JobPreview,
+  ManualJobBody,
+  OnboardingJobBody,
+  PageBundle,
+  PageConfig,
+  PreviewJobBody,
+  RunSlice,
+  SchedulerJobBody,
+  WorkerJob
 } from "./seam1.types.ts";
-import type { JobPreview, ManualJobFile, OnboardingJobFile, OpeningRule, PageConfig, RunSlice, SchedulerJobFile, TagRule, WorkerJob } from "./seam1.types.ts";
+import type { seam1Repository as seam1RepositoryType } from "./seam1.repository.ts";
 
 const backendRoot = resolve(import.meta.dir, "../../..");
-const seam1JsonRoot = resolve(backendRoot, "json", "seam1");
 const workerRoot = resolve(backendRoot, "go-worker");
 
-class Seam1Service {
-  async listPages() {
-    const pages = await this.loadAllPages();
-    const recentRuns = await seam1Repository.listRecentRuns(100);
-    const latestRunByPageId = new Map<string, (typeof recentRuns)[number]>();
-    for (const run of recentRuns) {
-      if (!latestRunByPageId.has(run.pageId)) {
-        latestRunByPageId.set(run.pageId, run);
-      }
-    }
+let cachedRepository: typeof seam1RepositoryType | null = null;
 
-    return pages.map((page) => ({
-      ...page,
-      latestRun: latestRunByPageId.get(page.pageId) ?? null
-    }));
+async function getRepository() {
+  if (cachedRepository) {
+    return cachedRepository;
+  }
+  const module = await import("./seam1.repository.ts");
+  cachedRepository = module.seam1Repository;
+  return cachedRepository;
+}
+
+class Seam1Service {
+  async listPagesFromToken(userAccessToken: string) {
+    const endpoint = new URL("https://pages.fm/api/v1/pages");
+    endpoint.searchParams.set("access_token", userAccessToken);
+
+    const response = await fetch(endpoint, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "chat-analyzer-v2-seam1-control-plane/0.1"
+      }
+    });
+    const raw = await response.text();
+    if (!response.ok) {
+      throw new AppError(400, "SEAM1_LIST_PAGES_FAILED", "Failed to list Pancake pages.", {
+        status: response.status,
+        body: compactPayload(raw)
+      });
+    }
+    return parseListPagesResponse(raw);
   }
 
-  async getPage(pageSlug: string) {
-    const page = await this.loadPage(pageSlug);
-    const [runs, botSignatures, tagRules, openingRules, customerDirectory] = await Promise.all([
-      seam1Repository.listRunsByPageId(page.pageId, 20),
-      this.loadBotSignatures(page),
-      this.loadTagRules(page),
-      this.loadOpeningRules(page),
-      this.loadCustomerDirectory(page)
-    ]);
+  async registerPageConfig(input: {
+    organizationId: string;
+    pageSlug: string;
+    userAccessToken: string;
+    pageId: string;
+    businessTimezone: string;
+    initialConversationLimit: number;
+    autoScraper: boolean;
+    autoAiAnalysis: boolean;
+  }) {
+    const pages = await this.listPagesFromToken(input.userAccessToken);
+    const selectedPage = pages.find((page) => page.pageId === input.pageId);
+    if (!selectedPage) {
+      throw new AppError(400, "SEAM1_PAGE_SELECTION_INVALID", `Pancake page ${input.pageId} was not found for the provided user_access_token.`);
+    }
 
     return {
-      page,
-      botSignatures,
-      tagRules,
-      openingRules,
-      customerDirectory,
-      recentRuns: runs
+      page: {
+        organization_id: input.organizationId,
+        page_slug: input.pageSlug,
+        page_id: input.pageId,
+        page_name: selectedPage.pageName,
+        business_timezone: input.businessTimezone,
+        initial_conversation_limit: input.initialConversationLimit,
+        auto_scraper: input.autoScraper,
+        auto_ai_analysis: input.autoAiAnalysis
+      }
     };
   }
 
   async getHealthSummary() {
-    const runs = await seam1Repository.listRecentRuns(50);
+    const runs = await (await getRepository()).listRecentRuns(50);
     const totals = {
       running: 0,
       loaded: 0,
       published: 0,
       failed: 0
     };
+
     for (const run of runs) {
       if (run.status === "running") {
         totals.running++;
@@ -97,96 +124,95 @@ class Seam1Service {
   }
 
   async getRun(runId: string) {
-    const run = await seam1Repository.getRunById(runId);
+    const repository = await getRepository();
+    const run = await repository.getRunById(runId);
     if (!run) {
       throw new AppError(404, "SEAM1_RUN_NOT_FOUND", `Seam 1 run ${runId} was not found.`);
     }
-    const counts = await seam1Repository.getRunCounts(runId);
+    const counts = await repository.getRunCounts(runId);
     return {
       run,
       counts
     };
   }
 
-  async previewJob(kind: "manual" | "onboarding" | "scheduler", name: string): Promise<JobPreview> {
-    if (kind === "manual") {
-      return this.previewManualJob(name);
+  async previewJobRequest(body: PreviewJobBody): Promise<JobPreview> {
+    if (body.kind === "manual") {
+      const workerJobs = await this.buildWorkerJobsForManual(body.job, body.page_bundle);
+      return {
+        kind: "manual",
+        jobName: body.job.jobName,
+        pageSlug: body.page_bundle.page.pageSlug,
+        workerJobs
+      };
     }
-    if (kind === "onboarding") {
-      return this.previewOnboardingJob(name);
+
+    if (body.kind === "onboarding") {
+      const workerJobs = await this.buildWorkerJobsForOnboarding(body.job, body.page_bundle);
+      return {
+        kind: "onboarding",
+        jobName: body.job.jobName,
+        pageSlug: body.page_bundle.page.pageSlug,
+        workerJobs
+      };
     }
-    return this.previewSchedulerJob(name);
+
+    const workerJobs = await this.buildWorkerJobsForScheduler(body.job, body.page_bundles);
+    return {
+      kind: "scheduler",
+      jobName: body.job.jobName,
+      pageSlugs: body.page_bundles.map((entry) => entry.page.pageSlug),
+      workerJobs
+    };
   }
 
-  async executeJob(kind: "manual" | "onboarding" | "scheduler", name: string) {
-    const preview = await this.previewJob(kind, name);
+  async executeJobRequest(body: ExecuteJobBody) {
+    const preview = await this.previewJobRequest(body);
     const executions = [];
     for (const workerJob of preview.workerJobs) {
       executions.push(await this.runWorker(workerJob));
     }
-    return {
-      preview,
-      executions
-    };
-  }
 
-  async previewManualJob(name: string): Promise<JobPreview> {
-    const job = await this.loadManualJob(name);
-    const page = await this.loadPage(job.pageSlug);
-    const workerJobs = await this.buildWorkerJobsForManualJob(job, page);
-    return {
-      kind: "manual",
-      jobName: job.jobName,
-      pageSlug: job.pageSlug,
-      workerJobs
-    };
-  }
-
-  async previewOnboardingJob(name: string): Promise<JobPreview> {
-    const job = await this.loadOnboardingJob(name);
-    const page = await this.loadPage(job.pageSlug);
-    const workerJobs = await this.buildWorkerJobsForOnboardingJob(job, page);
-    return {
-      kind: "onboarding",
-      jobName: job.jobName,
-      pageSlug: job.pageSlug,
-      workerJobs
-    };
-  }
-
-  async previewSchedulerJob(name: string): Promise<JobPreview> {
-    const job = await this.loadSchedulerJob(name);
-    const pages = await Promise.all(job.pageSlugs.map((pageSlug) => this.loadPage(pageSlug)));
-    const workerJobs: WorkerJob[] = [];
-    for (const page of pages) {
-      if (!page.autoScraper) {
-        continue;
+    const artifactWrites = [];
+    if (body.write_artifacts) {
+      for (const item of executions) {
+        const runId = extractRunIDFromWorkerOutput(item.stdout);
+        if (!runId) {
+          continue;
+        }
+        const pageSlug = this.resolvePageSlugFromExecution(body, item.pageId);
+        if (pageSlug) {
+          artifactWrites.push(await this.generateOnboardingArtifacts(pageSlug, runId));
+        }
       }
-      const snapshotVersion = job.snapshotVersion ?? await seam1Repository.nextSnapshotVersion(page.pageId, job.targetDate);
-      workerJobs.push(await this.buildWorkerJob({
-        page,
-        targetDate: job.targetDate,
-        runMode: "scheduled_daily",
-        runGroupId: null,
-        snapshotVersion,
-        isPublished: job.isPublished,
-        requestedWindowStartAt: job.requestedWindowStartAt,
-        requestedWindowEndExclusiveAt: job.requestedWindowEndExclusiveAt,
-        windowStartAt: job.windowStartAt,
-        windowEndExclusiveAt: job.windowEndExclusiveAt,
-        maxConversations: job.maxConversations
-      }));
     }
 
     return {
-      kind: "scheduler",
-      jobName: job.jobName,
-      pageSlugs: job.pageSlugs,
-      workerJobs
+      preview,
+      executions,
+      artifactWrites
     };
   }
 
-  async buildWorkerJobsForManualJob(job: ManualJobFile, page: PageConfig): Promise<WorkerJob[]> {
+  async generateOnboardingArtifacts(pageSlug: string, runId: string) {
+    const repository = await getRepository();
+    const [run, conversations] = await Promise.all([
+      this.getRun(runId),
+      repository.listConversationArtifacts(runId)
+    ]);
+
+    return {
+      payload: {
+        page_slug: pageSlug,
+        run_id: runId,
+        target_date: run.run.targetDate.toISOString().slice(0, 10),
+        generated_at: new Date().toISOString(),
+        artifacts: buildOnboardingArtifacts(conversations)
+      }
+    };
+  }
+
+  async buildWorkerJobsForManual(job: ManualJobBody, pageBundle: PageBundle): Promise<WorkerJob[]> {
     const slices = job.windowStartAt || job.windowEndExclusiveAt
       ? [
           {
@@ -212,16 +238,21 @@ class Seam1Service {
       : splitRequestedWindowByTargetDate(
           job.requestedWindowStartAt!,
           job.requestedWindowEndExclusiveAt!,
-          page.businessTimezone
+          pageBundle.page.businessTimezone
         );
 
     const runGroupId = job.runGroupId ?? (slices.length > 1 ? randomUUID() : null);
+    let repository: Awaited<ReturnType<typeof getRepository>> | null = null;
     const workerJobs: WorkerJob[] = [];
+
     for (const slice of slices) {
-      const snapshotVersion = job.snapshotVersion ?? await seam1Repository.nextSnapshotVersion(page.pageId, slice.targetDate);
+      const snapshotVersion =
+        job.snapshotVersion ??
+        await ((repository ??= await getRepository()).nextSnapshotVersion(pageBundle.page.pageId, slice.targetDate));
+
       workerJobs.push(
-        await this.buildWorkerJob({
-          page,
+        this.buildWorkerJob({
+          pageBundle,
           targetDate: slice.targetDate,
           runMode: job.runMode ?? (slice.isFullDay ? "backfill_day" : "manual_range"),
           runGroupId,
@@ -231,18 +262,22 @@ class Seam1Service {
           requestedWindowEndExclusiveAt: slice.requestedWindowEndExclusiveAt,
           windowStartAt: slice.windowStartAt,
           windowEndExclusiveAt: slice.windowEndExclusiveAt,
-          maxConversations: job.maxConversations
+          maxConversations: job.maxConversations,
+          maxMessagePagesPerConversation: job.maxMessagePagesPerConversation
         })
       );
     }
+
     return workerJobs;
   }
 
-  async buildWorkerJobsForOnboardingJob(job: OnboardingJobFile, page: PageConfig): Promise<WorkerJob[]> {
-    const snapshotVersion = job.snapshotVersion ?? await seam1Repository.nextSnapshotVersion(page.pageId, job.targetDate);
+  async buildWorkerJobsForOnboarding(job: OnboardingJobBody, pageBundle: PageBundle): Promise<WorkerJob[]> {
+    const snapshotVersion =
+      job.snapshotVersion ?? await (await getRepository()).nextSnapshotVersion(pageBundle.page.pageId, job.targetDate);
+
     return [
-      await this.buildWorkerJob({
-        page,
+      this.buildWorkerJob({
+        pageBundle,
         targetDate: job.targetDate,
         runMode: "onboarding_sample",
         runGroupId: null,
@@ -252,13 +287,48 @@ class Seam1Service {
         requestedWindowEndExclusiveAt: job.requestedWindowEndExclusiveAt,
         windowStartAt: job.windowStartAt,
         windowEndExclusiveAt: job.windowEndExclusiveAt,
-        maxConversations: job.initialConversationLimitOverride ?? page.initialConversationLimit
+        maxConversations: job.initialConversationLimitOverride ?? pageBundle.page.initialConversationLimit,
+        maxMessagePagesPerConversation: job.maxMessagePagesPerConversation
       })
     ];
   }
 
-  async buildWorkerJob(input: {
-    page: PageConfig;
+  async buildWorkerJobsForScheduler(job: SchedulerJobBody, pageBundles: PageBundle[]): Promise<WorkerJob[]> {
+    let repository: Awaited<ReturnType<typeof getRepository>> | null = null;
+    const workerJobs: WorkerJob[] = [];
+
+    for (const pageBundle of pageBundles) {
+      if (!pageBundle.page.autoScraper) {
+        continue;
+      }
+
+      const snapshotVersion =
+        job.snapshotVersion ??
+        await ((repository ??= await getRepository()).nextSnapshotVersion(pageBundle.page.pageId, job.targetDate));
+
+      workerJobs.push(
+        this.buildWorkerJob({
+          pageBundle,
+          targetDate: job.targetDate,
+          runMode: "scheduled_daily",
+          runGroupId: null,
+          snapshotVersion,
+          isPublished: job.isPublished,
+          requestedWindowStartAt: job.requestedWindowStartAt,
+          requestedWindowEndExclusiveAt: job.requestedWindowEndExclusiveAt,
+          windowStartAt: job.windowStartAt,
+          windowEndExclusiveAt: job.windowEndExclusiveAt,
+          maxConversations: job.maxConversations,
+          maxMessagePagesPerConversation: job.maxMessagePagesPerConversation
+        })
+      );
+    }
+
+    return workerJobs;
+  }
+
+  buildWorkerJob(input: {
+    pageBundle: PageBundle;
     targetDate: string;
     runMode: WorkerJob["run_mode"];
     runGroupId: string | null;
@@ -269,19 +339,14 @@ class Seam1Service {
     windowStartAt: string | null;
     windowEndExclusiveAt: string | null;
     maxConversations: number;
-  }): Promise<WorkerJob> {
-    const [botSignatures, tagRules, openingRules, customerDirectory] = await Promise.all([
-      this.loadBotSignatures(input.page),
-      this.loadTagRules(input.page),
-      this.loadOpeningRules(input.page),
-      this.loadCustomerDirectory(input.page)
-    ]);
-
+    maxMessagePagesPerConversation: number;
+  }): WorkerJob {
+    const { pageBundle } = input;
     return {
-      user_access_token: input.page.pancakeUserAccessToken,
-      page_id: input.page.pageId,
+      user_access_token: pageBundle.page.pancakeUserAccessToken,
+      page_id: pageBundle.page.pageId,
       target_date: input.targetDate,
-      business_timezone: input.page.businessTimezone,
+      business_timezone: pageBundle.page.businessTimezone,
       run_mode: input.runMode,
       run_group_id: input.runGroupId,
       snapshot_version: input.snapshotVersion,
@@ -291,11 +356,11 @@ class Seam1Service {
       window_start_at: input.windowStartAt,
       window_end_exclusive_at: input.windowEndExclusiveAt,
       max_conversations: input.maxConversations,
-      max_message_pages_per_conversation: 0,
-      tag_rules: tagRules,
-      opening_rules: openingRules,
-      customer_directory: customerDirectory,
-      bot_signatures: botSignatures
+      max_message_pages_per_conversation: input.maxMessagePagesPerConversation,
+      tag_rules: pageBundle.tagRules,
+      opening_rules: pageBundle.openingRules,
+      customer_directory: pageBundle.customerDirectory,
+      bot_signatures: pageBundle.botSignatures.length > 0 ? pageBundle.botSignatures : pageBundle.page.botSignatures
     };
   }
 
@@ -330,94 +395,42 @@ class Seam1Service {
     }
   }
 
-  async loadAllPages(): Promise<PageConfig[]> {
-    const dir = resolve(seam1JsonRoot, "pages");
-    const entries = await readdir(dir);
-    const pages: PageConfig[] = [];
-    for (const entry of entries) {
-      if (!entry.endsWith(".json")) {
-        continue;
-      }
-      const raw = await readFile(resolve(dir, entry), "utf8");
-      pages.push(pageConfigFileSchema.parse(JSON.parse(raw)));
+  resolvePageSlugFromExecution(body: ExecuteJobBody, pageId: string) {
+    if (body.kind === "scheduler") {
+      return body.page_bundles.find((entry) => entry.page.pageId === pageId)?.page.pageSlug ?? null;
     }
-    pages.sort((left, right) => left.pageSlug.localeCompare(right.pageSlug));
-    return pages;
+    return body.page_bundle.page.pageId === pageId ? body.page_bundle.page.pageSlug : null;
   }
-
-  async loadPage(pageSlug: string): Promise<PageConfig> {
-    const pages = await this.loadAllPages();
-    const page = pages.find((item) => item.pageSlug === pageSlug);
-    if (!page) {
-      throw new AppError(404, "SEAM1_PAGE_NOT_FOUND", `Seam 1 page ${pageSlug} was not found in backend/json/seam1/pages.`);
-    }
-    return page;
-  }
-
-  async loadTagRules(page: PageConfig): Promise<TagRule[]> {
-    if (!page.tagRulesFile) {
-      return [];
-    }
-    const raw = await readFile(resolve(seam1JsonRoot, page.tagRulesFile), "utf8");
-    return tagRuleSchema.array().parse(JSON.parse(raw));
-  }
-
-  async loadOpeningRules(page: PageConfig): Promise<OpeningRule[]> {
-    if (!page.openingRulesFile) {
-      return [];
-    }
-    const raw = await readFile(resolve(seam1JsonRoot, page.openingRulesFile), "utf8");
-    return openingRuleSchema.array().parse(JSON.parse(raw));
-  }
-
-  async loadCustomerDirectory(page: PageConfig) {
-    if (!page.customerDirectoryFile) {
-      return [];
-    }
-    const raw = await readFile(resolve(seam1JsonRoot, page.customerDirectoryFile), "utf8");
-    return customerDirectoryEntrySchema.array().parse(JSON.parse(raw));
-  }
-
-  async loadBotSignatures(page: PageConfig) {
-    if (page.botSignaturesFile) {
-      const raw = await readFile(resolve(seam1JsonRoot, page.botSignaturesFile), "utf8");
-      return botSignatureSchema.array().parse(JSON.parse(raw));
-    }
-    return page.botSignatures;
-  }
-
-  async loadManualJob(name: string): Promise<ManualJobFile> {
-    return this.loadJsonFile(resolve(seam1JsonRoot, "jobs", "manual", ensureJsonFilename(name)), manualJobFileSchema);
-  }
-
-  async loadOnboardingJob(name: string): Promise<OnboardingJobFile> {
-    return this.loadJsonFile(resolve(seam1JsonRoot, "jobs", "onboarding", ensureJsonFilename(name)), onboardingJobFileSchema);
-  }
-
-  async loadSchedulerJob(name: string): Promise<SchedulerJobFile> {
-    const filename = ensureJsonFilename(name);
-    try {
-      return await this.loadJsonFile(resolve(seam1JsonRoot, "scheduler", filename), schedulerJobFileSchema);
-    } catch {
-      return this.loadJsonFile(resolve(seam1JsonRoot, "jobs", "scheduled", filename), schedulerJobFileSchema);
-    }
-  }
-
-  async loadJsonFile<T>(path: string, schema: { parse: (value: unknown) => T }): Promise<T> {
-    try {
-      const raw = await readFile(path, "utf8");
-      return schema.parse(JSON.parse(raw));
-    } catch (error) {
-      throw new AppError(400, "SEAM1_JSON_LOAD_FAILED", `Failed to load JSON control-plane file ${basename(path)}.`, {
-        path,
-        cause: error instanceof Error ? error.message : String(error)
-      });
-    }
-  }
-}
-
-function ensureJsonFilename(value: string): string {
-  return value.endsWith(".json") ? value : `${value}.json`;
 }
 
 export const seam1Service = new Seam1Service();
+
+export function parseListPagesResponse(raw: string) {
+  const parsed = JSON.parse(raw) as {
+    pages?: Array<{ id?: string; name?: string }>;
+    categorized?: {
+      activated?: Array<{ id?: string; name?: string }>;
+    };
+  };
+
+  const pages = parsed.pages ?? parsed.categorized?.activated ?? [];
+  return pages
+    .filter((page) => typeof page.id === "string" && typeof page.name === "string")
+    .map((page) => ({
+      pageId: page.id!,
+      pageName: page.name!
+    }));
+}
+
+export function extractRunIDFromWorkerOutput(stdout: string): string | null {
+  const match = stdout.match(/etl_run_id=([0-9a-fA-F-]{36})/);
+  return match?.[1] ?? null;
+}
+
+export function compactPayload(value: string) {
+  const trimmed = value.trim();
+  if (trimmed.length <= 2000) {
+    return trimmed;
+  }
+  return `${trimmed.slice(0, 2000)}...`;
+}
