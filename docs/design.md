@@ -57,7 +57,7 @@ Mỗi folder là một "mini-repo" của chính nó, chạy độc lập và dep
   - Validation DTO
   - Swagger API documentation
 - `frontend/`: là phần frontend hiển thị dashboard, cung cấp UI để người dùng có thể tương tác với ứng dụng. Techstack:
-  - Bun + VueJS 3, Typescript
+  - Bun + VueJS 3 + Typescript, Vuetify
   - Có permission gate
   - Auth: JWT token, refresh token, cookie
 - `service/`: là phần seam-owner của AI service. Phần này sẽ đọc snapshot unit đã được backend publish sẵn qua internal read model hoặc gRPC/internal contract, sau đó xử lý bằng AI model và ghi kết quả versioned về cho backend. Không dùng REST JSON per-thread cho bulk processing hằng ngày. Techstack:
@@ -250,6 +250,10 @@ Có sidebar chia các trang chính cho BoD/Lead sales và IT, mỗi trang có th
 
 - Thiết kế 1 dashboard báo cáo thống kê chỉ số trực quan để BoD và Lead sales dễ dàng theo dõi các chỉ số quan trọng
 - Cho phép chọn view nhanh theo hàng ngày, hàng tuần, hàng tháng, hoặc custom theo nhu cầu.
+- Sidebar của dashboard business phải có source selector theo từng page nguồn để đổi scope xem số liệu.
+- Header period selector quyết định scope KPI chính thức của trang.
+- Search theo tên khách hàng và các bộ lọc AI phải nằm dưới cụm KPI; các control này chỉ tác động đến danh sách hội thoại và cụm biểu đồ phân phối, không được làm sai scope KPI chính.
+- Donut/pie distribution phải luôn tính lại trên tập hội thoại sau search + filter. Nếu người dùng đã lọc theo một chiều như `inbox mới`, biểu đồ chỉ được phân phối theo các chiều còn lại nhưng vẫn trong tập `inbox mới` đó.
 - Hệ thống KPI metric:
   - Tổng số thread trong ngày
   - Inbox mới trong ngày

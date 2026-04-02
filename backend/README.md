@@ -1,15 +1,26 @@
 # backend
 
-To install dependencies:
+Full project setup is documented in the root [README](D:/Code/chat-analyzer-v2/README.md).
 
-```bash
+Quick start:
+
+```powershell
+cd D:\Code\chat-analyzer-v2\backend
 bun install
+bunx prisma generate
+bun run dev
 ```
 
-To run:
+Prisma local flow:
 
-```bash
-bun run index.ts
+```powershell
+$env:DATABASE_URL='postgresql://chat_admin:your_password@localhost:5432/chat_analyzer_v2?schema=public'
+bunx prisma migrate deploy
+bunx prisma db seed
 ```
 
-This project was created using `bun init` in bun v1.3.10. [Bun](https://bun.com) is a fast all-in-one JavaScript runtime.
+Bootstrap the first admin:
+
+```powershell
+bun run auth:bootstrap-admin --identifier admin --display-name "Bootstrap Admin" --password "TempAdmin!2026A"
+```
