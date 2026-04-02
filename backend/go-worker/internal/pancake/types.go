@@ -7,6 +7,13 @@ type Page struct {
 	Name string `json:"name"`
 }
 
+type Tag struct {
+	ID           string `json:"id"`
+	Text         string `json:"text"`
+	Color        string `json:"color"`
+	LightenColor string `json:"lighten_color"`
+}
+
 type Conversation struct {
 	ID string `json:"id"`
 }
@@ -19,12 +26,12 @@ type listConversationsResponse struct {
 	Conversations []Conversation `json:"conversations"`
 }
 
-type listMessagesResponse struct {
-	Messages []json.RawMessage `json:"messages"`
+type listTagsResponse struct {
+	Tags []Tag `json:"tags"`
 }
 
-type listPageCustomersResponse struct {
-	Customers []json.RawMessage `json:"customers"`
+type listMessagesResponse struct {
+	Messages []json.RawMessage `json:"messages"`
 }
 
 type ConversationsRequest struct {
@@ -40,13 +47,4 @@ type MessagesRequest struct {
 	PageAccessToken string
 	ConversationID  string
 	CurrentCount    int
-}
-
-type PageCustomersRequest struct {
-	PageID          string
-	PageAccessToken string
-	Since           int64
-	Until           int64
-	PageNumber      int
-	PageSize        int
 }

@@ -35,40 +35,40 @@ func NewClient(userAccessToken string, timeout time.Duration) *Client {
 	}
 }
 
-func (c *Client) ListPages(ctx context.Context) ([]byte, []Page, error) {
+func (c *Client) ListPages(ctx context.Context) ([]Page, error) {
 	query := url.Values{}
 	query.Set("access_token", c.userAccessToken)
 
 	raw, err := c.do(ctx, http.MethodGet, userAPIBase, "/pages", query)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var response listPagesResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return raw, nil, fmt.Errorf("decode list pages response: %w", err)
+		return nil, fmt.Errorf("decode list pages response: %w", err)
 	}
-	return raw, response.Pages, nil
+	return response.Pages, nil
 }
 
-func (c *Client) GeneratePageAccessToken(ctx context.Context, pageID string) ([]byte, string, error) {
+func (c *Client) GeneratePageAccessToken(ctx context.Context, pageID string) (string, error) {
 	query := url.Values{}
 	query.Set("page_id", pageID)
 	query.Set("access_token", c.userAccessToken)
 
 	raw, err := c.do(ctx, http.MethodPost, userAPIBase, "/pages/"+pageID+"/generate_page_access_token", query)
 	if err != nil {
-		return nil, "", err
+		return "", err
 	}
 
 	token, err := extractToken(raw)
 	if err != nil {
-		return raw, "", err
+		return "", err
 	}
-	return raw, token, nil
+	return token, nil
 }
 
-func (c *Client) ListConversations(ctx context.Context, req ConversationsRequest) ([]byte, []Conversation, error) {
+func (c *Client) ListConversations(ctx context.Context, req ConversationsRequest) ([]Conversation, error) {
 	query := url.Values{}
 	query.Set("page_access_token", req.PageAccessToken)
 	if req.LastConversationID != "" {
@@ -83,17 +83,17 @@ func (c *Client) ListConversations(ctx context.Context, req ConversationsRequest
 
 	raw, err := c.do(ctx, http.MethodGet, publicV2Base, "/pages/"+req.PageID+"/conversations", query)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var response listConversationsResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return raw, nil, fmt.Errorf("decode conversations response: %w", err)
+		return nil, fmt.Errorf("decode conversations response: %w", err)
 	}
-	return raw, response.Conversations, nil
+	return response.Conversations, nil
 }
 
-func (c *Client) ListMessages(ctx context.Context, req MessagesRequest) ([]byte, []json.RawMessage, error) {
+func (c *Client) ListMessages(ctx context.Context, req MessagesRequest) ([]json.RawMessage, error) {
 	query := url.Values{}
 	query.Set("page_access_token", req.PageAccessToken)
 	if req.CurrentCount > 0 {
@@ -102,40 +102,30 @@ func (c *Client) ListMessages(ctx context.Context, req MessagesRequest) ([]byte,
 
 	raw, err := c.do(ctx, http.MethodGet, publicV1Base, "/pages/"+req.PageID+"/conversations/"+req.ConversationID+"/messages", query)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	var response listMessagesResponse
 	if err := json.Unmarshal(raw, &response); err != nil {
-		return raw, nil, fmt.Errorf("decode messages response: %w", err)
+		return nil, fmt.Errorf("decode messages response: %w", err)
 	}
-	return raw, response.Messages, nil
+	return response.Messages, nil
 }
 
-func (c *Client) ListPageCustomers(ctx context.Context, req PageCustomersRequest) ([]byte, int, error) {
-	query := url.Values{}
-	query.Set("page_access_token", req.PageAccessToken)
-	query.Set("since", strconv.FormatInt(req.Since, 10))
-	query.Set("until", strconv.FormatInt(req.Until, 10))
-	query.Set("page_number", strconv.Itoa(req.PageNumber))
-	query.Set("page_size", strconv.Itoa(req.PageSize))
-
-	raw, err := c.do(ctx, http.MethodGet, publicV1Base, "/pages/"+req.PageID+"/page_customers", query)
-	if err != nil {
-		return nil, 0, err
-	}
-
-	var response listPageCustomersResponse
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return raw, 0, fmt.Errorf("decode page customers response: %w", err)
-	}
-	return raw, len(response.Customers), nil
-}
-
-func (c *Client) ListTags(ctx context.Context, pageID, pageAccessToken string) ([]byte, error) {
+func (c *Client) ListTags(ctx context.Context, pageID, pageAccessToken string) ([]Tag, error) {
 	query := url.Values{}
 	query.Set("page_access_token", pageAccessToken)
-	return c.do(ctx, http.MethodGet, publicV1Base, "/pages/"+pageID+"/tags", query)
+
+	raw, err := c.do(ctx, http.MethodGet, publicV1Base, "/pages/"+pageID+"/tags", query)
+	if err != nil {
+		return nil, err
+	}
+
+	var response listTagsResponse
+	if err := json.Unmarshal(raw, &response); err != nil {
+		return nil, fmt.Errorf("decode tags response: %w", err)
+	}
+	return response.Tags, nil
 }
 
 func (c *Client) do(ctx context.Context, method, baseURL, rawPath string, query url.Values) ([]byte, error) {
