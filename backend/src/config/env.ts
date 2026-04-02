@@ -9,8 +9,8 @@ const envSchema = z
     DB_PROTOCOL: z.string().default("postgresql"),
     DB_HOST: z.string().default("localhost"),
     DB_PORT: z.coerce.number().int().positive().default(5432),
-    DB_NAME: z.string().min(1),
-    DB_USER: z.string().min(1),
+    DB_NAME: z.string().optional(),
+    DB_USER: z.string().optional(),
     DB_PASSWORD: z.string().default(""),
     DB_SCHEMA: z.string().default("public"),
     REDIS_URL: z.string().optional(),
@@ -18,26 +18,31 @@ const envSchema = z
     REDIS_HOST: z.string().default("localhost"),
     REDIS_PORT: z.coerce.number().int().positive().default(6379),
     REDIS_DB: z.coerce.number().int().min(0).default(0),
-    CORS_ORIGIN: z.string().min(1),
-    JWT_ACCESS_SECRET: z.string().min(16).optional(),
-    JWT_ACCESS_TOKEN_SECRET: z.string().min(16).optional(),
-    JWT_REFRESH_SECRET: z.string().min(16).optional(),
-    JWT_REFRESH_TOKEN_SECRET: z.string().min(16).optional(),
-    JWT_ACCESS_TOKEN_TTL: z.coerce.number().int().positive().default(900),
-    JWT_REFRESH_TOKEN_TTL: z.coerce.number().int().positive().default(60 * 60 * 24 * 30),
-    AUTH_REFRESH_COOKIE_NAME: z.string().min(1).default("chat_analyzer_refresh_token"),
-    AUTH_REFRESH_COOKIE_SECURE: z
-      .string()
-      .default("false")
-      .transform((value) => value === "true"),
-    AUTH_REFRESH_COOKIE_SAME_SITE: z.enum(["strict", "lax", "none"]).default("strict"),
-    AUTH_REFRESH_COOKIE_PATH: z.string().min(1).default("/auth"),
-    AUTH_REFRESH_COOKIE_DOMAIN: z.string().optional(),
-    AUTH_LOGIN_RATE_LIMIT_MAX_ATTEMPTS: z.coerce.number().int().positive().default(5),
-    AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS: z.coerce.number().int().positive().default(15 * 60)
+    CORS_ORIGIN: z.string().min(1)
+  })
+  .superRefine((raw, ctx) => {
+    if (!raw.DATABASE_URL && (!raw.DB_NAME || !raw.DB_USER)) {
+      if (!raw.DB_NAME) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["DB_NAME"],
+          message: "DB_NAME is required when DATABASE_URL is not set"
+        });
+      }
+
+      if (!raw.DB_USER) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["DB_USER"],
+          message: "DB_USER is required when DATABASE_URL is not set"
+        });
+      }
+    }
   })
   .transform((raw) => {
-    const databaseUrl = `${raw.DB_PROTOCOL}://${encodeURIComponent(raw.DB_USER)}:${encodeURIComponent(raw.DB_PASSWORD)}@${raw.DB_HOST}:${raw.DB_PORT}/${raw.DB_NAME}?schema=${raw.DB_SCHEMA}`;
+    const databaseUrl =
+      raw.DATABASE_URL ??
+      `${raw.DB_PROTOCOL}://${encodeURIComponent(raw.DB_USER!)}:${encodeURIComponent(raw.DB_PASSWORD)}@${raw.DB_HOST}:${raw.DB_PORT}/${raw.DB_NAME!}?schema=${raw.DB_SCHEMA}`;
     const redisUrl = `${raw.REDIS_PROTOCOL}://${raw.REDIS_HOST}:${raw.REDIS_PORT}/${raw.REDIS_DB}`;
 
     return {
@@ -46,18 +51,7 @@ const envSchema = z
       port: raw.PORT,
       databaseUrl,
       redisUrl,
-      corsOrigin: raw.CORS_ORIGIN,
-      jwtAccessSecret: raw.JWT_ACCESS_SECRET ?? raw.JWT_ACCESS_TOKEN_SECRET!,
-      jwtRefreshSecret: raw.JWT_REFRESH_SECRET ?? raw.JWT_REFRESH_TOKEN_SECRET!,
-      jwtAccessTokenTtlSeconds: raw.JWT_ACCESS_TOKEN_TTL,
-      jwtRefreshTokenTtlSeconds: raw.JWT_REFRESH_TOKEN_TTL,
-      authRefreshCookieName: raw.AUTH_REFRESH_COOKIE_NAME,
-      authRefreshCookieSecure: raw.AUTH_REFRESH_COOKIE_SECURE,
-      authRefreshCookieSameSite: raw.AUTH_REFRESH_COOKIE_SAME_SITE,
-      authRefreshCookiePath: raw.AUTH_REFRESH_COOKIE_PATH,
-      authRefreshCookieDomain: raw.AUTH_REFRESH_COOKIE_DOMAIN,
-      authLoginRateLimitMaxAttempts: raw.AUTH_LOGIN_RATE_LIMIT_MAX_ATTEMPTS,
-      authLoginRateLimitWindowSeconds: raw.AUTH_LOGIN_RATE_LIMIT_WINDOW_SECONDS
+      corsOrigin: raw.CORS_ORIGIN
     };
   });
 

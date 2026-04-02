@@ -1,26 +1,27 @@
 # chat-analyzer-v2
 
-This repository is a monorepo for the chat-analyzer application:
+Monorepo cho ứng dụng chat-analyzer:
 
-- `backend/`: Bun + Elysia + Prisma + PostgreSQL + Redis
-- `frontend/`: Bun + Vue 3 + Pinia + Vue Router
-- `service/`: AI service, currently out of scope for the auth bootstrap slice
+- `backend/`: Bun + Elysia + Prisma + PostgreSQL + Redis, hiện expose các endpoint seam1/control-plane không yêu cầu đăng nhập.
+- `frontend/`: frontend standalone tối giản bằng HTML/CSS/TypeScript thuần, build và serve bằng Bun; giữ preset JSON cho Seam 1 ở `frontend/json/seam1`.
+- `service/`: AI service sẽ nhận phần seam2 sau này.
+- `docs/`: tài liệu thiết kế và các matrix/schema liên quan.
 
-## Requirements
+## Yêu cầu môi trường
 
 - Bun
 - PostgreSQL
 - Redis
-- PowerShell if you are running on Windows
+- PowerShell nếu chạy trên Windows
 
-Default local ports:
+Port mặc định:
 
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:3000`
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
 
-## Current Structure
+## Cấu trúc hiện tại
 
 ```text
 backend/
@@ -33,11 +34,7 @@ service/
 docs/
 ```
 
-## Backend Setup
-
-1. Go to [backend](D:/Code/chat-analyzer-v2/backend)
-2. Create `.env` from [backend/.env.example](D:/Code/chat-analyzer-v2/backend/.env.example)
-3. Install dependencies:
+## Backend
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\backend
@@ -45,19 +42,7 @@ bun install
 bunx prisma generate
 ```
 
-### Important Prisma CLI Note
-
-If your PostgreSQL password contains reserved characters such as `#`, `@`, or `%`, you must percent-encode them in `DATABASE_URL` when running Prisma CLI commands.
-
-Example:
-
-```powershell
-$env:DATABASE_URL='postgresql://chat_admin:o2skin%232026@localhost:5432/chat_analyzer_v2?schema=public'
-```
-
-In this example, `#` becomes `%23`.
-
-### Migrate and Seed
+Tạo `.env` từ [backend/.env.example](D:/Code/chat-analyzer-v2/backend/.env.example), rồi migrate:
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\backend
@@ -66,37 +51,27 @@ bunx prisma migrate deploy
 bunx prisma db seed
 ```
 
-Notes:
-
-- Your local database user may not have permission to create a shadow database, so `bunx prisma migrate dev` may fail with `P3014`.
-- `bunx prisma migrate deploy` is the verified flow for the current local setup.
-
-### Bootstrap the First Admin
-
-```powershell
-cd D:\Code\chat-analyzer-v2\backend
-bun run auth:bootstrap-admin --identifier admin --display-name "Bootstrap Admin" --password "TempAdmin!2026A"
-```
-
-This command is idempotent for the same bootstrap admin. If the bootstrap admin already exists, it will not create a duplicate.
-
-### Run the Backend
+Chạy backend:
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\backend
 bun run dev
 ```
 
-Health endpoint:
+Endpoint chính:
 
 - [backend health](http://localhost:3000/health)
+- `POST /seam1/workspace`
+- `GET /seam1/control-center/pages`
+- `GET /seam1/control-center/pages/:pageSlug`
+- `GET /seam1/health/summary`
+- `GET /seam1/runs/:id`
+- `GET /seam1/jobs/:kind/:name/preview`
+- `POST /seam1/jobs/:kind/:name/execute`
 
-## Frontend Setup
+## Frontend
 
-1. Go to [frontend](D:/Code/chat-analyzer-v2/frontend)
-2. Create `.env` from [frontend/.env.example](D:/Code/chat-analyzer-v2/frontend/.env.example)
-3. Make sure `VITE_BACKEND_API_BASE_URL="http://localhost:3000"`
-4. Install dependencies and run:
+Frontend hiện là shell vận hành tối giản, không dùng framework và không có login. Các preset JSON để chạy Seam 1 nằm trong [frontend/json/seam1](D:/Code/chat-analyzer-v2/frontend/json/seam1) và được gửi sang backend qua `POST /seam1/workspace`.
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\frontend
@@ -104,34 +79,7 @@ bun install
 bun run dev
 ```
 
-## Local Login
-
-After bootstrapping the admin:
-
-- `identifier`: `admin`
-- `password`: `TempAdmin!2026A`
-
-Current auth model:
-
-- Access token is stored in frontend memory
-- Refresh token is stored in an `HttpOnly` cookie
-- Silent refresh is done through `POST /auth/refresh`
-
-## Common Commands
-
-### Backend
-
-```powershell
-cd D:\Code\chat-analyzer-v2\backend
-bun run typecheck
-bunx prisma generate
-bunx prisma migrate deploy
-bunx prisma db seed
-bun run auth:bootstrap-admin --identifier admin --display-name "Bootstrap Admin" --password "TempAdmin!2026A"
-bun run dev
-```
-
-### Frontend
+Các lệnh hữu ích:
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\frontend
@@ -140,41 +88,38 @@ bun run build
 bun run dev
 ```
 
-## Current Auth/API Scope
+UI cho phép:
 
-Public auth endpoints:
+- nhập base URL của backend
+- nạp preset JSON từ `frontend/json/seam1`
+- chỉnh trực tiếp payload JSON trong editor
+- gửi `list_pages_from_token`, `register_page`, `preview_job`, `execute_job`, `get_run` qua `POST /seam1/workspace`
+- xem response JSON thô ngay trên màn hình
 
-- `POST /auth/login`
-- `POST /auth/refresh`
-- `POST /auth/logout`
-- `POST /auth/logout-all`
-- `POST /auth/change-password`
-- `GET /auth/me`
+## Lệnh thường dùng
 
-Admin endpoints:
+Backend:
 
-- `GET /admin/users`
-- `POST /admin/users`
-- `PATCH /admin/users/:id`
-- `POST /admin/users/:id/reset-password`
-- `PUT /admin/users/:id/roles`
-- `GET /admin/roles`
-- `GET /admin/permissions`
+```powershell
+cd D:\Code\chat-analyzer-v2\backend
+bun run typecheck
+bunx prisma generate
+bunx prisma migrate deploy
+bunx prisma db seed
+bun run dev
+```
 
-## Verified Locally
+Frontend:
 
-The following checks have already been run locally:
+```powershell
+cd D:\Code\chat-analyzer-v2\frontend
+bun run typecheck
+bun run build
+bun run dev
+```
 
-- backend `bun run typecheck`
-- frontend `bun run typecheck`
-- frontend `bun run build`
-- backend migration and seed
-- bootstrap admin idempotency
-- smoke flow for login, refresh, auth me, change password, create user, disable user, and refresh-session revoke
+## Ghi chú
 
-## Developer Notes
-
-- There is no public signup flow.
-- The auth boundary is fully owned by `backend/`.
-- `service/` and `backend/go-worker/` do not own auth.
-- For v1, create additional users from the admin UI or the admin API after logging in as admin.
+- Repo standalone hiện không có đăng nhập, refresh session, role hay permission.
+- Các bảng auth cũ đã bị loại khỏi Prisma schema; dữ liệu seam1 và các JSON control-plane là trọng tâm runtime hiện tại.
+- `service/` chưa được nối vào frontend ở phase này; frontend mới chừa sẵn chỗ cho seam2.

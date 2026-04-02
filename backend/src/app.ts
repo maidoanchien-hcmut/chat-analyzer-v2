@@ -5,8 +5,6 @@ import { env } from "./config/env.ts";
 import { isAppError } from "./core/errors.ts";
 import { prisma } from "./infra/prisma.ts";
 import { redisManager } from "./infra/redis.ts";
-import { adminAccountsController } from "./modules/admin-accounts/admin-accounts.controller.ts";
-import { authController } from "./modules/auth/auth.controller.ts";
 import { seam1Controller } from "./modules/seam1/seam1.controller.ts";
 
 export const app = new Elysia()
@@ -29,8 +27,6 @@ export const app = new Elysia()
       timestamp: new Date().toISOString()
     };
   })
-  .use(authController)
-  .use(adminAccountsController)
   .use(seam1Controller)
   .onError(({ code, error, set }) => {
     if (isAppError(error)) {

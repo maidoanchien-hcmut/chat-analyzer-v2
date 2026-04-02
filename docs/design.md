@@ -19,7 +19,7 @@ Là một thành viên BoD và Lead sales, tôi muốn biết mỗi ngày:
   - sentiment, topic, intent, phân loại giai đoạn khách (không phải logic inbox mới/cũ, phần này được định nghĩa riêng), trạng thái chốt, đánh giá chất lượng phản hồi, risk flags, recommendation.
 - Kết quả AI không được ghi đè vào dữ liệu canonical của seam 1.
 - Thiết kế datawarehouse phải tận dụng hết khả năng của postgres17, số lượng bảng phải vừa đủ, không được dư thừa.
-- Mọi kết quả AI phải có version của model, prompt, schema output và run id để có thể audit, so sánh và backfill.
+- Mọi kết quả AI phải truy vết được model, profile prompt, schema output và run id để có thể audit, so sánh và backfill.
 - Báo cáo theo ngày phải đọc từ snapshot của ngày đó, không đọc từ trạng thái mới nhất của hội thoại.
 - Với mỗi kỳ extract ngày `D`, seam 1 chỉ được persist:
   - các conversation thuộc ngày `D`
@@ -44,7 +44,7 @@ Là một thành viên BoD và Lead sales, tôi muốn biết mỗi ngày:
 - `first_meaningful_human_message`: tin nhắn đầu tiên có ý nghĩa trong ngày `D` từ phía con người, có thể đến từ khách hoặc nhân viên, nhưng loại trừ chatbot/system
 - `CRM mapping`: enrichment/joining với hệ thống nội bộ; không được dùng để xác định hoặc rewrite `inbox mới / inbox cũ / tái khám`
 - `thread_customer_mapping`: mapping thread-level từ `page_id + thread_id` sang đúng 1 customer nội bộ; không được nhét ownership này vào `conversation_day`
-- `dashboard official`: chỉ đọc từ `published snapshot` và `published analysis version` của cùng một kỳ dữ liệu
+- `dashboard official`: chỉ đọc từ `published snapshot` và `published analysis rows` của cùng một kỳ dữ liệu
 - `extract boundary`: mỗi run ngày `D` chỉ được persist conversation-day và message có timestamp thuộc ngày `D`
 - `target_date`: ngày local mà ETL đang build canonical slice; scope page/ngày của `conversation_day` và `message` được kế thừa qua `etl_run`
 - `manual custom range`: yêu cầu vận hành có thể chỉ định khoảng thời gian bất kỳ; hệ thống phải materialize yêu cầu đó thành một hoặc nhiều `etl_run` theo từng `target_date`, và các run partial-day không được tự động trở thành dashboard official
@@ -59,25 +59,25 @@ Mỗi folder là một "mini-repo" của chính nó, chạy độc lập và dep
   - REST for public API, gRPC for internal communication
   - Validation DTO
   - Swagger API documentation
-- `frontend/`: là phần frontend hiển thị dashboard, cung cấp UI để người dùng có thể tương tác với ứng dụng. Techstack:
-  - Bun + VueJS 3 + Typescript, Vuetify
-  - Có permission gate
-  - Auth: JWT token, refresh token, cookie
-- `service/`: là phần seam-owner của AI service. Phần này sẽ đọc snapshot unit đã được backend publish sẵn qua internal read model hoặc gRPC/internal contract, sau đó xử lý bằng AI model và ghi kết quả versioned về cho backend. Không dùng REST JSON per-thread cho bulk processing hằng ngày. Techstack:
+- `frontend/`: là phần frontend standalone tối giản để thao tác ETL, chạy phân tích và xem dữ liệu. Techstack:
+  - Bun + Typescript thuần + HTML + CSS
+  - Không dùng framework UI ở giai đoạn này
+  - Không có đăng nhập, không có refresh token, không có phân quyền
+  - Ưu tiên cấu trúc file nhỏ, dễ tích hợp sang ứng dụng khác về sau
+- `service/`: là phần seam-owner của AI service. Phần này nhận manifest và unit payload từ `backend/` qua gRPC, xử lý bằng AI model, rồi trả kết quả versioned về cho `backend/` để persist. Không dùng REST JSON per-thread cho bulk processing hằng ngày. Techstack:
   - Python, FastAPI, Uvicorn
-  - Sử dụng gemini API, google agent developer kit
+  - Sử dụng Google ADK code-based runtime với Gemini model
   - Là nơi sẽ host nhiều dịch vụ AI hơn trong tương lai, hiện tại chỉ có chat-analyzer service
   - Chia nhỏ thành nhiều module để dễ quản lý đồng thời giữ root directory gọn gàng
 
 ## Các cơ chế hoạt động
 
-- Access Token (JWT): Trả về trong body của login API. Frontend lưu vào bộ nhớ (Memory/Pinia) để gắn vào Header Authorization: Bearer ... cho mỗi request.
-- Refresh Token: Backend đặt vào HttpOnly, Secure, SameSite=Strict Cookie. Cách này giúp chống tấn công XSS hiệu quả.
-- Cơ chế xoay vòng (Silent Refresh): Backend cung cấp endpoint /refresh. Khi Access Token hết hạn, Frontend Vue (thường dùng Axios Interceptor) sẽ gọi endpoint này để lấy Access Token mới bằng Refresh Token trong Cookie.
+- Frontend gọi trực tiếp các endpoint backend hiện có để lấy danh sách page, xem health summary, preview job và execute job.
+- Frontend chỉ cần một lớp API mỏng bằng `fetch`, không cần auth store hay session lifecycle.
 - Xử lý real-time: SSE (Server-Sent Events) hoặc WebSocket để cập nhật dashboard ngay khi có dữ liệu mới mà không cần refresh trang.
-- Phân quyền: sử dụng permission schema, vue integration (navigation guard, v-permission, ...) để ẩn/hiện UI dựa trên quyền của người dùng.
+- UI state được quản lý cục bộ theo từng màn hình; mỗi thao tác quan trọng đều hiển thị request/response, trạng thái loading và lỗi rõ ràng để phục vụ vận hành.
 - Backend phải có cơ chế xác định trạng thái của go-worker, log-streaming để IT có thể monitor và debug khi cần thiết.
-- Dashboard BI chỉ được đọc từ `published snapshot` và `published analysis version` của cùng một kỳ dữ liệu. Nếu trong ngày pipeline chưa hoàn tất, UI phải hiển thị rõ là đang xem số liệu `preliminary` hoặc fallback về kỳ `final` gần nhất; không được trộn Seam 1 real-time với Seam 2 của ngày cũ trong cùng một KPI card.
+- Dashboard BI chỉ được đọc từ `published snapshot` và `published analysis rows` của cùng một kỳ dữ liệu. Nếu trong ngày pipeline chưa hoàn tất, UI phải hiển thị rõ là đang xem số liệu `preliminary` hoặc fallback về kỳ `final` gần nhất; không được trộn Seam 1 real-time với Seam 2 của ngày cũ trong cùng một KPI card.
 
 ## Nguồn dữ liệu
 
@@ -203,7 +203,13 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
 **AI seam 2:**
 
 - Job AI chỉ đọc dữ liệu canonical đã được chuẩn hoá từ seam 1.
-- Job AI phân tích theo conversation-day hoặc conversation snapshot của ngày đó.
+- Bulk path giữa `backend/` và `service/` phải đi qua gRPC; public API vẫn là REST.
+- Scheduled automatic flow có analysis grain là đúng một `conversation_day`, bao gồm toàn bộ message thuộc `conversation_day` đó.
+- Manual path có thể chạy theo `custom_window`, nhưng mặc định chỉ là diagnostic và không tự đi vào official chain.
+- Batch chỉ là execution grouping để tiết kiệm RPM/token; batch không phải grain lưu trữ hay grain publish.
+- Physical schema lean của Seam 2 ở phase đầu chỉ có 2 bảng:
+  - `analysis_run`: owner của scheduled/manual run, retry, coverage, publish outcome
+  - `analysis_result`: output table duy nhất của Seam 2
 - Input của AI cho một `conversation-day` phải bao gồm:
   - khối message của ngày `D`
   - `customer_display_name` nguyên văn của thread tại thời điểm extract
@@ -211,23 +217,42 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
   - metadata tag đã resolve từ page tag dictionary
   - normalized tag mapping đã được IT cấu hình cho page đó, nếu có
   - opening block observations và opening selections đã parse được, nếu có
-  - summary trạng thái Seam 2 đã publish gần nhất của cùng conversation trước ngày `D`, nếu có
+  - label deterministic từ Seam 1 nếu có
 - Có thể chạy lại AI với model hoặc prompt mới mà không làm thay đổi dữ liệu gốc.
-- Cho phép lưu snapshot phân tích AI theo prompt version để so sánh hiệu quả của các prompt khác nhau.
-- Seam 2 phải duy trì một `conversation_state_summary` dạng structured cho từng conversation để carry context qua nhiều ngày:
-  - AI đọc `conversation_state_summary` gần nhất làm context khi phân tích khối message mới của ngày `D`
-  - sau khi phân tích xong ngày `D`, AI ghi ra `conversation_state_summary` mới dạng `as-of-day D`
-  - summary này chỉ là derived state của Seam 2, phải version theo cùng `analysis baseline` với `ai_result`
-- `conversation_state_summary` nên giữ các trường ngắn gọn, có cấu trúc, ví dụ:
-  - `latest_customer_goal`
-  - `care_stage`
-  - `appointment_state`
-  - `known_constraints`
-  - `open_questions`
-  - `unresolved_objections`
-  - `risk_flags_open`
-  - `last_known_sentiment`
-  - `promised_follow_up`
+- Seam 2 scheduled v1 chỉ phân tích các chiều business mà BoD đang cần, và mỗi chiều chỉ có đúng một giá trị trên mỗi `conversation_day`:
+  - `opening_theme`
+  - `customer_mood`
+  - `primary_need`
+  - `primary_topic`
+  - `content_customer_type`
+  - `closing_outcome_as_of_day`
+  - `response_quality_label`
+- `analysis_result` chỉ cần giữ:
+  - một số cột first-class cho dashboard:
+  - `opening_theme`
+  - `customer_mood`
+  - `primary_need`
+  - `primary_topic`
+  - `content_customer_type`
+  - `closing_outcome_as_of_day`
+  - `response_quality_label`
+- Phần coaching không đi dưới dạng array hay multi-label ở scheduled v1; chỉ giữ 2 supporting text ngắn:
+  - `response_quality_issue_text`
+  - `response_quality_improvement_text`
+- `service/` phải dùng code-based Google ADK:
+  - `LlmAgent` cho structured output
+  - `Runner` để chạy unit hoặc batch
+  - `CustomAgent` hoặc thin coordinator nếu cần orchestration stateful như retry, split batch, mapping output
+- Không dùng `Agent Config` YAML làm production path.
+- ADK session state chỉ là runtime scratchpad; business source of truth vẫn là Postgres do `backend/` sở hữu.
+- Prompt builder phải compile thành text thuần trước khi gửi vào agent.
+- Prompt editor theo page vẫn là requirement, nhưng storage của prompt config không nằm trong 2 bảng Seam 2 này.
+- Khi một run bắt đầu, effective prompt phải được snapshot vào `analysis_run`.
+- Prompt tracking tối thiểu chỉ cần:
+  - `analysis_run.model_name`
+  - `analysis_run.prompt_snapshot_json`
+  - `analysis_run.output_schema_version`
+  - `analysis_result.prompt_hash`
 - Có 1 luồng AI mapping riêng ở seam 2 chỉ để xử lý các thread chưa resolve được ở Seam 1:
   - deterministic fast-path với đúng 1 số điện thoại hữu hiệu phải được xử lý trước ở Seam 1 và ghi vào `thread_customer_mapping`
   - nếu thread có nhiều số điện thoại hoặc dữ liệu nhập nhằng thì gọi CRM để lấy candidate set và dùng AI để mapping dựa trên tên khách hàng trong thread và tên khách hàng trong CRM
@@ -235,35 +260,75 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
 - Luồng CRM mapping chỉ phục vụ enrichment/joining với hệ thống nội bộ; không được dùng như tín hiệu để xác định hoặc rewrite nhãn `tái khám`.
 - `closing_outcome` phải được hiểu là kết quả chốt `as-of-day` trên snapshot ngày đó, không phải kết quả cuối cùng của toàn bộ vòng đời thread.
 - `tái khám` là một nhãn nghiệp vụ hiển thị trong UI theo ngày; nó độc lập với trục `inbox mới / inbox cũ` vì "mới trên kênh chat" không đồng nghĩa với "mới với phòng khám".
+- Final nhãn `tái khám` trên dashboard phải resolve theo thứ tự ưu tiên:
+  - label/evidence từ Seam 1
+  - `content_customer_type` do AI suy luận từ nội dung thật của `conversation_day`
+  - tag vận hành từ Pancake
+  - `unknown`
+- Tag Pancake kiểu `KH mới`, `KH tái khám` chỉ là operational hint có độ tin cậy thấp; không được override label Seam 1 hoặc nội dung chat thật.
 - Phải có cost monitoring để theo dõi chi phí vận hành AI, tránh chi phí bị đội lên ngoài kiểm soát.
 - AI phải ưu tiên dùng structured evidence có sẵn trước khi suy luận:
   - opening block mapping theo page
   - normalized tag mapping theo page
-  - conversation_state_summary của ngày trước
+  - label/evidence deterministic từ Seam 1
 - Chỉ khi conversation thiếu tag phù hợp, thiếu opening signals, hoặc mapping page chưa đủ bao phủ thì AI mới được suy luận thêm từ context message.
 - Khi provider trả 429 hoặc rate-limit tương đương, AI seam phải hỗ trợ retry có jitter, phân lô lại batch, giảm concurrency động, và tôn trọng `Retry-After` nếu provider cung cấp.
+- Mỗi planned unit phải đi tới một trạng thái terminal:
+  - `succeeded`
+  - hoặc `unknown`
+- Nếu một unit không phân tích được sau retry/split hợp lệ thì unit đó phải được terminalize về `unknown`, lưu `failure_info_json`, và ngày vẫn được phép publish nếu mọi unit khác đã terminal.
+- Scheduled daily chỉ bị chặn publish nếu còn unit chưa terminal hoặc job chết giữa chừng mà không recover được.
 - Khi thay đổi prompt/model/schema, hệ thống phải có policy chống lệch pha báo cáo dài hạn:
-  - Báo cáo chính thức theo tuần/tháng/quý phải pin vào một `published analysis baseline`.
-  - Nếu muốn so sánh trend dài hạn dưới prompt mới, phải backfill lại kỳ cũ rồi publish baseline mới.
-  - Nếu chưa backfill, UI phải hiển thị ranh giới version và cảnh báo không so sánh trực tiếp các đoạn trend khác baseline.
+  - báo cáo chính thức nên pin vào cùng prompt/model snapshot của `analysis_run`
+  - nếu muốn so sánh trend dài hạn dưới prompt mới, phải backfill lại kỳ cũ rồi publish lại
+  - nếu chưa backfill, UI phải hiển thị ranh giới version và cảnh báo không so sánh trực tiếp các đoạn trend khác snapshot
+- Matrix chi tiết của Seam 2 nằm ở [seam2-analysis-schema-matrix.md](D:/Code/chat-analyzer-v2/docs/seam2-analysis-schema-matrix.md).
 
 ## Hợp đồng vận hành của AI seam
 
 - AI seam không chạy ad-hoc trực tiếp trên dữ liệu sống, mà chạy thông qua job definition.
-- `ai_result` dùng để lưu kết quả phân tích trên từng conversation-day hoặc snapshot unit.
-- `conversation_state_summary` dùng để lưu trạng thái tóm tắt tích luỹ của từng conversation theo từng analysis version và `as-of-day`, để làm context cho lần phân tích ngày sau.
-- `ai_usage_log` dùng để lưu chi phí AI theo provider, model, token, cost để phục vụ dashboard và kiểm soát vận hành.
-- Mỗi lần replay/backfill phải sinh ra analysis version mới và phải có khái niệm `published version` để dashboard biết nên đọc kết quả nào làm số chính thức.
-- Không được nối context từ `conversation_state_summary` của baseline/prompt version khác vào một run mới nếu chưa pin hoặc backfill đồng bộ; chain summary phải bám cùng `published analysis baseline`.
+- `backend/` là owner của scheduler, prompt snapshot freeze, gRPC client, persistence, publish/supersede và read API.
+- `service/` là owner của prompt builder và ADK runtime; `service/` không phải owner của business persistence.
+- `analysis_run` giữ owner của run:
+  - `run_mode`
+  - `source_etl_run_id` hoặc `scope_ref_json`
+  - `model_name`
+  - `prompt_snapshot_json`
+  - `output_schema_version`
+  - retry/coverage/log
+  - `publish_outcome`
+- `analysis_result` là output table duy nhất:
+  - mỗi row tương ứng đúng một `conversation_day` hoặc một `custom_window`
+  - chứa `opening_theme`, `customer_mood`, `primary_need`, `primary_topic`, `content_customer_type`, `closing_outcome_as_of_day`, `response_quality_label`
+  - và 2 supporting text: `response_quality_issue_text`, `response_quality_improvement_text`
+- Scheduled daily unique theo `source_etl_run_id`; retry chỉ nằm trong cùng `analysis_run`.
+- Scheduled daily được publish khi mọi unit đã terminal ở `succeeded` hoặc `unknown`.
+- Nếu job chết giữa chừng và còn unit chưa terminal thì không publish ngày đó; chỉ giữ log để recovery hoặc manual rerun.
+- Manual day luôn tạo run mới và row mới; khi IT publish thì row official cũ của cùng `conversation_day_id` bị `superseded`.
+- Manual custom slice mặc định là `diagnostic`, không tự nối vào official summary chain.
+- `manual_slice` và `pilot` là cùng một use case vận hành.
 - Thiết kế này cho phép chạy thử, chạy lại, backfill hoặc replay bằng prompt mới mà không làm thay đổi dữ liệu canonical.
 - Internal data path giữa `backend` và `service` phải tối ưu cho bulk processing:
-  - Public API vẫn là REST.
-  - Bulk daily processing không dùng REST JSON gọi qua lại cho từng thread.
-  - Ưu tiên shared Postgres read model, manifest table hoặc gRPC streaming nội bộ để giảm overhead network và serialize/deserialize.
+  - public API vẫn là REST
+  - bulk daily processing không dùng REST JSON gọi qua lại cho từng thread
+  - `backend` gửi batch/unit payload sang `service` qua gRPC và nhận kết quả per-unit qua gRPC response hoặc stream
 
 ## Trình bày dữ liệu
 
-Có sidebar chia các trang chính cho BoD/Lead sales và IT, mỗi trang có thể có tab nhỏ tuỳ mục đích.
+Frontend standalone chỉ cần một app shell đơn giản và dày thông tin trong một màn hình desktop, không làm theo kiểu sidebar nhiều mục như trước. Thay vào đó:
+
+- phía trên là thanh điều khiển nhanh để nhập backend endpoint và refresh dữ liệu
+- ngay dưới là dải thông số tóm tắt cho các nhóm chức năng cũ như `dashboard`, `page config`, `message view`, `extract jobs`, `AI analysis`, `system`
+- vùng làm việc chính chia thành cụm điều khiển nhỏ ở bên trái và các ô dữ liệu/payload có scroll riêng ở bên phải
+- người vận hành phải nhìn được gần như toàn bộ trạng thái chính trong 1 viewport desktop, không cần chuyển tab
+
+Thiết kế UI ưu tiên:
+
+- 1 viewport desktop rõ ràng, thao tác nhanh cho IT và người vận hành
+- chữ nhỏ, mật độ thông tin cao nhưng vẫn dễ đọc
+- responsive theo chiều rộng cho mobile, nhưng desktop vẫn là target chính
+- form và bảng đơn giản, không phụ thuộc component library
+- mọi hành động chạy job phải có khu vực hiển thị input, output, trạng thái và lỗi để debug nhanh
 
 ## Cho BoD và Lead sales (Business Intelligence)
 
