@@ -2,9 +2,11 @@ package transform
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
+	"chat-analyzer-v2/backend/go-worker/internal/controlplane"
 	"chat-analyzer-v2/backend/go-worker/internal/pancake"
 )
 
@@ -65,7 +67,7 @@ func TestBuildConversationDayRedactsPhonesAndSkipsOpeningSelections(t *testing.T
 		mustMessage(t, "m-7", "2026-03-31T14:03:22", "26456821540601695", "Sdt 0774665884", []pancake.RecentPhoneNumber{{PhoneNumber: "0774665884"}}),
 	}
 
-	day, err := BuildConversationDay(window, conversation, messageContext, messages, len(messages), nil)
+	day, err := BuildConversationDay(window, conversation, messageContext, messages, len(messages), nil, controlplane.RuntimeConfig{})
 	if err != nil {
 		t.Fatalf("BuildConversationDay returned error: %v", err)
 	}
@@ -78,6 +80,102 @@ func TestBuildConversationDayRedactsPhonesAndSkipsOpeningSelections(t *testing.T
 	}
 	if got := string(day.NormalizedPhoneCandidatesJSON); got != `["+84774665884"]` {
 		t.Fatalf("expected normalized phone candidate, got %s", got)
+	}
+}
+
+func TestBuildConversationDayAppliesTagSignalsAndOpeningSignatures(t *testing.T) {
+	location := time.FixedZone("ICT", 7*60*60)
+	window := DayWindow{
+		Start:        time.Date(2026, 4, 1, 0, 0, 0, 0, location),
+		EndExclusive: time.Date(2026, 4, 2, 0, 0, 0, 0, location),
+	}
+
+	conversation := pancake.Conversation{
+		ID:         "conv-2",
+		PageID:     "page-1",
+		From:       pancake.Actor{ID: "customer-1", Name: "An"},
+		InsertedAt: "2026-04-01T09:00:00",
+		UpdatedAt:  "2026-04-01T09:05:00",
+		Tags: []json.RawMessage{
+			json.RawMessage(`{"id":101}`),
+		},
+	}
+
+	tagDictionary := map[int64]pancake.Tag{
+		101: {
+			ID:   101,
+			Text: "KH TÁI KHÁM",
+		},
+	}
+
+	messages := []pancake.Message{
+		mustTemplateMessage(t, "m-open", "2026-04-01T09:00:05", "page-1", "Botcake", []string{"Bắt đầu"}),
+		mustMessage(t, "m-real", "2026-04-01T09:01:00", "customer-1", "em muốn đặt lịch tái khám", nil),
+	}
+
+	day, err := BuildConversationDay(window, conversation, pancake.MessageContext{}, messages, len(messages), tagDictionary, controlplane.RuntimeConfig{
+		TagRules: []controlplane.TagRule{
+			{
+				Name:         "returning",
+				MatchAnyText: []string{"KH TÁI KHÁM"},
+				Signals: map[string]any{
+					"customer_type": "returning",
+					"need":          "booking",
+				},
+			},
+		},
+		OpeningRules: []controlplane.OpeningRule{
+			{
+				Name:         "bot_start",
+				MatchAnyText: []string{"bắt đầu"},
+				Signals: map[string]any{
+					"entry_flow": "welcome_bot",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildConversationDay returned error: %v", err)
+	}
+
+	if got := string(day.NormalizedTagSignalsJSON); !strings.Contains(got, `"customer_type":["returning"]`) {
+		t.Fatalf("expected normalized tag signals to include customer_type, got %s", got)
+	}
+	if got := string(day.OpeningBlocksJSON); !strings.Contains(got, `"entry_flow":"welcome_bot"`) {
+		t.Fatalf("expected opening blocks to include matched signature payload, got %s", got)
+	}
+}
+
+func TestBuildThreadCustomerMappingsUsesSingleDeterministicPhone(t *testing.T) {
+	mappings, err := BuildThreadCustomerMappings("page-1", []ConversationDaySource{
+		{
+			ConversationID:                "thread-1",
+			NormalizedPhoneCandidatesJSON: json.RawMessage(`["+84774665884"]`),
+		},
+		{
+			ConversationID:                "thread-2",
+			NormalizedPhoneCandidatesJSON: json.RawMessage(`["+84770000000","+84881111111"]`),
+		},
+	}, controlplane.RuntimeConfig{
+		CustomerDirectory: []controlplane.CustomerDirectoryEntry{
+			{
+				CustomerID: "customer-1",
+				PhoneE164:  "+84774665884",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildThreadCustomerMappings returned error: %v", err)
+	}
+
+	if len(mappings) != 1 {
+		t.Fatalf("expected one deterministic mapping, got %d", len(mappings))
+	}
+	if mappings[0].ThreadID != "thread-1" || mappings[0].CustomerID != "customer-1" {
+		t.Fatalf("unexpected mapping: %+v", mappings[0])
+	}
+	if mappings[0].MappingMethod != "deterministic_single_phone" {
+		t.Fatalf("expected deterministic_single_phone mapping method, got %s", mappings[0].MappingMethod)
 	}
 }
 

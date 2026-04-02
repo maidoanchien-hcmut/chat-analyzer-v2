@@ -11,6 +11,23 @@ bunx prisma generate
 bun run dev
 ```
 
+Seam 1 local control-plane now lives in [backend/json/seam1](D:/Code/chat-analyzer-v2/backend/json/seam1):
+
+- `pages/*.json`: page connection config and scheduler flags
+- `jobs/manual/*.json`: manual day/range ETL requests
+- `jobs/onboarding/*.json`: onboarding sample extract requests
+- `scheduler/*.json`: scheduled daily sweeps
+- `tag-rules/*.json`, `opening-rules/*.json`, `customer-directory/*.json`: deterministic enrichments compiled into worker jobs
+
+Unauthenticated local endpoints for Seam 1:
+
+- `GET /seam1/control-center/pages`
+- `GET /seam1/control-center/pages/:pageSlug`
+- `GET /seam1/health/summary`
+- `GET /seam1/runs/:id`
+- `GET /seam1/jobs/:kind/:name/preview`
+- `POST /seam1/jobs/:kind/:name/execute`
+
 Prisma local flow:
 
 ```powershell

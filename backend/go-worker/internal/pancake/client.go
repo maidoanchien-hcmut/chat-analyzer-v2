@@ -4,13 +4,16 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -24,6 +27,15 @@ const (
 type Client struct {
 	userAccessToken string
 	httpClient      *http.Client
+	metricsMu       sync.Mutex
+	metrics         ClientMetrics
+}
+
+type ClientMetrics struct {
+	RequestsTotal  int `json:"requests_total"`
+	RequestsFailed int `json:"requests_failed"`
+	RateLimited    int `json:"rate_limited"`
+	Timeouts       int `json:"timeouts"`
 }
 
 func NewClient(userAccessToken string, timeout time.Duration) *Client {
@@ -33,6 +45,12 @@ func NewClient(userAccessToken string, timeout time.Duration) *Client {
 			Timeout: timeout,
 		},
 	}
+}
+
+func (c *Client) Metrics() ClientMetrics {
+	c.metricsMu.Lock()
+	defer c.metricsMu.Unlock()
+	return c.metrics
 }
 
 func (c *Client) ListPages(ctx context.Context) ([]Page, error) {
@@ -161,8 +179,10 @@ func (c *Client) do(ctx context.Context, method, baseURL, rawPath string, query 
 	req.Header.Set("Accept", "application/json")
 	req.Header.Set("User-Agent", defaultUA)
 
+	c.recordRequestAttempt()
 	res, err := c.httpClient.Do(req)
 	if err != nil {
+		c.recordRequestFailure(err, 0)
 		return nil, fmt.Errorf("request %s %s: %w", method, endpoint.String(), err)
 	}
 	defer res.Body.Close()
@@ -172,10 +192,40 @@ func (c *Client) do(ctx context.Context, method, baseURL, rawPath string, query 
 		return nil, fmt.Errorf("read response body %s %s: %w", method, endpoint.String(), err)
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		c.recordRequestFailure(nil, res.StatusCode)
 		return nil, fmt.Errorf("request %s %s failed with %d: %s", method, endpoint.String(), res.StatusCode, string(body))
 	}
 
 	return body, nil
+}
+
+func (c *Client) recordRequestAttempt() {
+	c.metricsMu.Lock()
+	defer c.metricsMu.Unlock()
+	c.metrics.RequestsTotal++
+}
+
+func (c *Client) recordRequestFailure(err error, statusCode int) {
+	c.metricsMu.Lock()
+	defer c.metricsMu.Unlock()
+	c.metrics.RequestsFailed++
+	if statusCode == http.StatusTooManyRequests {
+		c.metrics.RateLimited++
+	}
+	if isTimeoutError(err) {
+		c.metrics.Timeouts++
+	}
+}
+
+func isTimeoutError(err error) bool {
+	if err == nil {
+		return false
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return errors.Is(err, context.DeadlineExceeded)
 }
 
 func extractToken(raw []byte) (string, error) {

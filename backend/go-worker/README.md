@@ -13,7 +13,13 @@ Current worker path follows the production extract shape from [pancake-seam1-ext
 - pages conversation messages and keeps only the `message-day` slice for that business day
 - stops paging a conversation as soon as a message page contains records older than the day window
 - transforms the filtered slice into canonical `conversation_day` and `message` rows
+- applies optional deterministic control-plane rules from the job JSON:
+  - `tag_rules`
+  - `opening_rules`
+  - `customer_directory`
+  - `bot_signatures`
 - loads Seam 1 directly into Postgres via `etl_run`, `conversation_day`, `message`, and `thread_customer_mapping`
+- persists `etl_run` lifecycle as `running -> loaded/published` or `running -> failed`
 
 ## Run
 
@@ -50,7 +56,11 @@ Job payload sample:
   "window_start_at": null,
   "window_end_exclusive_at": null,
   "max_conversations": 0,
-  "max_message_pages_per_conversation": 0
+  "max_message_pages_per_conversation": 0,
+  "tag_rules": [],
+  "opening_rules": [],
+  "customer_directory": [],
+  "bot_signatures": []
 }
 ```
 
@@ -63,5 +73,6 @@ File mẫu nằm ở [local-run.example.json](D:/Code/chat-analyzer-v2/backend/g
 - `PANCAKE_PAGE_ACCESS_TOKEN` is intentionally not part of any config surface. The worker obtains it from Pancake.
 - `window_*` allow a partial-day operational run inside the selected `target_date`.
 - `is_published = true` is only valid for a full-day bucket.
+- `metrics_json` on `etl_run` now includes compact Pancake API health counters such as failed requests, rate limits, and timeouts.
 - `target_date` is the design-aligned term. `-business-day` remains only as a CLI compatibility alias.
 - `docs/pancake-api-samples/` stays as a static audit artifact only. The worker no longer writes sample payloads there.

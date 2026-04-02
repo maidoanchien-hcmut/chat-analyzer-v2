@@ -223,7 +223,7 @@ func resolvePageID(pageID string, pages []pancake.Page) (string, error) {
 		return "", errors.New("no Pancake pages were returned for this access token")
 	}
 
-	return "", fmt.Errorf("PANCAKE_PAGE_ID is required because access token can see %d pages", len(pages))
+	return "", fmt.Errorf("page_id is required because access token can see %d pages", len(pages))
 }
 
 func limitReached(limit, current int) bool {

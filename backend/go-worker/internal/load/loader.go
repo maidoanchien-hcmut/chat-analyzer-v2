@@ -4,14 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"chat-analyzer-v2/backend/go-worker/internal/config"
-	"chat-analyzer-v2/backend/go-worker/internal/extract"
 	"chat-analyzer-v2/backend/go-worker/internal/pancake"
 	"chat-analyzer-v2/backend/go-worker/internal/transform"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
@@ -19,85 +20,133 @@ type Result struct {
 	ETLRunID string
 }
 
-func Save(
-	ctx context.Context,
-	cfg config.Config,
-	summary extract.Summary,
-	tags []pancake.Tag,
-	conversationDays []transform.ConversationDaySource,
-	threadMappings []transform.ThreadCustomerMapping,
-) (Result, error) {
+type execer interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+func StartRun(ctx context.Context, cfg config.Config) (Result, error) {
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
 		return Result{}, fmt.Errorf("connect postgres: %w", err)
 	}
 	defer pool.Close()
 
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return Result{}, fmt.Errorf("begin transaction: %w", err)
-	}
-	defer rollbackOnError(ctx, tx)
-
 	startedAt := time.Now().UTC()
-	etlRunID, err := insertETLRun(ctx, tx, cfg, summary, tags, startedAt)
+	etlRunID, err := insertETLRunStart(ctx, pool, cfg, startedAt)
 	if err != nil {
 		return Result{}, err
 	}
+	return Result{ETLRunID: etlRunID}, nil
+}
+
+func SaveSuccess(
+	ctx context.Context,
+	cfg config.Config,
+	etlRunID string,
+	metrics map[string]any,
+	tags []pancake.Tag,
+	conversationDays []transform.ConversationDaySource,
+	threadMappings []transform.ThreadCustomerMapping,
+) error {
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("connect postgres: %w", err)
+	}
+	defer pool.Close()
+
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer rollbackOnError(ctx, tx)
+
+	finishedAt := time.Now().UTC()
+	if err := updateETLRunSuccess(ctx, tx, cfg, etlRunID, metrics, tags, finishedAt); err != nil {
+		return err
+	}
 
 	for _, conversationDay := range conversationDays {
-		conversationDayID, err := insertConversationDay(ctx, tx, etlRunID, conversationDay, startedAt)
+		conversationDayID, err := insertConversationDay(ctx, tx, etlRunID, conversationDay, finishedAt)
 		if err != nil {
-			return Result{}, err
+			return err
 		}
-		if err := insertMessages(ctx, tx, etlRunID, conversationDayID, conversationDay.Messages, startedAt); err != nil {
-			return Result{}, err
+		if err := insertMessages(ctx, tx, etlRunID, conversationDayID, conversationDay.Messages, finishedAt); err != nil {
+			return err
 		}
 	}
 
 	for _, mapping := range threadMappings {
-		if err := insertThreadCustomerMapping(ctx, tx, mapping, startedAt); err != nil {
-			return Result{}, err
+		if err := insertThreadCustomerMapping(ctx, tx, mapping, finishedAt); err != nil {
+			return err
 		}
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return Result{}, fmt.Errorf("commit transaction: %w", err)
+		return fmt.Errorf("commit transaction: %w", err)
 	}
+	return nil
+}
 
-	return Result{ETLRunID: etlRunID}, nil
+func SaveFailure(
+	ctx context.Context,
+	cfg config.Config,
+	etlRunID string,
+	metrics map[string]any,
+	runErr error,
+) error {
+	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
+	if err != nil {
+		return fmt.Errorf("connect postgres: %w", err)
+	}
+	defer pool.Close()
+
+	metricsJSON, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("marshal failed run metrics: %w", err)
+	}
+	_, err = pool.Exec(ctx, `
+		UPDATE etl_run
+		SET status = 'failed',
+		    is_published = false,
+		    metrics_json = $2::jsonb,
+		    error_text = NULLIF($3, ''),
+		    finished_at = $4
+		WHERE id = $1
+	`,
+		etlRunID,
+		metricsJSON,
+		compactErrorText(runErr),
+		time.Now().UTC(),
+	)
+	if err != nil {
+		return fmt.Errorf("update etl_run failure %s: %w", etlRunID, err)
+	}
+	return nil
 }
 
 func rollbackOnError(ctx context.Context, tx pgx.Tx) {
 	_ = tx.Rollback(ctx)
 }
 
-func insertETLRun(
+func insertETLRunStart(
 	ctx context.Context,
-	tx pgx.Tx,
+	db execer,
 	cfg config.Config,
-	summary extract.Summary,
-	tags []pancake.Tag,
 	startedAt time.Time,
 ) (string, error) {
 	targetDate, _ := cfg.BusinessWindow()
 	windowStartAt, windowEndAt := cfg.EffectiveWindow()
-	metricsJSON, err := json.Marshal(summary)
+	metricsJSON, err := json.Marshal(map[string]any{})
 	if err != nil {
 		return "", fmt.Errorf("marshal run metrics: %w", err)
 	}
-	tagDictionaryJSON, err := json.Marshal(tags)
+	tagDictionaryJSON, err := json.Marshal([]any{})
 	if err != nil {
 		return "", fmt.Errorf("marshal tag dictionary: %w", err)
 	}
 
-	status := "loaded"
-	if cfg.IsPublished {
-		status = "published"
-	}
-
 	etlRunID := uuid.NewString()
-	_, err = tx.Exec(ctx, `
+	_, err = db.Exec(ctx, `
 		INSERT INTO etl_run (
 			id,
 			run_group_id,
@@ -117,32 +166,75 @@ func insertETLRun(
 			started_at,
 			finished_at
 		) VALUES (
-			$1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14::jsonb, $15::jsonb, $16, $17
+			$1, NULLIF($2, ''), $3, $4, $5, $6, $7, $8, $9, $10, 'running', $11, false, $12::jsonb, $13::jsonb, $14, NULL
 		)
 	`,
 		etlRunID,
 		cfg.RunGroupID,
 		cfg.RunMode,
-		summary.PageID,
+		cfg.PageID,
 		targetDate.Format(time.DateOnly),
 		cfg.BusinessTimezone,
 		cfg.RequestedWindowStartAt,
 		cfg.RequestedWindowEndExclusiveAt,
 		windowStartAt,
 		windowEndAt,
-		status,
 		cfg.SnapshotVersion,
-		cfg.IsPublished,
 		tagDictionaryJSON,
 		metricsJSON,
 		startedAt,
-		time.Now().UTC(),
 	)
 	if err != nil {
 		return "", fmt.Errorf("insert etl_run: %w", err)
 	}
 
 	return etlRunID, nil
+}
+
+func updateETLRunSuccess(
+	ctx context.Context,
+	tx pgx.Tx,
+	cfg config.Config,
+	etlRunID string,
+	metrics map[string]any,
+	tags []pancake.Tag,
+	finishedAt time.Time,
+) error {
+	metricsJSON, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("marshal run metrics: %w", err)
+	}
+	tagDictionaryJSON, err := json.Marshal(tags)
+	if err != nil {
+		return fmt.Errorf("marshal tag dictionary: %w", err)
+	}
+
+	status := "loaded"
+	if cfg.IsPublished {
+		status = "published"
+	}
+
+	_, err = tx.Exec(ctx, `
+		UPDATE etl_run
+		SET status = $2,
+		    is_published = $3,
+		    tag_dictionary_json = $4::jsonb,
+		    metrics_json = $5::jsonb,
+		    error_text = NULL,
+		    finished_at = $6
+		WHERE id = $1
+	`,
+		etlRunID,
+		status,
+		cfg.IsPublished,
+		tagDictionaryJSON,
+		metricsJSON,
+		finishedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("update etl_run success %s: %w", etlRunID, err)
+	}
+	return nil
 }
 
 func insertConversationDay(
@@ -277,11 +369,7 @@ func insertThreadCustomerMapping(
 		) VALUES (
 			$1, $2, $3, NULLIF($4, ''), $5, $6, $6
 		)
-		ON CONFLICT (page_id, thread_id) DO UPDATE
-		SET customer_id = EXCLUDED.customer_id,
-		    mapped_phone_e164 = EXCLUDED.mapped_phone_e164,
-		    mapping_method = EXCLUDED.mapping_method,
-		    updated_at = EXCLUDED.updated_at
+		ON CONFLICT (page_id, thread_id) DO NOTHING
 	`,
 		mapping.PageID,
 		mapping.ThreadID,
@@ -294,4 +382,15 @@ func insertThreadCustomerMapping(
 		return fmt.Errorf("upsert thread_customer_mapping %s/%s: %w", mapping.PageID, mapping.ThreadID, err)
 	}
 	return nil
+}
+
+func compactErrorText(runErr error) string {
+	if runErr == nil {
+		return ""
+	}
+	text := strings.TrimSpace(runErr.Error())
+	if len(text) <= 4000 {
+		return text
+	}
+	return text[:4000]
 }

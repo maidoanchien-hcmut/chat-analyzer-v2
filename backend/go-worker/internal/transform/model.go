@@ -69,6 +69,8 @@ type ThreadCustomerMapping struct {
 
 type openingBlocks struct {
 	OpeningCandidateWindow []openingBlockMessage `json:"opening_candidate_window"`
+	MatchedRules           []openingRuleMatch    `json:"matched_rules"`
+	UnmatchedCandidateText []string              `json:"unmatched_candidate_texts"`
 }
 
 type openingBlockMessage struct {
@@ -77,4 +79,9 @@ type openingBlockMessage struct {
 	SenderRole   string `json:"sender_role"`
 	MessageType  string `json:"message_type"`
 	RedactedText string `json:"redacted_text"`
+}
+
+type openingRuleMatch struct {
+	Name    string         `json:"name"`
+	Signals map[string]any `json:"signals"`
 }

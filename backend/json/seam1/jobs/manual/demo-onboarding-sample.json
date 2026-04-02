@@ -1,0 +1,14 @@
+{
+  "job_name": "demo-onboarding-sample",
+  "page_key": "demo-clinic",
+  "target_date": "2026-04-01",
+  "run_mode": "onboarding_sample",
+  "snapshot_version": 1,
+  "is_published": false,
+  "requested_window_start_at": "2026-04-01T00:00:00+07:00",
+  "requested_window_end_exclusive_at": "2026-04-02T00:00:00+07:00",
+  "window_start_at": null,
+  "window_end_exclusive_at": null,
+  "max_conversations": 25,
+  "max_message_pages_per_conversation": 0
+}

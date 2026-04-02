@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"chat-analyzer-v2/backend/go-worker/internal/config"
+	"chat-analyzer-v2/backend/go-worker/internal/controlplane"
 	"chat-analyzer-v2/backend/go-worker/internal/extract"
 	"chat-analyzer-v2/backend/go-worker/internal/job"
 	"chat-analyzer-v2/backend/go-worker/internal/load"
@@ -36,9 +37,14 @@ func main() {
 	ctx := context.Background()
 	client := pancake.NewClient(cfg.UserAccessToken, cfg.RequestTimeout)
 	startedAt := time.Now().UTC()
+	runState, err := load.StartRun(ctx, cfg)
+	if err != nil {
+		logger.Fatal(err)
+	}
 
 	extracted, err := extract.Run(ctx, cfg, client)
 	if err != nil {
+		failRun(logger, ctx, cfg, runState.ETLRunID, baseMetrics(cfg, client, nil, nil, startedAt), err)
 		logger.Fatal(err)
 	}
 
@@ -52,6 +58,12 @@ func main() {
 	}
 
 	conversationDays := make([]transform.ConversationDaySource, 0, len(extracted.ConversationDays))
+	policies := controlplane.RuntimeConfig{
+		TagRules:          cfg.TagRules,
+		OpeningRules:      cfg.OpeningRules,
+		CustomerDirectory: cfg.CustomerDirectory,
+		BotSignatures:     cfg.BotSignatures,
+	}
 	for _, candidate := range extracted.ConversationDays {
 		conversationDay, err := transform.BuildConversationDay(
 			window,
@@ -60,49 +72,30 @@ func main() {
 			candidate.Messages,
 			candidate.MessagesSeenFromSource,
 			tagDictionary,
+			policies,
 		)
 		if err != nil {
+			failRun(logger, ctx, cfg, runState.ETLRunID, baseMetrics(cfg, client, &extracted.Summary, nil, startedAt), err)
 			logger.Fatal(err)
 		}
 		conversationDays = append(conversationDays, conversationDay)
 	}
-
-	run := transform.Run{
-		PageID:                        extracted.PageID,
-		TargetDate:                    cfg.BusinessDay.Format(time.DateOnly),
-		BusinessTimezone:              cfg.BusinessTimezone,
-		RunMode:                       cfg.RunMode,
-		RunGroupID:                    cfg.RunGroupID,
-		SnapshotVersion:               cfg.SnapshotVersion,
-		IsPublished:                   cfg.IsPublished,
-		Window:                        window,
-		RequestedWindowStartAt:        cfg.RequestedWindowStartAt,
-		RequestedWindowEndExclusiveAt: cfg.RequestedWindowEndExclusiveAt,
-		StartedAt:                     startedAt,
-		FinishedAt:                    time.Now().UTC(),
-		Tags:                          extracted.Tags,
-		Summary: map[string]any{
-			"page_id":                 extracted.Summary.PageID,
-			"target_date":             cfg.BusinessDay.Format(time.DateOnly),
-			"tags_loaded":             extracted.Summary.TagsLoaded,
-			"conversations_scanned":   extracted.Summary.ConversationsScanned,
-			"conversation_days_built": extracted.Summary.ConversationDaysBuilt,
-			"message_pages_fetched":   extracted.Summary.MessagePagesFetched,
-			"messages_seen":           extracted.Summary.MessagesSeen,
-			"messages_selected":       extracted.Summary.MessagesSelected,
-		},
-		ConversationDays:       conversationDays,
-		ThreadCustomerMappings: nil,
-	}
-
-	loadResult, err := load.Save(ctx, cfg, extracted.Summary, run.Tags, run.ConversationDays, run.ThreadCustomerMappings)
+	threadMappings, err := transform.BuildThreadCustomerMappings(extracted.PageID, conversationDays, policies)
 	if err != nil {
+		failRun(logger, ctx, cfg, runState.ETLRunID, baseMetrics(cfg, client, &extracted.Summary, nil, startedAt), err)
+		logger.Fatal(err)
+	}
+	metrics := baseMetrics(cfg, client, &extracted.Summary, map[string]any{
+		"thread_customer_mappings_created": len(threadMappings),
+	}, startedAt)
+	if err := load.SaveSuccess(ctx, cfg, runState.ETLRunID, metrics, extracted.Tags, conversationDays, threadMappings); err != nil {
+		failRun(logger, ctx, cfg, runState.ETLRunID, metrics, err)
 		logger.Fatal(err)
 	}
 
 	logger.Printf(
 		"etl complete: etl_run_id=%s page_id=%s target_date=%s tags=%d conversations_scanned=%d conversation_days=%d message_pages=%d messages_seen=%d messages_selected=%d",
-		loadResult.ETLRunID,
+		runState.ETLRunID,
 		extracted.Summary.PageID,
 		cfg.BusinessDay.Format(time.DateOnly),
 		extracted.Summary.TagsLoaded,
@@ -112,6 +105,54 @@ func main() {
 		extracted.Summary.MessagesSeen,
 		extracted.Summary.MessagesSelected,
 	)
+}
+
+func baseMetrics(
+	cfg config.Config,
+	client *pancake.Client,
+	summary *extract.Summary,
+	extra map[string]any,
+	startedAt time.Time,
+) map[string]any {
+	windowStart, windowEnd := cfg.EffectiveWindow()
+	metrics := map[string]any{
+		"page_id":                 cfg.PageID,
+		"target_date":             cfg.BusinessDay.Format(time.DateOnly),
+		"run_mode":                cfg.RunMode,
+		"snapshot_version":        cfg.SnapshotVersion,
+		"is_published":            cfg.IsPublished,
+		"started_at":              startedAt.Format(time.RFC3339Nano),
+		"pancake_api":             client.Metrics(),
+		"business_timezone":       cfg.BusinessTimezone,
+		"window_start_at":         windowStart.Format(time.RFC3339Nano),
+		"window_end_exclusive_at": windowEnd.Format(time.RFC3339Nano),
+	}
+	if summary != nil {
+		metrics["tags_loaded"] = summary.TagsLoaded
+		metrics["conversations_scanned"] = summary.ConversationsScanned
+		metrics["conversation_days_built"] = summary.ConversationDaysBuilt
+		metrics["message_pages_fetched"] = summary.MessagePagesFetched
+		metrics["messages_seen"] = summary.MessagesSeen
+		metrics["messages_selected"] = summary.MessagesSelected
+		metrics["page_id"] = summary.PageID
+	}
+	for key, value := range extra {
+		metrics[key] = value
+	}
+	return metrics
+}
+
+func failRun(
+	logger *log.Logger,
+	ctx context.Context,
+	cfg config.Config,
+	etlRunID string,
+	metrics map[string]any,
+	runErr error,
+) {
+	if err := load.SaveFailure(ctx, cfg, etlRunID, metrics, runErr); err != nil {
+		logger.Printf("failed to persist etl_run failure state for %s: %v", etlRunID, err)
+	}
 }
 
 func applyFlags(cfg *config.Config) error {

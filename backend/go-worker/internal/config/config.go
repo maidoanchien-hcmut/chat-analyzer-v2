@@ -8,6 +8,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"chat-analyzer-v2/backend/go-worker/internal/controlplane"
 )
 
 const defaultBusinessTimezone = "Asia/Ho_Chi_Minh"
@@ -33,6 +35,10 @@ type Config struct {
 	MaxConversations               int
 	MaxMessagePagesPerConversation int
 	RequestTimeout                 time.Duration
+	TagRules                       []controlplane.TagRule
+	OpeningRules                   []controlplane.OpeningRule
+	CustomerDirectory              []controlplane.CustomerDirectoryEntry
+	BotSignatures                  []controlplane.BotSignature
 }
 
 func Load() (Config, error) {
@@ -56,25 +62,25 @@ func Load() (Config, error) {
 
 func (c Config) Validate() error {
 	if c.UserAccessToken == "" {
-		return errors.New("PANCAKE_USER_ACCESS_TOKEN is required")
+		return errors.New("user_access_token is required")
 	}
 	if c.DatabaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
 	if c.BusinessDay.IsZero() {
-		return errors.New("PANCAKE_BUSINESS_DAY is required")
+		return errors.New("target_date is required")
 	}
 	if c.RunMode == "" {
-		return errors.New("PANCAKE_RUN_MODE is required")
+		return errors.New("run_mode is required")
 	}
 	if c.SnapshotVersion <= 0 {
-		return errors.New("PANCAKE_SNAPSHOT_VERSION must be >= 1")
+		return errors.New("snapshot_version must be >= 1")
 	}
 	if c.MaxConversations < 0 {
-		return errors.New("PANCAKE_MAX_CONVERSATIONS must be >= 0")
+		return errors.New("max_conversations must be >= 0")
 	}
 	if c.MaxMessagePagesPerConversation < 0 {
-		return errors.New("PANCAKE_MAX_MESSAGE_PAGES_PER_CONVERSATION must be >= 0")
+		return errors.New("max_message_pages_per_conversation must be >= 0")
 	}
 	windowStart, windowEnd := c.EffectiveWindow()
 	if !windowStart.Before(windowEnd) {
@@ -116,17 +122,17 @@ func ParseBusinessDay(value, timezone string) (time.Time, error) {
 
 	location, err := time.LoadLocation(timezone)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("PANCAKE_BUSINESS_TIMEZONE: %w", err)
+		return time.Time{}, fmt.Errorf("business_timezone: %w", err)
 	}
 
 	value = strings.TrimSpace(value)
 	if value == "" {
-		return time.Time{}, errors.New("PANCAKE_BUSINESS_DAY is required")
+		return time.Time{}, errors.New("target_date is required")
 	}
 
 	businessDay, err := time.ParseInLocation(time.DateOnly, value, location)
 	if err != nil {
-		return time.Time{}, fmt.Errorf("PANCAKE_BUSINESS_DAY must use YYYY-MM-DD: %w", err)
+		return time.Time{}, fmt.Errorf("target_date must use YYYY-MM-DD: %w", err)
 	}
 	return businessDay, nil
 }

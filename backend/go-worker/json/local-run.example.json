@@ -12,5 +12,9 @@
   "window_start_at": null,
   "window_end_exclusive_at": null,
   "max_conversations": 0,
-  "max_message_pages_per_conversation": 0
+  "max_message_pages_per_conversation": 0,
+  "tag_rules": [],
+  "opening_rules": [],
+  "customer_directory": [],
+  "bot_signatures": []
 }

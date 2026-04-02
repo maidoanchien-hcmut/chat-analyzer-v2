@@ -8,25 +8,35 @@ import (
 	"time"
 
 	"chat-analyzer-v2/backend/go-worker/internal/config"
+	"chat-analyzer-v2/backend/go-worker/internal/controlplane"
 )
 
 const defaultRunMode = "scheduled_daily"
 
+type TagRule = controlplane.TagRule
+type OpeningRule = controlplane.OpeningRule
+type CustomerDirectoryEntry = controlplane.CustomerDirectoryEntry
+type BotSignature = controlplane.BotSignature
+
 type Request struct {
-	UserAccessToken                string  `json:"user_access_token"`
-	PageID                         string  `json:"page_id"`
-	TargetDate                     string  `json:"target_date"`
-	BusinessTimezone               string  `json:"business_timezone"`
-	RunMode                        string  `json:"run_mode"`
-	RunGroupID                     string  `json:"run_group_id"`
-	SnapshotVersion                int     `json:"snapshot_version"`
-	IsPublished                    bool    `json:"is_published"`
-	RequestedWindowStartAt         *string `json:"requested_window_start_at"`
-	RequestedWindowEndExclusiveAt  *string `json:"requested_window_end_exclusive_at"`
-	WindowStartAt                  *string `json:"window_start_at"`
-	WindowEndExclusiveAt           *string `json:"window_end_exclusive_at"`
-	MaxConversations               int     `json:"max_conversations"`
-	MaxMessagePagesPerConversation int     `json:"max_message_pages_per_conversation"`
+	UserAccessToken                string                   `json:"user_access_token"`
+	PageID                         string                   `json:"page_id"`
+	TargetDate                     string                   `json:"target_date"`
+	BusinessTimezone               string                   `json:"business_timezone"`
+	RunMode                        string                   `json:"run_mode"`
+	RunGroupID                     string                   `json:"run_group_id"`
+	SnapshotVersion                int                      `json:"snapshot_version"`
+	IsPublished                    bool                     `json:"is_published"`
+	RequestedWindowStartAt         *string                  `json:"requested_window_start_at"`
+	RequestedWindowEndExclusiveAt  *string                  `json:"requested_window_end_exclusive_at"`
+	WindowStartAt                  *string                  `json:"window_start_at"`
+	WindowEndExclusiveAt           *string                  `json:"window_end_exclusive_at"`
+	MaxConversations               int                      `json:"max_conversations"`
+	MaxMessagePagesPerConversation int                      `json:"max_message_pages_per_conversation"`
+	TagRules                       []TagRule                `json:"tag_rules"`
+	OpeningRules                   []OpeningRule            `json:"opening_rules"`
+	CustomerDirectory              []CustomerDirectoryEntry `json:"customer_directory"`
+	BotSignatures                  []BotSignature           `json:"bot_signatures"`
 }
 
 func LoadFile(path string) (Request, error) {
@@ -98,6 +108,10 @@ func (r Request) Apply(cfg *config.Config) error {
 	cfg.WindowEndExclusiveAt = windowEndExclusiveAt
 	cfg.MaxConversations = r.MaxConversations
 	cfg.MaxMessagePagesPerConversation = r.MaxMessagePagesPerConversation
+	cfg.TagRules = append([]controlplane.TagRule(nil), r.TagRules...)
+	cfg.OpeningRules = append([]controlplane.OpeningRule(nil), r.OpeningRules...)
+	cfg.CustomerDirectory = append([]controlplane.CustomerDirectoryEntry(nil), r.CustomerDirectory...)
+	cfg.BotSignatures = append([]controlplane.BotSignature(nil), r.BotSignatures...)
 	return nil
 }
 

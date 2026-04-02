@@ -1,0 +1,14 @@
+{
+  "job_name": "demo-daily-2026-04-01",
+  "page_key": "demo-clinic",
+  "target_date": "2026-04-01",
+  "run_mode": "scheduled_daily",
+  "snapshot_version": 3,
+  "is_published": true,
+  "requested_window_start_at": null,
+  "requested_window_end_exclusive_at": null,
+  "window_start_at": null,
+  "window_end_exclusive_at": null,
+  "max_conversations": 0,
+  "max_message_pages_per_conversation": 0
+}

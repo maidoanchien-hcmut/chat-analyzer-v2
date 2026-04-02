@@ -8,6 +8,7 @@ import (
 	"time"
 	"unicode"
 
+	"chat-analyzer-v2/backend/go-worker/internal/controlplane"
 	"chat-analyzer-v2/backend/go-worker/internal/pancake"
 )
 
@@ -18,6 +19,7 @@ func BuildConversationDay(
 	messages []pancake.Message,
 	messagesSeen int,
 	tagDictionary map[int64]pancake.Tag,
+	policies controlplane.RuntimeConfig,
 ) (ConversationDaySource, error) {
 	loc := window.Start.Location()
 	dedupedMessages, insertedByID, err := sortMessages(messages, loc)
@@ -46,7 +48,7 @@ func BuildConversationDay(
 			InsertedAt:                insertedAt,
 			SenderSourceID:            message.From.ID,
 			SenderName:                selectSenderName(message.From),
-			SenderRole:                classifySenderRole(message),
+			SenderRole:                classifySenderRole(message, policies.BotSignatures),
 			SourceMessageTypeRaw:      message.Type,
 			MessageType:               normalizeMessageType(message),
 			RedactedText:              renderMessageText(message),
@@ -84,11 +86,12 @@ func BuildConversationDay(
 	}
 
 	phones := collectNormalizedPhones(conversation, messageContext, dedupedMessages)
-	currentTagsJSON := marshalJSON(resolveCurrentTags(conversation.Tags, tagDictionary), "[]")
-	tagEventsJSON := marshalJSON(resolveObservedTagEvents(conversation.TagHistories, tagDictionary, window), "[]")
-	openingBlocksJSON := marshalJSON(openingBlocks{
-		OpeningCandidateWindow: openingMessages,
-	}, `{"opening_candidate_window":[]}`)
+	currentTags := resolveCurrentTags(conversation.Tags, tagDictionary)
+	tagEvents := resolveObservedTagEvents(conversation.TagHistories, tagDictionary, window)
+	currentTagsJSON := marshalJSON(currentTags, "[]")
+	tagEventsJSON := marshalJSON(tagEvents, "[]")
+	normalizedTagSignals := buildNormalizedTagSignals(currentTags, tagEvents, policies.TagRules)
+	openingBlocksJSON := marshalJSON(buildOpeningBlocks(openingMessages, dedupedMessages[:openingCandidateEnd], policies.OpeningRules), `{"opening_candidate_window":[],"matched_rules":[],"unmatched_candidate_texts":[]}`)
 
 	conversationDay := ConversationDaySource{
 		ConversationID:                conversation.ID,
@@ -99,7 +102,7 @@ func BuildConversationDay(
 		NormalizedPhoneCandidatesJSON: marshalJSON(phones, "[]"),
 		CurrentTagsJSON:               currentTagsJSON,
 		ObservedTagEventsJSON:         tagEventsJSON,
-		NormalizedTagSignalsJSON:      json.RawMessage("{}"),
+		NormalizedTagSignalsJSON:      normalizedTagSignals,
 		OpeningBlocksJSON:             openingBlocksJSON,
 		SourceConversationJSON:        redactJSON(conversation.Raw),
 		Messages:                      transformed,
@@ -195,7 +198,7 @@ func selectSenderName(actor pancake.Actor) string {
 	return strings.TrimSpace(actor.Name)
 }
 
-func classifySenderRole(message pancake.Message) string {
+func classifySenderRole(message pancake.Message, botSignatures []controlplane.BotSignature) string {
 	if message.From.ID == "" || message.PageID == "" {
 		return "unclassified_page_actor"
 	}
@@ -204,7 +207,7 @@ func classifySenderRole(message pancake.Message) string {
 	}
 
 	adminName := strings.ToLower(strings.TrimSpace(message.From.AdminName))
-	if looksLikeBotActor(adminName, message.From.AppID, message.From.FlowID, message.From.AIGenerated) {
+	if matchesBotSignature(message, botSignatures) || looksLikeBotActor(adminName, message.From.AppID, message.From.FlowID, message.From.AIGenerated) {
 		return "third_party_bot"
 	}
 	if strings.TrimSpace(message.From.AdminName) != "" {
@@ -214,6 +217,30 @@ func classifySenderRole(message pancake.Message) string {
 		return "page_system_auto_message"
 	}
 	return "unclassified_page_actor"
+}
+
+func matchesBotSignature(message pancake.Message, botSignatures []controlplane.BotSignature) bool {
+	if len(botSignatures) == 0 {
+		return false
+	}
+	adminName := strings.ToLower(strings.TrimSpace(message.From.AdminName))
+	for _, signature := range botSignatures {
+		if contains := strings.ToLower(strings.TrimSpace(signature.AdminNameContains)); contains != "" && !strings.Contains(adminName, contains) {
+			continue
+		}
+		if signature.AppID != nil {
+			if message.From.AppID == nil || *message.From.AppID != *signature.AppID {
+				continue
+			}
+		}
+		if signature.FlowID != nil {
+			if message.From.FlowID == nil || *message.From.FlowID != *signature.FlowID {
+				continue
+			}
+		}
+		return true
+	}
+	return false
 }
 
 func looksLikeBotActor(adminName string, appID, flowID *int64, aiGenerated bool) bool {

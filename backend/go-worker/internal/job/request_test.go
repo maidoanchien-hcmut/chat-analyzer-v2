@@ -19,6 +19,21 @@ func TestRequestApplyPopulatesConfig(t *testing.T) {
 		IsPublished:                    false,
 		MaxConversations:               10,
 		MaxMessagePagesPerConversation: 3,
+		TagRules: []TagRule{
+			{
+				Name:         "kh-moi",
+				MatchAnyText: []string{"KH MỚI"},
+				Signals: map[string]any{
+					"customer_type": "new",
+				},
+			},
+		},
+		CustomerDirectory: []CustomerDirectoryEntry{
+			{
+				CustomerID: "customer-1",
+				PhoneE164:  "+84774665884",
+			},
+		},
 	}
 	windowStart := "2026-03-31T02:00:00Z"
 	windowEnd := "2026-03-31T10:00:00Z"
@@ -51,6 +66,12 @@ func TestRequestApplyPopulatesConfig(t *testing.T) {
 	if got := cfg.BusinessDay.Format(time.DateOnly); got != "2026-03-31" {
 		t.Fatalf("expected business day 2026-03-31, got %s", got)
 	}
+	if len(cfg.TagRules) != 1 {
+		t.Fatalf("expected tag mappings to be copied")
+	}
+	if len(cfg.CustomerDirectory) != 1 {
+		t.Fatalf("expected customer directory to be copied")
+	}
 }
 
 func TestRequestApplyDefaultsRunModeAndSnapshotVersion(t *testing.T) {
@@ -74,5 +95,56 @@ func TestRequestApplyDefaultsRunModeAndSnapshotVersion(t *testing.T) {
 	}
 	if cfg.BusinessTimezone != config.DefaultBusinessTimezone() {
 		t.Fatalf("expected default timezone %s, got %s", config.DefaultBusinessTimezone(), cfg.BusinessTimezone)
+	}
+}
+
+func TestRequestApplyPopulatesControlPlaneRules(t *testing.T) {
+	req := Request{
+		UserAccessToken:  "user-token",
+		PageID:           "page-1",
+		TargetDate:       "2026-03-31",
+		BusinessTimezone: "Asia/Ho_Chi_Minh",
+		TagRules: []TagRule{
+			{
+				Name:         "kh-moi",
+				MatchAnyText: []string{"KH mới"},
+				Signals: map[string]any{
+					"customer_type": "new",
+				},
+			},
+		},
+		OpeningRules: []OpeningRule{
+			{
+				Name:         "dat-lich",
+				MatchAnyText: []string{"Đặt lịch hẹn"},
+				Signals: map[string]any{
+					"need": "booking",
+				},
+			},
+		},
+		CustomerDirectory: []CustomerDirectoryEntry{
+			{
+				CustomerID: "crm-001",
+				PhoneE164:  "+84774665884",
+			},
+		},
+	}
+
+	var cfg config.Config
+	if err := req.Apply(&cfg); err != nil {
+		t.Fatalf("Apply returned error: %v", err)
+	}
+
+	if got := len(cfg.TagRules); got != 1 {
+		t.Fatalf("expected 1 tag rule, got %d", got)
+	}
+	if got := len(cfg.OpeningRules); got != 1 {
+		t.Fatalf("expected 1 opening rule, got %d", got)
+	}
+	if got := len(cfg.CustomerDirectory); got != 1 {
+		t.Fatalf("expected 1 customer directory entry, got %d", got)
+	}
+	if cfg.CustomerDirectory[0].CustomerID != "crm-001" {
+		t.Fatalf("expected customer directory entry to be copied")
 	}
 }

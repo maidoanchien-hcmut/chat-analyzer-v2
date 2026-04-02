@@ -1,0 +1,7 @@
+{
+  "job_name": "demo-day-run",
+  "page_slug": "demo-clinic",
+  "mode": "manual_extract",
+  "target_date": "2026-04-01",
+  "publish": false
+}
