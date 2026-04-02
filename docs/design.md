@@ -43,8 +43,11 @@ Là một thành viên BoD và Lead sales, tôi muốn biết mỗi ngày:
 - `opening block`: chuỗi postback/template/opening options ở đầu conversation hoặc đầu slice ngày, có thể chứa tín hiệu giá trị như loại khách và nhu cầu; phải được lưu thành source evidence riêng
 - `first_meaningful_human_message`: tin nhắn đầu tiên có ý nghĩa trong ngày `D` từ phía con người, có thể đến từ khách hoặc nhân viên, nhưng loại trừ chatbot/system
 - `CRM mapping`: enrichment/joining với hệ thống nội bộ; không được dùng để xác định hoặc rewrite `inbox mới / inbox cũ / tái khám`
+- `thread_customer_mapping`: mapping thread-level từ `page_id + thread_id` sang đúng 1 customer nội bộ; không được nhét ownership này vào `conversation_day`
 - `dashboard official`: chỉ đọc từ `published snapshot` và `published analysis version` của cùng một kỳ dữ liệu
 - `extract boundary`: mỗi run ngày `D` chỉ được persist conversation-day và message có timestamp thuộc ngày `D`
+- `target_date`: ngày local mà ETL đang build canonical slice; scope page/ngày của `conversation_day` và `message` được kế thừa qua `etl_run`
+- `manual custom range`: yêu cầu vận hành có thể chỉ định khoảng thời gian bất kỳ; hệ thống phải materialize yêu cầu đó thành một hoặc nhiều `etl_run` theo từng `target_date`, và các run partial-day không được tự động trở thành dashboard official
 
 ## Repository structure & technical stack
 
@@ -121,6 +124,9 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
 **Extract seam 1:**
 
 - Gọi API Pancake để lấy dữ liệu thay đổi theo cửa sổ thời gian.
+- Mỗi run seam 1 phải được neo vào một `target_date` theo timezone business của page. Window canonical là `[00:00, ngày kế tiếp 00:00)` theo timezone đó; không dùng mốc `23:59:59` để tránh rơi message ở biên thời gian.
+- Với manual custom range, UI có thể nhận `requested_window_start_at` và `requested_window_end_exclusive_at` không bám mốc 0h. Orchestrator phải chia yêu cầu đó thành một hoặc nhiều run theo từng `target_date`; mỗi run giữ `window_start_at/window_end_exclusive_at` là phần giao giữa requested window và day bucket của `target_date`.
+- `go-worker` là process ETL phải kết nối trực tiếp Postgres để load Seam 1; không đi vòng qua REST hoặc gRPC của backend cho hot path persistence.
 - Đơn vị ingest nhỏ nhất là message:
   - Source incremental unit là conversation.updated_at
   - Persisted fact unit là message
@@ -133,7 +139,7 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
 - Conversation là thread nguồn từ Pancake.
 - Customer trong hệ thống báo cáo này được đồng nhất 1:1 với conversation thread.
 - CRM identity là một liên kết ngoài tuỳ chọn; có thể nhiều thread cùng map về một hồ sơ CRM, nhưng điều đó không làm thay đổi customer/thread snapshot của hệ thống này.
-- Lưu raw payload tại landing zone để có thể debug, audit và backfill khi cần.
+- Nếu cần giữ payload để debug, audit hoặc backfill thì payload message phải được redact trước khi ghi; không được persist original text dưới bất kỳ lớp lưu trữ lâu dài nào của production path.
 - Dedupe theo định danh ổn định từ source.
 - Có lookback window để xử lý dữ liệu về muộn hoặc source update lại hội thoại cũ. Sử dụng cơ chế upsert để đảm bảo tính toàn vẹn của dữ liệu (update nếu đã tồn tại, insert nếu chưa có).
 - Có retry mechanism với exponential backoff
@@ -152,9 +158,11 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
 - Normalize dữ liệu về schema chuẩn chung cho tất cả các trang nguồn.
 - Ẩn danh hoá dữ liệu nhạy cảm:
   - Redact số điện thoại trong tin nhắn.
-  - Giữ nguyên số điện thoại trong trường recent_phone_number khi Pancake trả về để phục vụ mapping CRM nội bộ ở seam 1, nhưng không lưu số điện thoại trong message text và không coi đó là AI input mặc định.
+  - Giữ số điện thoại trong structured field phục vụ CRM mapping ở seam 1, nhưng phải normalize + dedupe trước khi ghi vào `conversation_day` và không lưu số điện thoại trong message text.
+  - Không persist `original_text` của message; canonical seam 1 chỉ được lưu `redacted_text` và payload message đã redact.
 - Chuẩn hoá timezone, enum, participant role, message type, tag, attachment.
 - Tách riêng tin nhắn chatbot, tin nhắn của khách, tin nhắn của nhân viên.
+- Carry `customer_display_name` của thread vào `conversation_day` để làm evidence cho AI/manual customer mapping; tên này phải giữ nguyên văn như source, không normalize.
 - Tạo trường deterministic `first_meaningful_human_message` bằng cách loại bỏ chatbot/system/quick-reply chọn sẵn/sticker-only message để phục vụ báo cáo "cuộc hội thoại trong ngày bắt đầu bằng nội dung gì". Trường này có thể đến từ khách hoặc từ nhân viên nếu nhân viên là người mở đầu slice ngày đó bằng một tin nhắn có ý nghĩa như nhắc lịch hẹn.
 - Lưu thêm `first_meaningful_human_sender_role` để phân biệt tin nhắn mở đầu có ý nghĩa đến từ `customer` hay `staff`.
 - Trích riêng `opening_block_observation` và `opening_block_selection` từ các postback/template/opening messages khi match được signature theo page/channel.
@@ -164,6 +172,7 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
   - `normalized_need_from_tag`
   - `normalized_branch_from_tag`
   - `noise_tag_flags`
+- Normalize + dedupe các số điện thoại của thread vào `conversation_day.normalized_phone_candidates`.
 - Dedupe tin nhắn nếu có tin nhắn trùng lặp do lỗi từ source hoặc lỗi trong quá trình ingest.
 - Tính các chỉ số deterministic như:
   - first response time của nhân viên
@@ -171,13 +180,24 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
 - Tính các cờ deterministic khi có đủ source evidence:
   - bot/self-service selection cho `tái khám`
   - bot/self-service selection cho các loại nhu cầu chuẩn hoá nếu source cung cấp
-- Mapping conversation / customer sang crm nội bộ
+- Mapping conversation / customer sang CRM nội bộ theo fast-path deterministic:
+  - nếu thread chưa có mapping và tập `normalized_phone_candidates` hữu hiệu chỉ còn đúng 1 số map được tới đúng 1 customer nội bộ, `go-worker` ghi thẳng vào `thread_customer_mapping`
+  - nếu thread có nhiều số điện thoại hoặc mapping nhập nhằng thì không tự chọn; chỉ ghi evidence ở `conversation_day` như `customer_display_name` nguyên văn từ source và `normalized_phone_candidates`, rồi defer case đó sang AI/manual
 
 **Load seam 1:** _This is the single source of truth for all downstream jobs_
 
 - Lưu dữ liệu canonical vào hệ thống bảng mới trong postgres17.
 - Dữ liệu canonical là nguồn sự thật duy nhất cho các job downstream.
-- Có daily snapshot để khoá số liệu theo ngày. Snapshot phải có tối thiểu `snapshot_date`, `snapshot_version`, `build_watermark_at`, `status` (`preliminary` hoặc `final`) để vừa giữ được audit trail vừa cho phép backfill có kiểm soát.
+- Canonical seam 1 ở phase hiện tại được rút gọn về 3 bảng:
+  - `etl_run`: owner của `page_id`, `target_date`, `business_timezone`, `snapshot_version`, `run_mode`, trạng thái run, publish state, requested window và effective window
+  - `conversation_day`: owner của conversation slice và evidence đã gom nhóm theo ngày như `customer_display_name` nguyên văn từ source, tag state, tag events, opening blocks, normalized tag signals, normalized phone candidates
+  - `message`: owner của transcript message-level, actor/message type chuẩn hoá, `redacted_text`, attachment metadata, và cờ `is_meaningful_human_message`
+- Ngoài 3 bảng canonical trên, Seam 1 có 1 bảng phụ trợ `thread_customer_mapping` để giữ owner của mapping thread-level sang customer nội bộ.
+- `conversation_day` và `message` không lặp lại `page_id` hoặc `target_date` nếu không thật sự cần; scope page/ngày được suy ra qua `etl_run_id` để giảm dư thừa schema.
+- Semantics daily snapshot được biểu diễn bằng `etl_run.snapshot_version`, `etl_run.status`, và `etl_run.is_published` thay vì tách thêm bảng snapshot riêng trong phase này.
+- Một manual custom range có thể tạo nhiều `etl_run` cùng `run_group_id`; các run partial-day phải mặc định `is_published = false` để không ghi đè snapshot official theo ngày.
+- Các evidence page-local hoặc cấu trúc chưa ổn định như tag dictionary, observed tag events, opening blocks, normalized phone candidates nên được giữ trong `jsonb` thay vì tách nhiều bảng con quá sớm.
+- Matrix chi tiết của 3 bảng canonical nằm ở [seam1-lean-schema-matrix.md](D:/Code/chat-analyzer-v2/docs/seam1-lean-schema-matrix.md).
 - Tối ưu sức mạnh của postgres17 để đảm bảo hiệu suất và khả năng mở rộng, ví dụ sử dụng partitioning, indexing, materialized view, v.v...
 
 **AI seam 2:**
@@ -186,6 +206,7 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
 - Job AI phân tích theo conversation-day hoặc conversation snapshot của ngày đó.
 - Input của AI cho một `conversation-day` phải bao gồm:
   - khối message của ngày `D`
+  - `customer_display_name` nguyên văn của thread tại thời điểm extract
   - các observed tag/tag event của conversation-day đó
   - metadata tag đã resolve từ page tag dictionary
   - normalized tag mapping đã được IT cấu hình cho page đó, nếu có
@@ -207,10 +228,10 @@ Hệ thống chạy theo lịch cuối ngày, nhưng dữ liệu gốc phải đ
   - `risk_flags_open`
   - `last_known_sentiment`
   - `promised_follow_up`
-- Có 1 luồng AI mapping riêng ở seam 2 để best-effort mapping `recent_phone_number` với hồ sơ khách hàng trong CRM:
-  - Nếu source/CRM cho ra đúng 1 candidate đủ rõ ràng thì map theo deterministic fast-path.
-  - Nếu có nhiều candidate hoặc dữ liệu nhập nhằng thì gọi CRM để lấy candidate set và dùng AI để mapping dựa trên tên khách hàng trong thread và tên khách hàng trong CRM.
-  - Kết quả mapping phải có confidence score, evidence và cờ manual-review khi độ tin cậy thấp.
+- Có 1 luồng AI mapping riêng ở seam 2 chỉ để xử lý các thread chưa resolve được ở Seam 1:
+  - deterministic fast-path với đúng 1 số điện thoại hữu hiệu phải được xử lý trước ở Seam 1 và ghi vào `thread_customer_mapping`
+  - nếu thread có nhiều số điện thoại hoặc dữ liệu nhập nhằng thì gọi CRM để lấy candidate set và dùng AI để mapping dựa trên tên khách hàng trong thread và tên khách hàng trong CRM
+  - kết quả mapping phải có confidence score, evidence và cờ manual-review khi độ tin cậy thấp
 - Luồng CRM mapping chỉ phục vụ enrichment/joining với hệ thống nội bộ; không được dùng như tín hiệu để xác định hoặc rewrite nhãn `tái khám`.
 - `closing_outcome` phải được hiểu là kết quả chốt `as-of-day` trên snapshot ngày đó, không phải kết quả cuối cùng của toàn bộ vòng đời thread.
 - `tái khám` là một nhãn nghiệp vụ hiển thị trong UI theo ngày; nó độc lập với trục `inbox mới / inbox cũ` vì "mới trên kênh chat" không đồng nghĩa với "mới với phòng khám".
@@ -330,6 +351,9 @@ Khi Sales Lead thấy một nhân viên bị AI chấm điểm thấp (ví dụ 
     - bật `Auto AI Analysis`
   - Mặc định page mới phải khởi tạo với cả `Auto Scraper = OFF` và `Auto AI Analysis = OFF` cho tới khi IT chủ động bật.
 - Cho phép chạy thủ công để populate dữ liệu khi cần thiết, ví dụ khi có sự cố hoặc khi muốn backfill dữ liệu cũ. Cho phép chọn khoảng thời gian cụ thể để chạy lại ETL, AI, hoặc cả hai.
+  - Nếu khoảng thời gian không bám mốc 0h-24h, hệ thống phải tự chia thành các `etl_run` theo từng `target_date`.
+  - Mỗi `etl_run` phải giữ lại `requested_window_*` để audit và `window_*` thực tế để biết slice nào đã được xử lý.
+  - Run partial-day chỉ phục vụ vận hành, debug, recovery, hoặc pilot; không được auto publish làm dashboard official.
 - Scheduler control:
   - `Auto Scraper`: bật/tắt scheduler extract hằng ngày theo từng page.
   - `Auto AI Analysis`: bật/tắt scheduler AI theo từng page.

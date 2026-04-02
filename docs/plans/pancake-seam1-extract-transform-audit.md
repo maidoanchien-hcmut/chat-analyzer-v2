@@ -105,19 +105,31 @@ Từ [tags.json](D:/Code/chat-analyzer-v2/docs/pancake-api-samples/20260401T0420
 - Với mỗi run ngày `D`, canonical Seam 1 chỉ được persist:
   - `conversation-day` của ngày `D`
   - `message` có `inserted_at` thuộc ngày `D`
-  - `observed tags/tag events` gắn với conversation-day của ngày `D`
+  - `observed tags/tag events`, opening evidence và normalized tag signals gắn với conversation-day của ngày `D`
 - `customer = conversation thread`
 - `inbox mới / inbox cũ` vẫn là deterministic theo lịch sử thread trên kênh chat
 - `tái khám` là trục nghiệp vụ độc lập, và tags chỉ là một trong các evidence source
 - `page_customer` không thuộc critical path của daily extract
 - `assignee` không tham gia vào logic chuẩn hoá nghiệp vụ hiện tại
+- Scope page/ngày của dữ liệu canonical phải do `etl_run` sở hữu; các bảng con không lặp lại `page_id` hoặc `target_date` nếu không cần cho integrity
+- Không persist `original_text` của message; chỉ lưu `redacted_text` và payload message đã redact
+- Manual custom range phải được materialize thành một hoặc nhiều `etl_run` theo từng `target_date`; run partial-day không được publish làm số official mặc định
+- `go-worker` phải kết nối trực tiếp Postgres để load Seam 1
+- Mapping thread sang customer nội bộ phải có owner thread-level riêng là `thread_customer_mapping`, không được ownership hoá trong `conversation_day`
 
 ## Thiết Kế Extract Production
 
 ### Input của job
 
 - `page_id`
-- `business_day`
+- `target_date`
+- `business_timezone`
+- `window_start_at`
+- `window_end_exclusive_at`
+- optional `run_mode`
+- optional `run_group_id`
+- optional `requested_window_start_at`
+- optional `requested_window_end_exclusive_at`
 - `request_timeout`
 - optional debug limits qua CLI flag hoặc job option, không phải production env bắt buộc
 
@@ -146,6 +158,9 @@ Lưu ý:
 
 - API spec mô tả endpoint này là danh sách conversation cập nhật gần nhất và có filter theo time range, nhưng không mô tả tuyệt đối rõ `since/until` bind vào trường thời gian nào.
 - Vì vậy production design phải coi đây là `conversation selection window`, còn biên message của ngày `D` luôn phải được enforce ở phía mình.
+- Window canonical của `target_date` là `[00:00, ngày kế tiếp 00:00)` theo `business_timezone`; không dùng `23:59:59` để tránh rơi message ở biên.
+- Với scheduler daily, `window_start_at/window_end_exclusive_at` bằng full-day bucket của `target_date`.
+- Với manual custom range, orchestrator phải cắt requested window thành các run con theo từng `target_date`; mỗi run con chỉ xử lý phần giao của requested window với day bucket đó.
 
 ### Bước 4: với mỗi conversation đã chọn, fetch message pages
 
@@ -182,18 +197,19 @@ Lưu ý:
 ### Output slice tối thiểu
 
 - `ConversationDaySource`
-  - `page_id`
   - `conversation_id`
-  - `business_day`
+  - `customer_display_name`
   - `conversation_inserted_at`
   - `conversation_updated_at`
   - `message_count_seen_from_source`
-  - `recent_phone_candidates`
+  - `normalized_phone_candidates`
   - `current_tags`
+  - `observed_tag_events`
   - `normalized_tag_signals`
-  - `opening_block_observation_ids`
+  - `opening_blocks`
   - `first_meaningful_human_message_id`
   - `first_meaningful_human_sender_role`
+  - `source_conversation_json`
 - `MessageSource`
   - `message_id`
   - `conversation_id`
@@ -201,21 +217,21 @@ Lưu ý:
   - `sender_source_id`
   - `sender_name`
   - `sender_role`
+  - `source_message_type_raw`
   - `message_type`
-  - `original_text`
   - `redacted_text`
   - `attachments`
   - `message_tags`
-- `ObservedConversationTag`
-  - current tag state của conversation ở thời điểm extract
-- `ObservedConversationTagEvent`
-  - tag history event nếu timestamp của event thuộc hoặc liên quan tới conversation-day đang xét
-- `OpeningBlockObservation`
-  - raw opening block messages/template/postback thuộc conversation-day
-- `OpeningBlockSelection`
-  - các lựa chọn đã parse được từ opening block như `customer_type`, `need`, `entry_flow`
-- `RecentPhoneCandidate`
-  - phone number do Pancake capture từ conversation payload
+  - `is_meaningful_human_message`
+  - `source_message_json_redacted`
+
+Lưu ý canonical:
+
+- `ConversationDaySource` là shape nạp vào bảng `conversation_day`; scope page/ngày được suy ra qua `etl_run_id`
+- `customer_display_name` là evidence text ở cấp thread/slice ngày để phục vụ AI/manual customer mapping; phải giữ nguyên văn từ source, không normalize
+- `current_tags`, `observed_tag_events`, `opening_blocks`, `normalized_phone_candidates` được giữ trong `jsonb` để giảm số bảng
+- `MessageSource` không có `original_text`; `redacted_text` là text canonical duy nhất được phép persist
+- `first_meaningful_human_message` của run partial-day phải được hiểu là first meaningful message trong `window_start_at/window_end_exclusive_at`, không được diễn giải thành first message của cả ngày rồi publish chính thức
 
 ### Transform rule tối thiểu
 
@@ -227,13 +243,51 @@ Lưu ý:
   - `unclassified_page_actor`
 - chuẩn hoá `message_type`
 - redact phone khỏi message text
+- không giữ `original_text` trong canonical storage
+- carry `customer_display_name` nguyên văn từ source conversation/customer payload vào `ConversationDaySource`, không normalize
+- normalize + dedupe phone của thread vào `ConversationDaySource.normalized_phone_candidates`
 - nhận diện `first_meaningful_human_message`
 - đánh dấu `is_meaningful_human_message`
 - trích riêng `opening_block_observation` khi match được opening signature theo page/channel
 - nếu page chưa có opening signature, vẫn phải tạo `opening_candidate_window` gồm các message từ đầu slice tới trước `first_meaningful_human_message`
 - apply `page tag mapping` để sinh deterministic normalized signals trước khi giao cho AI
+- nếu thread chưa có mapping và tập phone đã normalize chỉ còn đúng 1 số map được tới đúng 1 customer nội bộ thì ghi deterministic vào `thread_customer_mapping`
+- nếu thread có nhiều số điện thoại hoặc candidate customer nhập nhằng thì không ghi mapping trong Seam 1; chỉ giữ evidence để chuyển AI/manual
 - giữ `tags` như source evidence để Seam 2 đọc cùng conversation-day/message-day
 - không dùng tag để rewrite taxonomy canonical
+
+## Thiết Kế Load Production
+
+Canonical seam 1 của phase hiện tại được rút gọn về 3 bảng canonical và 1 bảng mapping phụ trợ:
+
+- `etl_run`
+  - owner của `page_id`, `target_date`, `business_timezone`, `snapshot_version`, `run_mode`, `run_group_id`, `status`, `is_published`
+  - giữ `tag_dictionary_json`, metrics run, requested window, effective window
+- `conversation_day`
+  - owner của `conversation_id`, `customer_display_name` nguyên văn từ source, source conversation facts, tag/opening evidence, normalized tag signals, normalized phone candidates
+  - không lặp lại `page_id` hoặc `target_date`; scope được kế thừa qua `etl_run_id`
+- `message`
+  - owner của transcript message-level và các trường chuẩn hoá như `sender_role`, `message_type`, `redacted_text`, `is_meaningful_human_message`
+  - raw payload message nếu cần audit thì chỉ được lưu dưới dạng đã redact
+- `thread_customer_mapping`
+  - owner của mapping thread-level `page_id + thread_id -> customer_id`
+  - chỉ được tạo theo fast-path deterministic hoặc luồng AI/manual resolve về sau
+
+Persistence path:
+
+- `go-worker` load trực tiếp Postgres cho cả 3 bảng canonical và `thread_customer_mapping`
+- backend TypeScript giữ vai trò orchestration, monitoring, và read API; không nằm trên hot path persistence của Seam 1
+
+Constraint tối thiểu:
+
+- `etl_run`: unique (`page_id`, `target_date`, `snapshot_version`)
+- `etl_run`: chỉ một run `is_published = true` cho mỗi (`page_id`, `target_date`)
+- `etl_run`: index (`run_group_id`) để gom các run con của cùng một manual range
+- `conversation_day`: unique (`etl_run_id`, `conversation_id`)
+- `message`: unique (`etl_run_id`, `message_id`)
+- `thread_customer_mapping`: unique (`page_id`, `thread_id`)
+
+Chi tiết cột và matrix canonical nằm ở [seam1-lean-schema-matrix.md](D:/Code/chat-analyzer-v2/docs/seam1-lean-schema-matrix.md).
 
 ## Rule Phân Loại Actor
 
@@ -332,8 +386,8 @@ cho thấy một opening flow rất cụ thể của page này:
 - đây là `page-specific opening signature`
 - cần cấu hình qua UI IT trong bảng signature riêng theo `page/channel`
 - extractor/transform phải loại được các postback/template/hướng dẫn bot trong opening flow trước khi chọn `first_meaningful_human_message`
-- opening block không được vứt bỏ; phải lưu lại thành `OpeningBlockObservation` và nếu parse được thì tạo `OpeningBlockSelection`
-- `OpeningBlockSelection` là structured evidence có giá trị cho downstream vì nó có thể chứa loại khách và nhu cầu
+- opening block không được vứt bỏ; phải được giữ lại trong `opening_blocks` và nếu parse được thì embed structured selection tương ứng vào cùng payload đó
+- structured opening selection là evidence có giá trị cho downstream vì nó có thể chứa loại khách và nhu cầu
 - với page này, `Bắt đầu`, `Khách hàng lần đầu`, `Đặt lịch hẹn` không nên được coi là `first_meaningful_human_message`
 - với page mới chưa có config, hệ thống vẫn chạy bằng fallback:
   - dùng `first_meaningful_human_message` để cắt mốc
@@ -395,6 +449,7 @@ cho thấy một opening flow rất cụ thể của page này:
 - `Auto Scraper`
   - bật/tắt scheduler extract hằng ngày theo từng page
   - khi tắt, manual extract/backfill vẫn được phép
+- Manual extract/backfill có thể nhận arbitrary range; backend/orchestrator phải tự chia thành các run theo từng `target_date`
 - `Auto AI Analysis`
   - bật/tắt scheduler AI theo từng page
   - chỉ được enqueue khi đã có `final seam 1 snapshot` tương ứng
@@ -467,7 +522,7 @@ cho thấy một opening flow rất cụ thể của page này:
 ## Những Gì Không Thuộc Daily Critical Path
 
 - `page_customers` full sync
-- CRM mapping
+- AI/manual CRM disambiguation cho các thread không resolve được deterministic
 - assignee statistics
 - sample writer/raw JSON dump
 
