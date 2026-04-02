@@ -1,0 +1,16 @@
+{
+  "user_access_token": "your-user-access-token",
+  "page_id": "your-page-id",
+  "target_date": "2026-03-31",
+  "business_timezone": "Asia/Ho_Chi_Minh",
+  "run_mode": "scheduled_daily",
+  "run_group_id": null,
+  "snapshot_version": 1,
+  "is_published": false,
+  "requested_window_start_at": null,
+  "requested_window_end_exclusive_at": null,
+  "window_start_at": null,
+  "window_end_exclusive_at": null,
+  "max_conversations": 0,
+  "max_message_pages_per_conversation": 0
+}

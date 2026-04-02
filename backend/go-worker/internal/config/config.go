@@ -12,11 +12,24 @@ import (
 
 const defaultBusinessTimezone = "Asia/Ho_Chi_Minh"
 
+func DefaultBusinessTimezone() string {
+	return defaultBusinessTimezone
+}
+
 type Config struct {
 	UserAccessToken                string
+	DatabaseURL                    string
 	PageID                         string
 	BusinessDay                    time.Time
 	BusinessTimezone               string
+	RunMode                        string
+	RunGroupID                     string
+	SnapshotVersion                int
+	IsPublished                    bool
+	RequestedWindowStartAt         *time.Time
+	RequestedWindowEndExclusiveAt  *time.Time
+	WindowStartAt                  *time.Time
+	WindowEndExclusiveAt           *time.Time
 	MaxConversations               int
 	MaxMessagePagesPerConversation int
 	RequestTimeout                 time.Duration
@@ -27,41 +40,17 @@ func Load() (Config, error) {
 		return Config{}, err
 	}
 
-	businessTimezone := strings.TrimSpace(os.Getenv("PANCAKE_BUSINESS_TIMEZONE"))
-	if businessTimezone == "" {
-		businessTimezone = defaultBusinessTimezone
-	}
-
-	var businessDay time.Time
-	if rawBusinessDay := strings.TrimSpace(os.Getenv("PANCAKE_BUSINESS_DAY")); rawBusinessDay != "" {
-		var err error
-		businessDay, err = ParseBusinessDay(rawBusinessDay, businessTimezone)
-		if err != nil {
-			return Config{}, err
-		}
-	}
-
-	timeoutSeconds, err := intEnv("PANCAKE_REQUEST_TIMEOUT_SECONDS", 30)
-	if err != nil {
-		return Config{}, err
-	}
-	maxConversations, err := intEnv("PANCAKE_MAX_CONVERSATIONS", 0)
-	if err != nil {
-		return Config{}, err
-	}
-	maxMessagePagesPerConversation, err := intEnv("PANCAKE_MAX_MESSAGE_PAGES_PER_CONVERSATION", 0)
+	timeoutSeconds, err := intEnvWithFallback("WORKER_REQUEST_TIMEOUT_SECONDS", []string{"PANCAKE_REQUEST_TIMEOUT_SECONDS"}, 30)
 	if err != nil {
 		return Config{}, err
 	}
 
 	return Config{
-		UserAccessToken:                strings.TrimSpace(os.Getenv("PANCAKE_USER_ACCESS_TOKEN")),
-		PageID:                         strings.TrimSpace(os.Getenv("PANCAKE_PAGE_ID")),
-		BusinessDay:                    businessDay,
-		BusinessTimezone:               businessTimezone,
-		MaxConversations:               maxConversations,
-		MaxMessagePagesPerConversation: maxMessagePagesPerConversation,
-		RequestTimeout:                 time.Duration(timeoutSeconds) * time.Second,
+		DatabaseURL:      strings.TrimSpace(os.Getenv("DATABASE_URL")),
+		BusinessTimezone: defaultBusinessTimezone,
+		RunMode:          "scheduled_daily",
+		SnapshotVersion:  1,
+		RequestTimeout:   time.Duration(timeoutSeconds) * time.Second,
 	}, nil
 }
 
@@ -69,8 +58,17 @@ func (c Config) Validate() error {
 	if c.UserAccessToken == "" {
 		return errors.New("PANCAKE_USER_ACCESS_TOKEN is required")
 	}
+	if c.DatabaseURL == "" {
+		return errors.New("DATABASE_URL is required")
+	}
 	if c.BusinessDay.IsZero() {
 		return errors.New("PANCAKE_BUSINESS_DAY is required")
+	}
+	if c.RunMode == "" {
+		return errors.New("PANCAKE_RUN_MODE is required")
+	}
+	if c.SnapshotVersion <= 0 {
+		return errors.New("PANCAKE_SNAPSHOT_VERSION must be >= 1")
 	}
 	if c.MaxConversations < 0 {
 		return errors.New("PANCAKE_MAX_CONVERSATIONS must be >= 0")
@@ -78,11 +76,36 @@ func (c Config) Validate() error {
 	if c.MaxMessagePagesPerConversation < 0 {
 		return errors.New("PANCAKE_MAX_MESSAGE_PAGES_PER_CONVERSATION must be >= 0")
 	}
+	windowStart, windowEnd := c.EffectiveWindow()
+	if !windowStart.Before(windowEnd) {
+		return errors.New("effective window must satisfy start < end")
+	}
+	dayStart, dayEnd := c.BusinessWindow()
+	if windowStart.Before(dayStart) || windowEnd.After(dayEnd) {
+		return errors.New("effective window must stay inside the business-day bucket")
+	}
+	if c.RequestedWindowStartAt != nil && c.RequestedWindowEndExclusiveAt != nil && !c.RequestedWindowStartAt.Before(*c.RequestedWindowEndExclusiveAt) {
+		return errors.New("requested window must satisfy start < end")
+	}
+	if c.IsPublished && (windowStart != dayStart || windowEnd != dayEnd) {
+		return errors.New("partial-day runs cannot be published")
+	}
 	return nil
 }
 
 func (c Config) BusinessWindow() (time.Time, time.Time) {
 	return c.BusinessDay, c.BusinessDay.AddDate(0, 0, 1)
+}
+
+func (c Config) EffectiveWindow() (time.Time, time.Time) {
+	start, end := c.BusinessWindow()
+	if c.WindowStartAt != nil {
+		start = *c.WindowStartAt
+	}
+	if c.WindowEndExclusiveAt != nil {
+		end = *c.WindowEndExclusiveAt
+	}
+	return start, end
 }
 
 func ParseBusinessDay(value, timezone string) (time.Time, error) {
@@ -146,14 +169,18 @@ func loadDotEnv(path string) error {
 	return nil
 }
 
-func intEnv(key string, defaultValue int) (int, error) {
-	value := strings.TrimSpace(os.Getenv(key))
-	if value == "" {
-		return defaultValue, nil
+func intEnvWithFallback(primary string, aliases []string, defaultValue int) (int, error) {
+	keys := append([]string{primary}, aliases...)
+	for _, key := range keys {
+		value := strings.TrimSpace(os.Getenv(key))
+		if value == "" {
+			continue
+		}
+		parsed, err := strconv.Atoi(value)
+		if err != nil {
+			return 0, fmt.Errorf("%s must be an integer", key)
+		}
+		return parsed, nil
 	}
-	parsed, err := strconv.Atoi(value)
-	if err != nil {
-		return 0, fmt.Errorf("%s must be an integer", key)
-	}
-	return parsed, nil
+	return defaultValue, nil
 }

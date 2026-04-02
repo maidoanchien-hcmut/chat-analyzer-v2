@@ -86,14 +86,14 @@ func (c *Client) ListConversations(ctx context.Context, req ConversationsRequest
 		return nil, err
 	}
 
-	var response listConversationsResponse
+	var response listConversationsEnvelope
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return nil, fmt.Errorf("decode conversations response: %w", err)
 	}
-	return response.Conversations, nil
+	return decodeConversations(response.Conversations)
 }
 
-func (c *Client) ListMessages(ctx context.Context, req MessagesRequest) ([]json.RawMessage, error) {
+func (c *Client) ListMessages(ctx context.Context, req MessagesRequest) (MessagesPage, error) {
 	query := url.Values{}
 	query.Set("page_access_token", req.PageAccessToken)
 	if req.CurrentCount > 0 {
@@ -102,14 +102,32 @@ func (c *Client) ListMessages(ctx context.Context, req MessagesRequest) ([]json.
 
 	raw, err := c.do(ctx, http.MethodGet, publicV1Base, "/pages/"+req.PageID+"/conversations/"+req.ConversationID+"/messages", query)
 	if err != nil {
-		return nil, err
+		return MessagesPage{}, err
 	}
 
-	var response listMessagesResponse
-	if err := json.Unmarshal(raw, &response); err != nil {
-		return nil, fmt.Errorf("decode messages response: %w", err)
+	var envelope listMessagesEnvelope
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return MessagesPage{}, fmt.Errorf("decode messages response: %w", err)
 	}
-	return response.Messages, nil
+
+	response := MessagesPage{
+		ConversationID:                 envelope.ConversationID,
+		ConvPhoneNumbers:               envelope.ConvPhoneNumbers,
+		ConvRecentPhoneNumbers:         envelope.ConvRecentPhoneNumbers,
+		AvailableForReportPhoneNumbers: envelope.AvailableForReportPhoneNumbers,
+		Customers:                      envelope.Customers,
+		Messages:                       make([]Message, 0, len(envelope.Messages)),
+		Raw:                            append(json.RawMessage(nil), raw...),
+	}
+	for idx, rawMessage := range envelope.Messages {
+		var message Message
+		if err := json.Unmarshal(rawMessage, &message); err != nil {
+			return MessagesPage{}, fmt.Errorf("decode message %d: %w", idx, err)
+		}
+		message.Raw = append(json.RawMessage(nil), rawMessage...)
+		response.Messages = append(response.Messages, message)
+	}
+	return response, nil
 }
 
 func (c *Client) ListTags(ctx context.Context, pageID, pageAccessToken string) ([]Tag, error) {
@@ -121,11 +139,11 @@ func (c *Client) ListTags(ctx context.Context, pageID, pageAccessToken string) (
 		return nil, err
 	}
 
-	var response listTagsResponse
+	var response listTagsEnvelope
 	if err := json.Unmarshal(raw, &response); err != nil {
 		return nil, fmt.Errorf("decode tags response: %w", err)
 	}
-	return response.Tags, nil
+	return decodeTags(response.Tags)
 }
 
 func (c *Client) do(ctx context.Context, method, baseURL, rawPath string, query url.Values) ([]byte, error) {
@@ -201,4 +219,30 @@ func findStringField(value any, target string) (string, bool) {
 		}
 	}
 	return "", false
+}
+
+func decodeConversations(rawItems []json.RawMessage) ([]Conversation, error) {
+	conversations := make([]Conversation, 0, len(rawItems))
+	for idx, rawItem := range rawItems {
+		var conversation Conversation
+		if err := json.Unmarshal(rawItem, &conversation); err != nil {
+			return nil, fmt.Errorf("decode conversation %d: %w", idx, err)
+		}
+		conversation.Raw = append(json.RawMessage(nil), rawItem...)
+		conversations = append(conversations, conversation)
+	}
+	return conversations, nil
+}
+
+func decodeTags(rawItems []json.RawMessage) ([]Tag, error) {
+	tags := make([]Tag, 0, len(rawItems))
+	for idx, rawItem := range rawItems {
+		var tag Tag
+		if err := json.Unmarshal(rawItem, &tag); err != nil {
+			return nil, fmt.Errorf("decode tag %d: %w", idx, err)
+		}
+		tag.Raw = append(json.RawMessage(nil), rawItem...)
+		tags = append(tags, tag)
+	}
+	return tags, nil
 }

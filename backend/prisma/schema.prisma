@@ -168,3 +168,109 @@ model AuthAuditLog {
   @@index([userId, createdAt])
   @@map("auth_audit_log")
 }
+
+model EtlRun {
+  id                            String            @id @default(uuid()) @db.Uuid
+  runGroupId                    String?           @map("run_group_id") @db.Uuid
+  runMode                       String            @map("run_mode")
+  pageId                        String            @map("page_id")
+  targetDate                    DateTime          @map("target_date") @db.Date
+  businessTimezone              String            @map("business_timezone")
+  requestedWindowStartAt        DateTime?         @map("requested_window_start_at") @db.Timestamptz(6)
+  requestedWindowEndExclusiveAt DateTime?         @map("requested_window_end_exclusive_at") @db.Timestamptz(6)
+  windowStartAt                 DateTime          @map("window_start_at") @db.Timestamptz(6)
+  windowEndExclusiveAt          DateTime          @map("window_end_exclusive_at") @db.Timestamptz(6)
+  status                        String
+  snapshotVersion               Int               @map("snapshot_version")
+  isPublished                   Boolean           @default(false) @map("is_published")
+  tagDictionaryJson             Json              @map("tag_dictionary_json")
+  metricsJson                   Json              @map("metrics_json")
+  errorText                     String?           @map("error_text")
+  startedAt                     DateTime          @default(now()) @map("started_at") @db.Timestamptz(6)
+  finishedAt                    DateTime?         @map("finished_at") @db.Timestamptz(6)
+  conversationDays              ConversationDay[]
+  messages                      Message[]
+
+  @@unique([pageId, targetDate, snapshotVersion])
+  @@index([runGroupId])
+  @@index([pageId])
+  @@index([targetDate])
+  @@index([status])
+  @@index([isPublished])
+  @@index([startedAt])
+  @@index([finishedAt])
+  @@map("etl_run")
+}
+
+model ConversationDay {
+  id                             String    @id @default(uuid()) @db.Uuid
+  etlRunId                       String    @map("etl_run_id") @db.Uuid
+  conversationId                 String    @map("conversation_id")
+  customerDisplayName            String?   @map("customer_display_name")
+  conversationInsertedAt         DateTime? @map("conversation_inserted_at") @db.Timestamptz(6)
+  conversationUpdatedAt          DateTime? @map("conversation_updated_at") @db.Timestamptz(6)
+  messageCountSeenFromSource     Int       @map("message_count_seen_from_source")
+  normalizedPhoneCandidatesJson  Json      @map("normalized_phone_candidates_json")
+  currentTagsJson                Json      @map("current_tags_json")
+  observedTagEventsJson          Json      @map("observed_tag_events_json")
+  normalizedTagSignalsJson       Json      @map("normalized_tag_signals_json")
+  openingBlocksJson              Json      @map("opening_blocks_json")
+  firstMeaningfulHumanMessageId  String?   @map("first_meaningful_human_message_id")
+  firstMeaningfulHumanSenderRole String?   @map("first_meaningful_human_sender_role")
+  sourceConversationJson         Json      @map("source_conversation_json")
+  createdAt                      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  etlRun                         EtlRun    @relation(fields: [etlRunId], references: [id], onDelete: Cascade)
+  messages                       Message[]
+
+  @@unique([etlRunId, conversationId])
+  @@index([etlRunId])
+  @@index([conversationId])
+  @@index([customerDisplayName])
+  @@index([createdAt])
+  @@map("conversation_day")
+}
+
+model Message {
+  id                       String          @id @default(uuid()) @db.Uuid
+  conversationDayId        String          @map("conversation_day_id") @db.Uuid
+  etlRunId                 String          @map("etl_run_id") @db.Uuid
+  messageId                String          @map("message_id")
+  conversationId           String          @map("conversation_id")
+  insertedAt               DateTime        @map("inserted_at") @db.Timestamptz(6)
+  senderSourceId           String?         @map("sender_source_id")
+  senderName               String?         @map("sender_name")
+  senderRole               String          @map("sender_role")
+  sourceMessageTypeRaw     String?         @map("source_message_type_raw")
+  messageType              String          @map("message_type")
+  redactedText             String?         @map("redacted_text")
+  attachmentsJson          Json            @map("attachments_json")
+  messageTagsJson          Json            @map("message_tags_json")
+  isMeaningfulHumanMessage Boolean         @map("is_meaningful_human_message")
+  sourceMessageJsonRedacted Json           @map("source_message_json_redacted")
+  createdAt                DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  conversationDay          ConversationDay @relation(fields: [conversationDayId], references: [id], onDelete: Cascade)
+  etlRun                   EtlRun          @relation(fields: [etlRunId], references: [id], onDelete: Cascade)
+
+  @@unique([etlRunId, messageId])
+  @@index([conversationDayId, insertedAt])
+  @@index([conversationId, insertedAt])
+  @@index([isMeaningfulHumanMessage])
+  @@map("message")
+}
+
+model ThreadCustomerMapping {
+  pageId          String   @map("page_id")
+  threadId        String   @map("thread_id")
+  customerId      String   @map("customer_id")
+  mappedPhoneE164 String?  @map("mapped_phone_e164")
+  mappingMethod   String   @map("mapping_method")
+  createdAt       DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@id([pageId, threadId])
+  @@index([customerId])
+  @@index([mappingMethod])
+  @@index([createdAt])
+  @@index([updatedAt])
+  @@map("thread_customer_mapping")
+}

@@ -2,14 +2,12 @@ package extract
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
 
 	"chat-analyzer-v2/backend/go-worker/internal/config"
 	"chat-analyzer-v2/backend/go-worker/internal/pancake"
-	"chat-analyzer-v2/backend/go-worker/internal/transform"
 )
 
 const (
@@ -22,10 +20,13 @@ type PancakeClient interface {
 	GeneratePageAccessToken(ctx context.Context, pageID string) (string, error)
 	ListTags(ctx context.Context, pageID, pageAccessToken string) ([]pancake.Tag, error)
 	ListConversations(ctx context.Context, req pancake.ConversationsRequest) ([]pancake.Conversation, error)
-	ListMessages(ctx context.Context, req pancake.MessagesRequest) ([]json.RawMessage, error)
+	ListMessages(ctx context.Context, req pancake.MessagesRequest) (pancake.MessagesPage, error)
 }
 
 type Result struct {
+	PageID           string
+	BusinessTimezone string
+	Window           DayWindow
 	Summary          Summary
 	ConversationDays []ConversationDayCandidate
 	Tags             []pancake.Tag
@@ -43,27 +44,33 @@ type Summary struct {
 }
 
 type ConversationDayCandidate struct {
-	PageID         string
-	ConversationID string
-	BusinessDay    string
-	Messages       []json.RawMessage
+	PageID                 string
+	Conversation           pancake.Conversation
+	BusinessDay            string
+	MessageContext         pancake.MessageContext
+	Messages               []pancake.Message
+	MessagesSeenFromSource int
 }
 
 func Run(ctx context.Context, cfg config.Config, client PancakeClient) (Result, error) {
-	dayStart, dayEnd := cfg.BusinessWindow()
-	window := transform.DayWindow{
-		Start:        dayStart,
-		EndExclusive: dayEnd,
+	windowStart, windowEnd := cfg.EffectiveWindow()
+	window := DayWindow{
+		Start:        windowStart,
+		EndExclusive: windowEnd,
 	}
 
-	pages, err := client.ListPages(ctx)
-	if err != nil {
-		return Result{}, fmt.Errorf("list pages: %w", err)
-	}
+	pageID := cfg.PageID
+	if pageID == "" {
+		pages, err := client.ListPages(ctx)
+		if err != nil {
+			return Result{}, fmt.Errorf("list pages: %w", err)
+		}
 
-	pageID, err := resolvePageID(cfg.PageID, pages)
-	if err != nil {
-		return Result{}, err
+		resolvedPageID, err := resolvePageID(cfg.PageID, pages)
+		if err != nil {
+			return Result{}, err
+		}
+		pageID = resolvedPageID
 	}
 
 	pageAccessToken, err := client.GeneratePageAccessToken(ctx, pageID)
@@ -77,16 +84,19 @@ func Run(ctx context.Context, cfg config.Config, client PancakeClient) (Result, 
 	}
 
 	result := Result{
+		PageID:           pageID,
+		BusinessTimezone: cfg.BusinessTimezone,
+		Window:           window,
 		Summary: Summary{
 			PageID:      pageID,
-			BusinessDay: dayStart.Format(time.DateOnly),
+			BusinessDay: cfg.BusinessDay.Format(time.DateOnly),
 			TagsLoaded:  len(tags),
 		},
 		Tags: tags,
 	}
 
-	since := dayStart.Unix()
-	until := dayEnd.Add(-time.Second).Unix()
+	since := windowStart.Unix()
+	until := windowEnd.Unix()
 	lastConversationID := ""
 
 	for !limitReached(cfg.MaxConversations, result.Summary.ConversationsScanned) {
@@ -110,7 +120,7 @@ func Run(ctx context.Context, cfg config.Config, client PancakeClient) (Result, 
 			}
 
 			result.Summary.ConversationsScanned++
-			candidate, stats, err := buildConversationDay(ctx, client, cfg, pageID, pageAccessToken, conversation.ID, window)
+			candidate, stats, err := buildConversationDay(ctx, client, cfg, pageID, pageAccessToken, conversation, window)
 			if err != nil {
 				return Result{}, err
 			}
@@ -124,12 +134,7 @@ func Run(ctx context.Context, cfg config.Config, client PancakeClient) (Result, 
 			}
 
 			result.Summary.ConversationDaysBuilt++
-			result.ConversationDays = append(result.ConversationDays, ConversationDayCandidate{
-				PageID:         pageID,
-				ConversationID: conversation.ID,
-				BusinessDay:    dayStart.Format(time.DateOnly),
-				Messages:       candidate.Messages,
-			})
+			result.ConversationDays = append(result.ConversationDays, candidate)
 		}
 
 		lastConversationID = conversations[len(conversations)-1].ID
@@ -152,42 +157,44 @@ func buildConversationDay(
 	cfg config.Config,
 	pageID string,
 	pageAccessToken string,
-	conversationID string,
-	window transform.DayWindow,
+	conversation pancake.Conversation,
+	window DayWindow,
 ) (ConversationDayCandidate, conversationDayStats, error) {
 	candidate := ConversationDayCandidate{
-		PageID:         pageID,
-		ConversationID: conversationID,
-		BusinessDay:    window.Start.Format(time.DateOnly),
+		PageID:       pageID,
+		Conversation: conversation,
+		BusinessDay:  window.Start.Format(time.DateOnly),
 	}
 
 	stats := conversationDayStats{}
 	currentCount := 0
 
 	for pageNumber := 0; !limitReached(cfg.MaxMessagePagesPerConversation, pageNumber); pageNumber++ {
-		messages, err := client.ListMessages(ctx, pancake.MessagesRequest{
+		page, err := client.ListMessages(ctx, pancake.MessagesRequest{
 			PageID:          pageID,
 			PageAccessToken: pageAccessToken,
-			ConversationID:  conversationID,
+			ConversationID:  conversation.ID,
 			CurrentCount:    currentCount,
 		})
 		if err != nil {
 			return ConversationDayCandidate{}, conversationDayStats{}, fmt.Errorf(
 				"list messages for conversation %s page %d: %w",
-				conversationID,
+				conversation.ID,
 				pageNumber+1,
 				err,
 			)
 		}
 
 		stats.PagesFetched++
-		stats.MessagesSeen += len(messages)
+		stats.MessagesSeen += len(page.Messages)
+		candidate.MessagesSeenFromSource += len(page.Messages)
+		mergeMessageContext(&candidate.MessageContext, page)
 
-		pageWindow, err := transform.FilterMessagePage(messages, window)
+		pageWindow, err := FilterMessagePage(page.Messages, window)
 		if err != nil {
 			return ConversationDayCandidate{}, conversationDayStats{}, fmt.Errorf(
 				"filter message window for conversation %s page %d: %w",
-				conversationID,
+				conversation.ID,
 				pageNumber+1,
 				err,
 			)
@@ -195,11 +202,11 @@ func buildConversationDay(
 
 		candidate.Messages = append(candidate.Messages, pageWindow.Messages...)
 
-		if len(messages) < messagePageSize || pageWindow.StopPaging {
+		if len(page.Messages) < messagePageSize || pageWindow.StopPaging {
 			break
 		}
 
-		currentCount += len(messages)
+		currentCount += len(page.Messages)
 	}
 
 	return candidate, stats, nil
@@ -221,4 +228,72 @@ func resolvePageID(pageID string, pages []pancake.Page) (string, error) {
 
 func limitReached(limit, current int) bool {
 	return limit > 0 && current >= limit
+}
+
+func mergeMessageContext(target *pancake.MessageContext, page pancake.MessagesPage) {
+	if target == nil {
+		return
+	}
+
+	target.ConvPhoneNumbers = appendUniqueStrings(target.ConvPhoneNumbers, page.ConvPhoneNumbers...)
+	target.AvailableForReportPhoneNumbers = appendUniqueStrings(
+		target.AvailableForReportPhoneNumbers,
+		page.AvailableForReportPhoneNumbers...,
+	)
+	target.ConvRecentPhoneNumbers = appendUniqueRecentPhones(target.ConvRecentPhoneNumbers, page.ConvRecentPhoneNumbers...)
+	target.Customers = appendUniqueCustomers(target.Customers, page.Customers...)
+}
+
+func appendUniqueStrings(existing []string, values ...string) []string {
+	seen := make(map[string]struct{}, len(existing))
+	for _, value := range existing {
+		seen[value] = struct{}{}
+	}
+	for _, value := range values {
+		if value == "" {
+			continue
+		}
+		if _, ok := seen[value]; ok {
+			continue
+		}
+		seen[value] = struct{}{}
+		existing = append(existing, value)
+	}
+	return existing
+}
+
+func appendUniqueRecentPhones(existing []pancake.RecentPhoneNumber, values ...pancake.RecentPhoneNumber) []pancake.RecentPhoneNumber {
+	seen := make(map[string]struct{}, len(existing))
+	for _, value := range existing {
+		seen[value.PhoneNumber] = struct{}{}
+	}
+	for _, value := range values {
+		if value.PhoneNumber == "" {
+			continue
+		}
+		if _, ok := seen[value.PhoneNumber]; ok {
+			continue
+		}
+		seen[value.PhoneNumber] = struct{}{}
+		existing = append(existing, value)
+	}
+	return existing
+}
+
+func appendUniqueCustomers(existing []pancake.CustomerProfile, values ...pancake.CustomerProfile) []pancake.CustomerProfile {
+	seen := make(map[string]struct{}, len(existing))
+	for _, value := range existing {
+		seen[value.ID] = struct{}{}
+	}
+	for _, value := range values {
+		if value.ID == "" {
+			continue
+		}
+		if _, ok := seen[value.ID]; ok {
+			continue
+		}
+		seen[value.ID] = struct{}{}
+		existing = append(existing, value)
+	}
+	return existing
 }
