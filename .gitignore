@@ -1,2 +1,4 @@
-.env
 .codex
+
+__pycache__/
+.env
