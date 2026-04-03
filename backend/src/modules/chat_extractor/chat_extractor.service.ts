@@ -215,6 +215,8 @@ export class ChatExtractorService {
     });
     const preview = await this.runRuntimeSampleImpl(workerJob);
     const artifacts = buildOnboardingArtifacts(preview.conversations);
+    const openingSampleConversation = pickOpeningSampleConversation(preview.conversations);
+    const openingCandidates = buildOpeningCandidatesFromSingleConversation(openingSampleConversation);
     const observedTagCountMap = new Map<string, number>(
       artifacts.observedTagCounts.map((item) => [normalizeKey(item.text), item.count])
     );
@@ -233,10 +235,11 @@ export class ChatExtractorService {
         metrics: preview.summary,
         tagCandidates: pageTagCandidates,
         openingCandidates: {
-          topOpeningCandidateWindows: artifacts.topOpeningCandidateWindows,
-          unmatchedOpeningTexts: artifacts.unmatchedOpeningTexts,
-          matchedOpeningSelections: artifacts.matchedOpeningSelections
-        }
+          topOpeningCandidateWindows: openingCandidates.topOpeningCandidateWindows,
+          unmatchedOpeningTexts: openingCandidates.unmatchedOpeningTexts,
+          matchedOpeningSelections: openingCandidates.matchedOpeningSelections
+        },
+        openingSampleConversationId: openingSampleConversation?.conversationId ?? null
       }
     };
   }
@@ -1039,6 +1042,90 @@ function buildPageTagCandidates(
 
 function normalizeKey(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function pickOpeningSampleConversation(conversations: RuntimeSampleConversationArtifact[]) {
+  const rows = Array.isArray(conversations) ? conversations : [];
+  if (rows.length === 0) {
+    return null;
+  }
+  const withOpening = rows.find((item) => {
+    const opening = asObject(item.openingBlocksJson);
+    const window = opening.opening_candidate_window;
+    return Array.isArray(window) && window.length > 0;
+  });
+  return withOpening ?? rows[0] ?? null;
+}
+
+function buildOpeningCandidatesFromSingleConversation(conversation: RuntimeSampleConversationArtifact | null) {
+  if (!conversation) {
+    return {
+      topOpeningCandidateWindows: [] as Array<{ signature: string[]; count: number; exampleConversationIds: string[] }>,
+      unmatchedOpeningTexts: [] as Array<{ text: string; count: number; exampleConversationIds: string[] }>,
+      matchedOpeningSelections: [] as Array<{ signal: string; rawText: string; decision: string; count: number; exampleConversationIds: string[] }>
+    };
+  }
+  const opening = asObject(conversation.openingBlocksJson);
+  const signature = asArray(opening.opening_candidate_window)
+    .map((item) => (typeof item?.redacted_text === "string" ? item.redacted_text.trim() : ""))
+    .filter(Boolean);
+
+  const unmatchedCount = new Map<string, number>();
+  for (const text of asArray(opening.unmatched_candidate_texts)) {
+    if (typeof text !== "string") {
+      continue;
+    }
+    const normalized = text.trim();
+    if (!normalized) {
+      continue;
+    }
+    unmatchedCount.set(normalized, (unmatchedCount.get(normalized) ?? 0) + 1);
+  }
+
+  const matchedCount = new Map<string, { signal: string; rawText: string; decision: string; count: number }>();
+  for (const row of asArray(opening.matched_selections)) {
+    const signal = typeof row?.signal === "string" ? row.signal.trim() : "";
+    const rawText = typeof row?.raw_text === "string" ? row.raw_text.trim() : "";
+    const decision = typeof row?.decision === "string" ? row.decision.trim() : "";
+    if (!signal || !rawText || !decision) {
+      continue;
+    }
+    const key = JSON.stringify([signal, rawText, decision]);
+    const bucket = matchedCount.get(key) ?? { signal, rawText, decision, count: 0 };
+    bucket.count += 1;
+    matchedCount.set(key, bucket);
+  }
+
+  return {
+    topOpeningCandidateWindows: signature.length > 0
+      ? [{
+          signature,
+          count: 1,
+          exampleConversationIds: [conversation.conversationId]
+        }]
+      : [],
+    unmatchedOpeningTexts: [...unmatchedCount.entries()]
+      .sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]))
+      .map(([text, count]) => ({
+        text,
+        count,
+        exampleConversationIds: [conversation.conversationId]
+      })),
+    matchedOpeningSelections: [...matchedCount.values()]
+      .sort((left, right) => right.count - left.count || `${left.signal}:${left.rawText}:${left.decision}`.localeCompare(`${right.signal}:${right.rawText}:${right.decision}`))
+      .map((item) => ({
+        ...item,
+        exampleConversationIds: [conversation.conversationId]
+      }))
+  };
+}
+
+function asObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+
+function asArray(value: unknown): any[] {
+  return Array.isArray(value) ? value : [];
 }
 
 export function compactPayload(value: string) {

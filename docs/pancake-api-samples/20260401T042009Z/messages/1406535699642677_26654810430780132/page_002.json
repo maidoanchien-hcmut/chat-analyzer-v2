@@ -1,0 +1,442 @@
+{
+  "activities": [],
+  "ad_clicks": {
+    "98fee136-ed60-4a08-9c9f-a0d94113757e": null
+  },
+  "allow_use_data_for_training_ai": false,
+  "app": "76",
+  "available_for_report_phone_numbers": [
+    "+84392382853"
+  ],
+  "banned_by": null,
+  "banned_count": 0,
+  "birthday": null,
+  "can_inbox": true,
+  "comment_count": 0,
+  "conv_customers": [
+    {
+      "fb_id": "26654810430780132",
+      "id": "98fee136-ed60-4a08-9c9f-a0d94113757e",
+      "name": "Thoa Kim"
+    }
+  ],
+  "conv_from": {
+    "email": "26654810430780132@facebook.com",
+    "id": "26654810430780132",
+    "name": "Thoa Kim"
+  },
+  "conv_phone_numbers": [
+    "0392382853"
+  ],
+  "conv_recent_phone_numbers": [
+    {
+      "captured": "0392382853",
+      "length": 10,
+      "m_id": "m_SXNfpeswP2twUYNHWMDpqwf2W4FRIbHjhI2rXHqn626_7C70NJcN8xjRREzDSauR85AOuKtq-kI7Nt_pLZPb4A",
+      "offset": 34,
+      "phone_number": "0392382853",
+      "status": 2
+    }
+  ],
+  "conversation_id": "1406535699642677_26654810430780132",
+  "customers": [
+    {
+      "ad_clicks": [],
+      "address_source": [],
+      "can_inbox": true,
+      "currency": null,
+      "customer_id": "79dddf86-9f24-4d1d-b0fa-32427305f77d",
+      "emails": [],
+      "fb_id": "26654810430780132",
+      "global_id": "100080789157277",
+      "id": "98fee136-ed60-4a08-9c9f-a0d94113757e",
+      "is_discount_by_level": true,
+      "is_followed": null,
+      "last_order_at": null,
+      "name": "Thoa Kim",
+      "order_count": 1,
+      "personal_info": {
+        "gender": "female",
+        "job": null,
+        "lives_in": null,
+        "profile_updated_at": "2026-03-31T14:01:44",
+        "relationship_status": null
+      },
+      "purchased_amount": 0,
+      "recent_phone_numbers": [
+        {
+          "order_id": 90085058067808,
+          "phone_number": "0392382853"
+        }
+      ],
+      "reward_point": 0,
+      "shop_customer_addresses": [],
+      "succeed_order_count": 0,
+      "tags": [],
+      "total_amount_referred": null,
+      "web_sources": []
+    }
+  ],
+  "extra_info": {},
+  "gender": "female",
+  "global_id": "100080789157277",
+  "is_banned": false,
+  "last_commented_at": false,
+  "lives_in": null,
+  "matched_wa_fb_customers": null,
+  "messages": [
+    {
+      "attachments": [],
+      "can_comment": false,
+      "can_hide": false,
+      "can_like": false,
+      "can_remove": false,
+      "can_reply_privately": false,
+      "comment_count": null,
+      "conversation_id": "1406535699642677_26654810430780132",
+      "edit_history": null,
+      "from": {
+        "ai_generated": false,
+        "email": "26654810430780132@facebook.com",
+        "id": "26654810430780132",
+        "name": "Thoa Kim"
+      },
+      "has_phone": false,
+      "id": "m_wI3mGxnQCfxw3IvXSs_KiQf2W4FRIbHjhI2rXHqn624WKnMcdR2aV8m3RcOBKRHX0N5gFYBLCxW12aiZjNdI7A",
+      "inserted_at": "2026-03-31T13:58:27.000000",
+      "is_hidden": false,
+      "is_livestream_order": null,
+      "is_parent": false,
+      "is_parent_hidden": false,
+      "is_removed": false,
+      "like_count": null,
+      "message": "\u003cdiv\u003eBắt đầu\u003c/div\u003e",
+      "message_tags": [],
+      "original_message": "Bắt đầu",
+      "page_id": "1406535699642677",
+      "parent_id": null,
+      "phone_info": [],
+      "private_reply_conversation": null,
+      "removed_by": null,
+      "rich_message": null,
+      "seen": false,
+      "show_info": true,
+      "type": "INBOX",
+      "user_likes": false
+    },
+    {
+      "attachments": [
+        {
+          "payload": {
+            "buttons": [
+              {
+                "payload": "{\"bk\":\"bqlwdl7mneh69l76\",\"btk\":\"kkaxpunxr6n2p8kz\",\"btnt\":\"blocks\",\"ck\":\"w23n2d7id8te07x4\",\"flid\":44058712,\"id\":\"BotcakeAI.Payload\",\"tp\":\"welcome\"}",
+                "title": "Khách hàng lần đầu",
+                "type": "postback"
+              },
+              {
+                "payload": "{\"bk\":\"mlw9hn8jzf\",\"btk\":\"7ki59mdgru7vmy29\",\"btnt\":\"blocks\",\"ck\":\"w23n2d7id8te07x4\",\"flid\":44058712,\"id\":\"BotcakeAI.Payload\",\"tp\":\"welcome\"}",
+                "title": "Khách hàng tái khám",
+                "type": "postback"
+              }
+            ],
+            "template_type": "button",
+            "text": "Chào Thoa Kim đến với phòng khám chuyên khoa da liễu O2SKIN . Bạn cần O2SKIN hỗ trợ gì cho bạn ?"
+          },
+          "title": "Chào Thoa Kim đến với phòng khám chuyên khoa da liễu O2SKIN . Bạn cần O2SKIN hỗ trợ gì cho bạn ?",
+          "type": "template"
+        }
+      ],
+      "can_comment": false,
+      "can_hide": false,
+      "can_like": false,
+      "can_remove": false,
+      "can_reply_privately": false,
+      "comment_count": null,
+      "conversation_id": "1406535699642677_26654810430780132",
+      "edit_history": null,
+      "from": {
+        "admin_id": "1406535699642677",
+        "admin_name": "Botcake",
+        "ai_generated": false,
+        "app_id": 556376998159104,
+        "email": "1406535699642677@facebook.com",
+        "flow_id": 44058712,
+        "id": "1406535699642677",
+        "name": "O2 SKIN - Trị Mụn Chuẩn Y Khoa"
+      },
+      "has_phone": false,
+      "id": "m_KapCylmtLlVKq7BnDgRFjQf2W4FRIbHjhI2rXHqn624jtATmhlk8trYRi1hgbb8RVq-2-nS_cZnovfd2l1Qt7A",
+      "inserted_at": "2026-03-31T13:58:30.000000",
+      "is_hidden": false,
+      "is_livestream_order": null,
+      "is_parent": false,
+      "is_parent_hidden": false,
+      "is_removed": false,
+      "like_count": null,
+      "message": "\u003cdiv\u003e\u003c/div\u003e",
+      "message_tags": [],
+      "original_message": "Chào Thoa Kim đến với phòng khám chuyên khoa da liễu O2SKIN . Bạn cần O2SKIN hỗ trợ gì cho bạn ?",
+      "page_id": "1406535699642677",
+      "parent_id": null,
+      "phone_info": [],
+      "private_reply_conversation": null,
+      "removed_by": null,
+      "rich_message": null,
+      "seen": false,
+      "show_info": true,
+      "type": "INBOX",
+      "user_likes": false
+    },
+    {
+      "attachments": [],
+      "can_comment": false,
+      "can_hide": false,
+      "can_like": false,
+      "can_remove": false,
+      "can_reply_privately": false,
+      "comment_count": null,
+      "conversation_id": "1406535699642677_26654810430780132",
+      "edit_history": null,
+      "from": {
+        "ai_generated": false,
+        "email": "26654810430780132@facebook.com",
+        "id": "26654810430780132",
+        "name": "Thoa Kim"
+      },
+      "has_phone": false,
+      "id": "m_oUV4Gh1Dv8PJ5HJhN5TmWgf2W4FRIbHjhI2rXHqn626pJUT3sYJvPOtsNxlviUcSVQ998WuXo__7xmhUbmlv1g",
+      "inserted_at": "2026-03-31T13:58:36.000000",
+      "is_hidden": false,
+      "is_livestream_order": null,
+      "is_parent": false,
+      "is_parent_hidden": false,
+      "is_removed": false,
+      "like_count": null,
+      "message": "\u003cdiv\u003eKhách hàng lần đầu\u003c/div\u003e",
+      "message_tags": [],
+      "original_message": "Khách hàng lần đầu",
+      "page_id": "1406535699642677",
+      "parent_id": null,
+      "phone_info": [],
+      "private_reply_conversation": null,
+      "removed_by": null,
+      "rich_message": null,
+      "seen": false,
+      "show_info": true,
+      "type": "INBOX",
+      "user_likes": false
+    },
+    {
+      "attachments": [
+        {
+          "payload": {
+            "buttons": [
+              {
+                "payload": "{\"bk\":\"nf1slor4wd\",\"btk\":\"uqpgu4fvmux1n7pq\",\"btnt\":\"blocks\",\"ck\":\"ioqubpw5b60lqn5s\",\"flid\":44058712,\"id\":\"BotcakeAI.Payload\",\"tp\":\"welcome\"}",
+                "title": "Tôi muốn gọi tư vấn ",
+                "type": "postback"
+              },
+              {
+                "payload": "{\"bk\":\"300k8yb8lh\",\"btk\":\"2y8jhi9e6of7catv\",\"btnt\":\"blocks\",\"ck\":\"ioqubpw5b60lqn5s\",\"flid\":44058712,\"id\":\"BotcakeAI.Payload\",\"tp\":\"welcome\"}",
+                "title": "Tôi muốn chat tư vấn",
+                "type": "postback"
+              },
+              {
+                "payload": "{\"bk\":\"4yni9vi7kx\",\"btk\":\"t3vpdyvxsstsb4tw\",\"btnt\":\"blocks\",\"ck\":\"ioqubpw5b60lqn5s\",\"flid\":44058712,\"id\":\"BotcakeAI.Payload\",\"tp\":\"welcome\"}",
+                "title": "Đặt lịch hẹn",
+                "type": "postback"
+              }
+            ],
+            "template_type": "button",
+            "text": " Khách hàng lần đầu\n"
+          },
+          "title": " Khách hàng lần đầu\u003cbr key='n_0' /\u003e",
+          "type": "template"
+        }
+      ],
+      "can_comment": false,
+      "can_hide": false,
+      "can_like": false,
+      "can_remove": false,
+      "can_reply_privately": false,
+      "comment_count": null,
+      "conversation_id": "1406535699642677_26654810430780132",
+      "edit_history": null,
+      "from": {
+        "admin_id": "1406535699642677",
+        "admin_name": "Botcake",
+        "app_id": 556376998159104,
+        "flow_id": 44058712,
+        "id": "1406535699642677",
+        "name": "O2 SKIN - Trị Mụn Chuẩn Y Khoa"
+      },
+      "has_phone": false,
+      "id": "m_Jk5lclzgXivdGgKMtJxilgf2W4FRIbHjhI2rXHqn6265FR5YYxMo8S5H0PGB2ODvyq8VI3bwl8wf_zlBx0x1Yw",
+      "inserted_at": "2026-03-31T13:58:39.000000",
+      "is_hidden": false,
+      "is_livestream_order": null,
+      "is_parent": false,
+      "is_parent_hidden": false,
+      "is_removed": false,
+      "like_count": null,
+      "message": "\u003cdiv\u003e\u003c/div\u003e",
+      "message_tags": [],
+      "original_message": " Khách hàng lần đầu\n",
+      "page_id": "1406535699642677",
+      "parent_id": null,
+      "phone_info": [],
+      "private_reply_conversation": null,
+      "removed_by": null,
+      "rich_message": null,
+      "seen": false,
+      "show_info": true,
+      "type": "INBOX",
+      "user_likes": false
+    },
+    {
+      "attachments": [],
+      "can_comment": false,
+      "can_hide": false,
+      "can_like": false,
+      "can_remove": false,
+      "can_reply_privately": false,
+      "comment_count": null,
+      "conversation_id": "1406535699642677_26654810430780132",
+      "edit_history": null,
+      "from": {
+        "ai_generated": false,
+        "email": "26654810430780132@facebook.com",
+        "id": "26654810430780132",
+        "name": "Thoa Kim"
+      },
+      "has_phone": false,
+      "id": "m_ELEkmTkUC2xYqbxMIZlyBwf2W4FRIbHjhI2rXHqn627u7YkdadYenwlOY80reXKjAU5KYDVdM7jYa6SNfEU0dg",
+      "inserted_at": "2026-03-31T13:58:44.000000",
+      "is_hidden": false,
+      "is_livestream_order": null,
+      "is_parent": false,
+      "is_parent_hidden": false,
+      "is_removed": false,
+      "like_count": null,
+      "message": "\u003cdiv\u003eĐặt lịch hẹn\u003c/div\u003e",
+      "message_tags": [],
+      "original_message": "Đặt lịch hẹn",
+      "page_id": "1406535699642677",
+      "parent_id": null,
+      "phone_info": [],
+      "private_reply_conversation": null,
+      "removed_by": null,
+      "rich_message": null,
+      "seen": false,
+      "show_info": true,
+      "type": "INBOX",
+      "user_likes": false
+    },
+    {
+      "attachments": [],
+      "can_comment": false,
+      "can_hide": false,
+      "can_like": false,
+      "can_remove": false,
+      "can_reply_privately": false,
+      "comment_count": null,
+      "conversation_id": "1406535699642677_26654810430780132",
+      "edit_history": null,
+      "from": {
+        "admin_id": "1406535699642677",
+        "admin_name": "Botcake",
+        "app_id": 556376998159104,
+        "flow_id": 44058712,
+        "id": "1406535699642677",
+        "name": "O2 SKIN - Trị Mụn Chuẩn Y Khoa"
+      },
+      "has_phone": false,
+      "id": "m_n6xSuEod1qmzTT26h4WYLwf2W4FRIbHjhI2rXHqn624uitoYaQ3bgtcMH592ddOUg9BnIYbQ47gprwo9Wpkj4A",
+      "inserted_at": "2026-03-31T13:58:47.000000",
+      "is_hidden": false,
+      "is_livestream_order": null,
+      "is_parent": false,
+      "is_parent_hidden": false,
+      "is_removed": false,
+      "like_count": null,
+      "message": "\u003cdiv\u003eThoa Kim vui lòng báo ngày \u0026amp; giờ, chi nhánh  thăm khám trực tiếp với Bác Sĩ và cung cấp HỌ TÊN \u0026amp; SĐT  để phòng khám đặt hẹn cho mình nhé!\u003cbr key='n_0' /\u003e O2SKIN hiện có 5 phòng khám \u003cbr key='n_1' /\u003e🏠 PK Quận 3 : Số 292/15 Cách Mạng Tháng 8, P.10, Q.3, TP. Hồ Chí Minh.\u003cbr key='n_2' /\u003e🏠 PK  Bình Thạnh : 31/3 Điện Biên Phủ, Phường 15, Quận Bình Thạnh.\u003cbr key='n_3' /\u003e🏠 PK  Thủ Đức : 13A, Thống nhất – P. Bình Thọ - Q. Thủ Đức.\u003cbr key='n_4' /\u003e🏠 PK Cần Thơ: MG1-12, Vincom Shophouse Xuân Khánh, 209 Đường 30/4, Phường Xuân Khánh, Quận Ninh Kiều, Cần Thơ.\u003cbr key='n_5' /\u003e🏠 PK Gò Vấp : Số nhà 36. Đường Số 8, Khu City Lands Park Hill, Phường 10 Gò Vấp\u003c/div\u003e",
+      "message_tags": [],
+      "original_message": "Thoa Kim vui lòng báo ngày \u0026 giờ, chi nhánh  thăm khám trực tiếp với Bác Sĩ và cung cấp HỌ TÊN \u0026 SĐT  để phòng khám đặt hẹn cho mình nhé!\n O2SKIN hiện có 5 phòng khám \n🏠 PK Quận 3 : Số 292/15 Cách Mạng Tháng 8, P.10, Q.3, TP. Hồ Chí Minh.\n🏠 PK  Bình Thạnh : 31/3 Điện Biên Phủ, Phường 15, Quận Bình Thạnh.\n🏠 PK  Thủ Đức : 13A, Thống nhất – P. Bình Thọ - Q. Thủ Đức.\n🏠 PK Cần Thơ: MG1-12, Vincom Shophouse Xuân Khánh, 209 Đường 30/4, Phường Xuân Khánh, Quận Ninh Kiều, Cần Thơ.\n🏠 PK Gò Vấp : Số nhà 36. Đường Số 8, Khu City Lands Park Hill, Phường 10 Gò Vấp",
+      "page_id": "1406535699642677",
+      "parent_id": null,
+      "phone_info": [],
+      "private_reply_conversation": null,
+      "removed_by": null,
+      "rich_message": null,
+      "seen": false,
+      "show_info": true,
+      "type": "INBOX",
+      "user_likes": false
+    },
+    {
+      "attachments": [],
+      "can_comment": false,
+      "can_hide": false,
+      "can_like": false,
+      "can_remove": false,
+      "can_reply_privately": false,
+      "comment_count": null,
+      "conversation_id": "1406535699642677_26654810430780132",
+      "edit_history": null,
+      "from": {
+        "ai_generated": false,
+        "email": "26654810430780132@facebook.com",
+        "id": "26654810430780132",
+        "name": "Thoa Kim"
+      },
+      "has_phone": false,
+      "id": "m_2PId4qAnxaDMuhi1MikJpgf2W4FRIbHjhI2rXHqn624ms2u9AByuBMwiZdXGf2uyZ1l-YXUeqsy1I3teX6c1aQ",
+      "inserted_at": "2026-03-31T13:59:41.000000",
+      "is_hidden": false,
+      "is_livestream_order": null,
+      "is_parent": false,
+      "is_parent_hidden": false,
+      "is_removed": false,
+      "like_count": null,
+      "message": "\u003cdiv\u003e13A Thống Nhất - P.Bình Thọ-Quận Thủ Đức\u003c/div\u003e",
+      "message_tags": [],
+      "original_message": "13A Thống Nhất - P.Bình Thọ-Quận Thủ Đức",
+      "page_id": "1406535699642677",
+      "parent_id": null,
+      "phone_info": [],
+      "private_reply_conversation": null,
+      "removed_by": null,
+      "rich_message": null,
+      "seen": false,
+      "show_info": true,
+      "type": "INBOX",
+      "user_likes": false
+    }
+  ],
+  "notes": null,
+  "post": null,
+  "profile_updated_at": "2026-03-31T14:01:44",
+  "read_watermarks": [
+    {
+      "is_group_conv": null,
+      "message_id": "m_lPXbbqQUqfd616qogZ0Ekwf2W4FRIbHjhI2rXHqn624s1C1wk_Q4J_Y5wEyQUa6IF5m5k9TwyZv4CL9Uj_mlxg",
+      "psid": "26654810430780132",
+      "watermark": 1774966396
+    }
+  ],
+  "recent_orders": [],
+  "recent_phone_numbers": [
+    "0392382853"
+  ],
+  "reported_count": 0,
+  "reports_by_phone": {
+    "+84392382853": {
+      "order_fail": 0,
+      "order_success": 1,
+      "warning": 0
+    }
+  },
+  "success": true,
+  "suggested_posts": null
+}

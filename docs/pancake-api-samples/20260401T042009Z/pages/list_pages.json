@@ -1,0 +1,609 @@
+{
+  "categorized": {
+    "activated": [
+      {
+        "active_user_ids": [
+          "0d21581c-9309-4568-ba67-7bfdf4abf72d",
+          "43663781-bda3-4025-bb8b-1c8aabe0bd82",
+          "10e2b382-7ec5-4f42-bdbe-88b37481c69d",
+          "06f2533a-7e81-42a9-a878-45b69a13ebd9",
+          "01927bd7-d705-4f4e-a142-de80b938ee5b",
+          "a4b0b9e9-ce0f-41bf-afca-0ba452cadf87",
+          "7ba14bc4-5aad-4960-b819-e121f43c863f",
+          "5a00d570-d4d0-44a9-945a-e63c010bf5da",
+          "44cf94fe-81e1-46d3-9edd-09f24245b5d6",
+          "e2df5325-246c-472d-a8e5-2a1c9e850ac3",
+          "819192bb-afb3-4f2a-89c5-2a0d10ad399d",
+          "3abff787-da68-4e6e-a4dc-72f271c32a65",
+          "dd54d344-1a89-470f-b59f-83627d90cb97",
+          "86022e70-f045-407a-8098-70c99f19e8bc",
+          "9256f89e-22c6-403e-b2e9-3bc91bdd5478",
+          "2b6c92ef-006b-42d8-9b87-87fe122fa9c9",
+          "d149f1d7-e0a1-4a74-ba02-54805403d399",
+          "1a39351d-a44a-47fb-b9f9-745ed7849970",
+          "4b800749-7667-4e91-b2b8-b46e440305c5",
+          "3bafaab6-0573-4b27-871c-c1b3fcd224b2",
+          "f174185a-bcc8-4354-9297-9e6692d2c1c8",
+          "1bd1b6a1-cf18-470e-a96d-bb6281613874",
+          "04358733-0449-49bd-8d3f-9bcb50a42b3d",
+          "c3b82857-0417-4e41-b1be-d5c33b3fd29a",
+          "be3352b5-7c38-4fc8-aa00-fcb6669aa398",
+          "ec817d9d-6626-4550-a943-d3d683cc9605",
+          "7c7637ed-2a5d-44c0-8cac-c0255425d458",
+          "89b4372f-89b8-475e-b875-e4db64ad7486",
+          "881e31f7-7488-4a28-8dfc-0ef11963ca52",
+          "1f1b3ed0-705c-467c-b241-2e33c99a2246",
+          "36c38f5c-3bda-490e-bd0d-2cdbd34897bd",
+          "3fd9f005-c13f-4b6c-9eb8-9fa140580722"
+        ],
+        "business": null,
+        "country": "VN",
+        "custom_page_color": "#bab44a",
+        "id": "1406535699642677",
+        "inserted_at": "2022-05-18T03:35:19",
+        "is_activated": true,
+        "is_silhouette": false,
+        "last_global_id_crawl": null,
+        "name": "O2 SKIN - Trị Mụn Chuẩn Y Khoa",
+        "need_fix_webhook": null,
+        "page_content_sync_group_id": null,
+        "permissions": {
+          "is_enabled_permissions": false
+        },
+        "platform": "facebook",
+        "platform_extra_info": {
+          "country": "VN",
+          "facebook_call_settings": {
+            "is_calling_eligible": false
+          },
+          "inbox_done_synced_at": "2026-04-01T01:22:55.981936",
+          "inbox_spam_synced_at": "2026-04-01T01:22:58.329610"
+        },
+        "quick_reply_sync_group_id": null,
+        "role_in_page": "ADMINISTER",
+        "settings": {
+          "allow_round_robin": false,
+          "auto_create_order": true,
+          "auto_hide_comment": "NONE",
+          "auto_lead_event_submit": [
+            "phone"
+          ],
+          "auto_like": false,
+          "auto_tagging": false,
+          "auto_unhide_comment": false,
+          "auto_unhide_comment_after": 24,
+          "call_config": {
+            "enable": false,
+            "enable_timetable": true,
+            "icon_enabled": true,
+            "is_calling_eligible": true,
+            "received_call_source": "pancake",
+            "timetable": {
+              "monday": "00:00-00:00"
+            }
+          },
+          "current_qr_key": "3OuYlEjW2KFli0pl",
+          "current_settings_key": "qgqrEsbzSIVfnjem",
+          "current_tag_index": 70,
+          "custom_page_color": "#bab44a",
+          "filter_multi_tag": "AND",
+          "full_tag": true,
+          "graph_rate_limit_level": 0,
+          "hard_round_robin": false,
+          "hard_round_robin_assign_to_other_user_online": false,
+          "hard_round_robin_comment_user_ids": [],
+          "hard_round_robin_group_mode": true,
+          "hard_round_robin_group_next_id": 2,
+          "hard_round_robin_groups": [
+            {
+              "id": "1",
+              "name": "#1",
+              "user_ids": []
+            }
+          ],
+          "hard_round_robin_inbox_user_ids": [],
+          "hard_round_robin_only_assign_to_online_user": false,
+          "hard_round_robin_priority_online": false,
+          "hard_round_robin_reassign_if_unread_after_x_min": 0,
+          "hard_round_robin_show_all_convs_if_user_not_in_list": false,
+          "hard_round_robin_tmp_ignore_user_ids": [],
+          "hard_round_robin_web_user_ids": [],
+          "hard_round_robin_working_time_value": [
+            1,
+            14
+          ],
+          "multi_tag": true,
+          "notification": true,
+          "page_access_token": "***REDACTED***",
+          "pinned_conversations": [],
+          "qr_autocomplete": true,
+          "self_assignment_round_robin": false,
+          "show_assigned": false,
+          "show_quick_reply_topics": true,
+          "sync_tag_to_botcake": false,
+          "toggle_tag_when_call_fail": [],
+          "toggle_tag_when_call_success": [],
+          "unread_first": true
+        },
+        "shop_id": 3940882,
+        "special_feature": false,
+        "tag_sync_group_id": null,
+        "timezone": 7,
+        "username": null,
+        "users": [
+          {
+            "fb_id": "122160990776225946",
+            "name": "Hong Anh Sale",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "04cf61d7-d312-4ea6-afa3-8285c37aef69"
+          },
+          {
+            "fb_id": "122106870242368826",
+            "name": "Vương Hồ",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "a6397dff-fea9-4279-8f1a-65b8a4ee929c"
+          },
+          {
+            "fb_id": "147920110161675",
+            "name": "Phụng Võ Võ",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "e312daf6-01d9-42f6-932f-36bc277fecfe"
+          },
+          {
+            "fb_id": "756943224448624",
+            "name": "Minh Anh",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "b2d60393-d7e3-453b-94a7-2edf13c1dd9a"
+          },
+          {
+            "fb_id": "660652584100127",
+            "name": "Trương Hà Quỳnh Vy",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "08979166-55ca-403b-a7c3-969071950b1f"
+          },
+          {
+            "fb_id": "1195889780525567",
+            "name": "Minh Thương",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "61e1852b-8fe1-4ff3-9e41-adc47ed7b691"
+          },
+          {
+            "fb_id": "176660623324148",
+            "name": "Như Như",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "db879cd1-433d-48d8-9af2-d8a1b2db154f"
+          },
+          {
+            "fb_id": "738233166315693",
+            "name": "Thành Đạo",
+            "page_id": "1406535699642677",
+            "phone_number": "84905168807",
+            "status": "removed",
+            "user_id": "f43051b9-41e4-4455-bbe6-fa74da591a5b"
+          },
+          {
+            "fb_id": "660471024116748",
+            "name": "Thanh Thảo",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "48e1e544-5f86-47b5-93fd-59f8df7ba875"
+          },
+          {
+            "fb_id": "351192530530374",
+            "name": "Thu Sun",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "3402d7c5-d865-4788-a90f-70a1aa245dd1"
+          },
+          {
+            "fb_id": "130912441040883",
+            "name": "Vũ Thị Hà",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "9510ca85-28f2-4bc1-89c7-d732b720d9ec"
+          },
+          {
+            "fb_id": "118508042026311",
+            "name": "Minh Thi",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "fbcd464e-43d6-4bb5-9f31-50da4eaef5ba"
+          },
+          {
+            "fb_id": "1806122239675676",
+            "name": "Uyển",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "619714fe-875f-4a25-9f16-299b37e46937"
+          },
+          {
+            "fb_id": "130825700708562",
+            "name": "Lê Tuấn",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "3c6b2c58-6f86-41fa-a52f-7770c8f96eb2"
+          },
+          {
+            "fb_id": "130999546278990",
+            "name": "Quỳnh Vy",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "f48dcc12-ad22-4d22-8563-70df975894b7"
+          },
+          {
+            "fb_id": "230425614567635",
+            "name": "Ngọc Trúc",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "b92a617d-2097-4f6e-9c45-f7c126da8594"
+          },
+          {
+            "fb_id": "191010332060008",
+            "name": "Đặng Thủy",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "b62b0798-5004-48e6-b225-5102b3623892"
+          },
+          {
+            "fb_id": "170230710306429",
+            "name": "Jane Pham",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "4522da5f-ea14-4e97-be23-5a4c03241160"
+          },
+          {
+            "fb_id": "1789913271246505",
+            "name": "Thái An",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "1cdbd4d1-f4e9-46f8-a00e-ca4fba7a8f9e"
+          },
+          {
+            "fb_id": "1165243940475189",
+            "name": "Thanh Liêm",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "277d4127-4972-4966-9227-c3390a4fbbd7"
+          },
+          {
+            "fb_id": "122105600342367522",
+            "name": "Jane Pham",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "225719ba-c86c-4cc4-be77-bff965c1933f"
+          },
+          {
+            "fb_id": "122625322275870",
+            "name": "Diễm Huyền",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "e1d3d80c-56ef-4bd0-b51a-5325ad82e2e8"
+          },
+          {
+            "fb_id": "229191578022232",
+            "name": "T.Mỹ Sale",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "f7f2d071-bb53-4c17-aec3-bb41ff7910b4"
+          },
+          {
+            "fb_id": "122096986376451069",
+            "name": "Phúc Tín Sale",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "removed",
+            "user_id": "3d6052d3-79cd-403b-a276-504d7588f0e0"
+          },
+          {
+            "fb_id": "432536073101336",
+            "name": "An Sale",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "5a00d570-d4d0-44a9-945a-e63c010bf5da"
+          },
+          {
+            "fb_id": "123983792645174",
+            "name": "Kiều Linh Cskh",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "3fd9f005-c13f-4b6c-9eb8-9fa140580722"
+          },
+          {
+            "fb_id": "122120210642542260",
+            "name": "Mỹ Duyên Sale",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "e2df5325-246c-472d-a8e5-2a1c9e850ac3"
+          },
+          {
+            "fb_id": "415980655469223",
+            "name": "Nguyễn Ngọc Yến",
+            "page_id": "1406535699642677",
+            "phone_number": "84963934292",
+            "status": "active",
+            "user_id": "89b4372f-89b8-475e-b875-e4db64ad7486"
+          },
+          {
+            "fb_id": "970343729743516",
+            "name": "Nguyen Tien",
+            "page_id": "1406535699642677",
+            "phone_number": "84937434422",
+            "status": "active",
+            "user_id": "36c38f5c-3bda-490e-bd0d-2cdbd34897bd"
+          },
+          {
+            "fb_id": "650286653362623",
+            "name": "Duyên Trần",
+            "page_id": "1406535699642677",
+            "phone_number": "84933020994",
+            "status": "active",
+            "user_id": "1f1b3ed0-705c-467c-b241-2e33c99a2246"
+          },
+          {
+            "fb_id": "1949041178654073",
+            "name": "Hoàng Chương",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "881e31f7-7488-4a28-8dfc-0ef11963ca52"
+          },
+          {
+            "fb_id": "308747335301888",
+            "name": "Thanh Luân Cskh",
+            "page_id": "1406535699642677",
+            "phone_number": "84793808473",
+            "status": "active",
+            "user_id": "f174185a-bcc8-4354-9297-9e6692d2c1c8"
+          },
+          {
+            "fb_id": "122130992174436833",
+            "name": "Lê Hoài Sale",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "44cf94fe-81e1-46d3-9edd-09f24245b5d6"
+          },
+          {
+            "fb_id": "1738234523160753",
+            "name": "Nguyễn Mỹ Thi",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "0d21581c-9309-4568-ba67-7bfdf4abf72d"
+          },
+          {
+            "fb_id": "1201029309959194",
+            "name": "Văn Thanh Quế",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "dd54d344-1a89-470f-b59f-83627d90cb97"
+          },
+          {
+            "fb_id": null,
+            "name": "Ngọc Trúc Sale",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "8d0bd113-b440-47ea-84c5-966686021303"
+          },
+          {
+            "fb_id": "600648793475022",
+            "name": "Đặng Su",
+            "page_id": "1406535699642677",
+            "phone_number": "84355430148",
+            "status": "active",
+            "user_id": "06f2533a-7e81-42a9-a878-45b69a13ebd9"
+          },
+          {
+            "fb_id": "122155945484518270",
+            "name": "Như Ý Cskh",
+            "page_id": "1406535699642677",
+            "phone_number": "84339903781",
+            "status": "active",
+            "user_id": "04358733-0449-49bd-8d3f-9bcb50a42b3d"
+          },
+          {
+            "fb_id": "122164951388625371",
+            "name": "Nhi Nguyen Cskh",
+            "page_id": "1406535699642677",
+            "phone_number": "84901844167",
+            "status": "active",
+            "user_id": "7c7637ed-2a5d-44c0-8cac-c0255425d458"
+          },
+          {
+            "fb_id": null,
+            "name": "Đoàn",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "c4f8f400-583c-45d0-9141-96be65876376"
+          },
+          {
+            "fb_id": "1108478195893028",
+            "name": "Lê",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "43663781-bda3-4025-bb8b-1c8aabe0bd82"
+          },
+          {
+            "fb_id": "1516032525688536",
+            "name": "Uyển Nhi Sale",
+            "page_id": "1406535699642677",
+            "phone_number": "84965011075",
+            "status": "active",
+            "user_id": "10e2b382-7ec5-4f42-bdbe-88b37481c69d"
+          },
+          {
+            "fb_id": "559390037174327",
+            "name": "Võ Thanh Hằng",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "a4b0b9e9-ce0f-41bf-afca-0ba452cadf87"
+          },
+          {
+            "fb_id": "525904881132373",
+            "name": "Nguyen Doan Anh Tuan",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "d149f1d7-e0a1-4a74-ba02-54805403d399"
+          },
+          {
+            "fb_id": "115410041648674",
+            "name": "Phương Thy Cskh",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "4b800749-7667-4e91-b2b8-b46e440305c5"
+          },
+          {
+            "fb_id": "122156659844771523",
+            "name": "Quynh Nga Cskh",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "3bafaab6-0573-4b27-871c-c1b3fcd224b2"
+          },
+          {
+            "fb_id": "122176673420472380",
+            "name": "Dương Thuận Cskh",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "c3b82857-0417-4e41-b1be-d5c33b3fd29a"
+          },
+          {
+            "fb_id": "122166350498794616",
+            "name": "Dịu Hương Cskh",
+            "page_id": "1406535699642677",
+            "phone_number": "84528195240",
+            "status": "active",
+            "user_id": "1a39351d-a44a-47fb-b9f9-745ed7849970"
+          },
+          {
+            "fb_id": "692752747547264",
+            "name": "Quỳnh Hoa",
+            "page_id": "1406535699642677",
+            "phone_number": "84923388733",
+            "status": "active",
+            "user_id": "01927bd7-d705-4f4e-a142-de80b938ee5b"
+          },
+          {
+            "fb_id": "457949114581030",
+            "name": "Phạm Meo Sale",
+            "page_id": "1406535699642677",
+            "phone_number": "84392372200",
+            "status": "active",
+            "user_id": "7ba14bc4-5aad-4960-b819-e121f43c863f"
+          },
+          {
+            "fb_id": "1842348925789249",
+            "name": "Anh Son Nguyen",
+            "page_id": "1406535699642677",
+            "phone_number": "84909960365",
+            "status": "active",
+            "user_id": "9256f89e-22c6-403e-b2e9-3bc91bdd5478"
+          },
+          {
+            "fb_id": "439080182576910",
+            "name": "Hữu Lộc Cskh",
+            "page_id": "1406535699642677",
+            "phone_number": "84925259409",
+            "status": "active",
+            "user_id": "be3352b5-7c38-4fc8-aa00-fcb6669aa398"
+          },
+          {
+            "fb_id": "114018484679256",
+            "name": "Thanh Phương Sale",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "2b6c92ef-006b-42d8-9b87-87fe122fa9c9"
+          },
+          {
+            "fb_id": "122108884346432652",
+            "name": "Ngọc Trúc",
+            "page_id": "1406535699642677",
+            "phone_number": "84939568532",
+            "status": "active",
+            "user_id": "1bd1b6a1-cf18-470e-a96d-bb6281613874"
+          },
+          {
+            "fb_id": "137884487406406",
+            "name": "Hưởng Đông",
+            "page_id": "1406535699642677",
+            "phone_number": "84346734464",
+            "status": "active",
+            "user_id": "819192bb-afb3-4f2a-89c5-2a0d10ad399d"
+          },
+          {
+            "fb_id": "774031203086076",
+            "name": "Vương Hoàng",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "ec817d9d-6626-4550-a943-d3d683cc9605"
+          },
+          {
+            "fb_id": "122102831186448295",
+            "name": "Lê Anh Tuấn Sale",
+            "page_id": "1406535699642677",
+            "phone_number": null,
+            "status": "active",
+            "user_id": "86022e70-f045-407a-8098-70c99f19e8bc"
+          },
+          {
+            "fb_id": "669194166575825",
+            "name": "Trân Đường",
+            "page_id": "1406535699642677",
+            "phone_number": "84822482872",
+            "status": "active",
+            "user_id": "3abff787-da68-4e6e-a4dc-72f271c32a65"
+          }
+        ]
+      }
+    ],
+    "activated_page_ids": [
+      "1406535699642677"
+    ],
+    "hidden": [],
+    "inactivated": [],
+    "nopermission": []
+  },
+  "success": true
+}

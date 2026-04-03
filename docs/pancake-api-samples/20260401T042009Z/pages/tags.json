@@ -1,0 +1,287 @@
+{
+  "tags": [
+    {
+      "color": "#ee11e2",
+      "id": 6,
+      "lighten_color": "rgba(238,17,226,0.4)",
+      "text": "MEO"
+    },
+    {
+      "color": "#3dd507",
+      "id": 50,
+      "lighten_color": "rgba(61,213,7,0.4)",
+      "text": "TRÚC"
+    },
+    {
+      "color": "#8d6ae0",
+      "id": 34,
+      "lighten_color": "rgba(141,106,224,0.4)",
+      "text": "NHI"
+    },
+    {
+      "color": "#139b66",
+      "id": 14,
+      "lighten_color": "rgba(19,155,102,0.4)",
+      "text": "PHƯƠNG"
+    },
+    {
+      "color": "#3ca0af",
+      "id": 62,
+      "is_lead_event": false,
+      "lighten_color": "rgba(60,160,175,0.4)",
+      "text": "TRÂN"
+    },
+    {
+      "color": "#b1b00d",
+      "id": 60,
+      "is_lead_event": false,
+      "lighten_color": "rgba(177,176,13,0.4)",
+      "text": "HOA "
+    },
+    {
+      "color": "#e71115",
+      "id": 61,
+      "is_lead_event": false,
+      "lighten_color": "rgba(231,17,21,0.4)",
+      "text": "HẰNG"
+    },
+    {
+      "color": "#fa075d",
+      "id": 48,
+      "lighten_color": "rgba(250,7,93,0.4)",
+      "text": "AN"
+    },
+    {
+      "color": "#f7ba07",
+      "id": 25,
+      "lighten_color": "rgba(247,186,7,0.4)",
+      "text": "HOÀI"
+    },
+    {
+      "color": "#ba2b13",
+      "id": 54,
+      "is_lead_event": false,
+      "lighten_color": "rgba(186,43,19,0.4)",
+      "text": "H. ANH"
+    },
+    {
+      "color": "#188507",
+      "id": 51,
+      "is_lead_event": false,
+      "lighten_color": "rgba(24,133,7,0.4)",
+      "text": "VƯƠNG"
+    },
+    {
+      "color": "#277ba6",
+      "id": 15,
+      "lighten_color": "rgba(39,123,166,0.4)",
+      "text": "TUẤN"
+    },
+    {
+      "color": "#9254de",
+      "id": 41,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "Quận 3"
+    },
+    {
+      "color": "#9254de",
+      "id": 36,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "Bình Thạnh"
+    },
+    {
+      "color": "#9254de",
+      "id": 37,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "Thủ Đức"
+    },
+    {
+      "color": "#9254de",
+      "id": 39,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "Gò Vấp"
+    },
+    {
+      "color": "#9254de",
+      "id": 38,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "Cần Thơ"
+    },
+    {
+      "color": "#922e05",
+      "id": 29,
+      "lighten_color": "rgba(146,46,5,0.4)",
+      "text": "ĐÃ CHỐT HẸN"
+    },
+    {
+      "color": "#ff7a45",
+      "id": 43,
+      "lighten_color": "rgba(255,122,69,0.4)",
+      "text": "SĐT/CHƯA CHỐT"
+    },
+    {
+      "color": "#ff7a45",
+      "id": 40,
+      "lighten_color": "rgba(255,122,69,0.4)",
+      "text": "KH mới"
+    },
+    {
+      "color": "#ff7a45",
+      "id": 31,
+      "lighten_color": "rgba(255,122,69,0.4)",
+      "text": "KH tiềm năng"
+    },
+    {
+      "color": "#0e0c01",
+      "id": 21,
+      "lighten_color": "rgba(14,12,1,0.4)",
+      "text": "Không nhu cầu"
+    },
+    {
+      "color": "#010610",
+      "id": 44,
+      "lighten_color": "rgba(1,6,16,0.4)",
+      "text": "DV khác"
+    },
+    {
+      "color": "#010a0e",
+      "id": 45,
+      "lighten_color": "rgba(1,10,14,0.4)",
+      "text": "Spam"
+    },
+    {
+      "color": "#5f0988",
+      "id": 46,
+      "lighten_color": "rgba(95,9,136,0.4)",
+      "text": "ĐỢI CK ONLINE"
+    },
+    {
+      "color": "#535154",
+      "id": 8,
+      "lighten_color": "rgba(83,81,84,0.4)",
+      "text": "KH TÁI KHÁM"
+    },
+    {
+      "color": "#9254de",
+      "id": 58,
+      "is_lead_event": false,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "ORI DERM"
+    },
+    {
+      "color": "#9254de",
+      "id": 63,
+      "is_lead_event": false,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "Phụ Huynh"
+    },
+    {
+      "color": "#9254de",
+      "id": 64,
+      "is_lead_event": false,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "Người đi làm"
+    },
+    {
+      "color": "#9254de",
+      "id": 65,
+      "is_lead_event": false,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "\u003c18 tuổi"
+    },
+    {
+      "color": "#1550c6",
+      "id": 66,
+      "is_lead_event": false,
+      "lighten_color": "rgba(21,80,198,0.4)",
+      "text": "Sinh Viên"
+    },
+    {
+      "color": "#9254de",
+      "id": 69,
+      "is_lead_event": false,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "UDCT"
+    },
+    {
+      "color": "#9254de",
+      "id": 70,
+      "is_lead_event": false,
+      "lighten_color": "rgba(146,84,222,0.4)",
+      "text": "CSKH"
+    },
+    {
+      "color": "#12c2c2",
+      "id": 17,
+      "is_deactive": true,
+      "lighten_color": "rgba(18,194,194,0.4)",
+      "text": "Q. VY"
+    },
+    {
+      "color": "#b04b6a",
+      "id": 20,
+      "is_deactive": true,
+      "lighten_color": "rgba(176,75,106,0.4)",
+      "text": "THẢO"
+    },
+    {
+      "color": "#e66a17",
+      "id": 18,
+      "is_deactive": true,
+      "lighten_color": "rgba(230,106,23,0.4)",
+      "text": "SƯƠNG"
+    },
+    {
+      "color": "#ff6d6d",
+      "id": 49,
+      "is_deactive": true,
+      "lighten_color": "rgba(255,109,109,0.4)",
+      "text": "Mỹ Thi"
+    },
+    {
+      "color": "#ce6b00",
+      "id": 19,
+      "is_deactive": true,
+      "lighten_color": "rgba(206,107,0,0.4)",
+      "text": "HÀ"
+    },
+    {
+      "color": "#e0090d",
+      "id": 52,
+      "is_deactive": true,
+      "is_lead_event": false,
+      "lighten_color": "rgba(224,9,13,0.4)",
+      "text": "Thu Thủy"
+    },
+    {
+      "color": "#794b03",
+      "id": 4,
+      "is_deactive": true,
+      "lighten_color": "rgba(121,75,3,0.4)",
+      "text": "TH.MY"
+    },
+    {
+      "color": "#1b7eed",
+      "id": 57,
+      "is_deactive": true,
+      "is_lead_event": false,
+      "lighten_color": "rgba(27,126,237,0.4)",
+      "text": "Huyền"
+    },
+    {
+      "color": "#fa8c16",
+      "id": 56,
+      "is_deactive": true,
+      "is_lead_event": false,
+      "lighten_color": "rgba(250,140,22,0.4)",
+      "text": "LINH"
+    },
+    {
+      "color": "#47a2e2",
+      "id": 12,
+      "is_deactive": true,
+      "lighten_color": "rgba(71,162,226,0.4)",
+      "text": "SU"
+    }
+  ]
+}
