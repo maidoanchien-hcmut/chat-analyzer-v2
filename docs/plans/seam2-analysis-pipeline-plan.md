@@ -1,5 +1,7 @@
 # Seam 2 Analysis Pipeline Plan
 
+> Note: Tài liệu này có một số chỗ hard-pin ADK từ draft cũ. Quyết định framework hiện tại phải theo [AI Runtime Selection Design Gate](./ai-runtime-selection-design-gate.md) và [design.md](../design.md).
+
 **Goal:** Khoá Seam 2 theo hướng insight-first để trả lời đúng nhu cầu của BoD: inbox mới bắt đầu bằng gì, inbox tái khám bắt đầu bằng gì, khách đang quan tâm gì, tâm trạng ra sao, kết quả chốt theo ngày, và feedback coaching cho phản hồi của nhân viên.
 **Architecture:** `backend/` là owner của orchestration, persistence, publish gate và read API; `service/` là owner của AI runtime và phải dùng code-based Google ADK qua gRPC; `frontend/` là owner của UI vận hành và màn đọc kết quả.
 **Storage Scope:** Conversation-analysis path của Seam 2 giữ 2 bảng lưu trữ business-facing là `analysis_run` và `analysis_result`.

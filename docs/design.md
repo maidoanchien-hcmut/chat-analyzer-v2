@@ -23,6 +23,16 @@ Tôi muốn thống kê hiện trạng để ưu tiên cải tiến các kịch 
 
 Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 
+## Yêu cầu kỹ thuật
+
+- Hệ thống phải đảm bảo phục vụ được tất cả nhu cầu trong [ui-flows](./ui-flows.md) không được thiếu bất kỳ tính năng nào.
+- Thiết kế datawarehouse vận dụng hết khả năng của postgres17, có thể sử dụng các tính năng mới nhất của postgres17 để tối ưu hiệu suất và khả năng mở rộng.
+- Tách biệt 2 seam rõ ràng là lưu trữ dữ liệu đã được chuẩn hoá và phân tích dữ liệu bằng AI, để có thể tối ưu hiệu suất và khả năng mở rộng của từng phần, đồng thời đảm bảo tính linh hoạt trong việc thay đổi hoặc nâng cấp từng phần mà không ảnh hưởng đến phần còn lại.
+- Không nhúng AI vào seam lưu trữ dữ liệu.
+- Liên kết được dữ liệu hội thoại sau transform với khách trong hệ thống app crm nội bộ.
+- Có khả năng linh hoạt trong những tình huống hệ thống mất ổn định và service chết, có thể đảm bảo tính toàn vẹn của dữ liệu và khả năng khôi phục nhanh chóng.
+- Có snapshot theo ngày để có thể dễ dàng theo dõi và phân tích dữ liệu theo thời gian, đồng thời có thể khôi phục dữ liệu về một thời điểm cụ thể nếu cần thiết.
+
 ## Nguyên tắc bất biến
 
 - Hệ thống có 2 seam-owner tách biệt:
@@ -198,8 +208,8 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 - Lưu dữ liệu canonical vào hệ thống bảng mới trong postgres17.
 - Dữ liệu canonical là nguồn sự thật duy nhất cho các job downstream.
 - Schema design cho Seam 1:
-  - `page`: owner của thông tin page-level như `page_name`, `page_id`, các config theo page như tag classification, opening block signature, v.v...
-  - `page_prompt_version`: owner của prompt config theo page và versioning prompt; active version được tham chiếu từ `connected_page.active_prompt_version_id`
+  - `connected_page`: owner của thông tin page-level như `page_name`, `pancake_page_id`, các config theo page như tag classification, opening rules, active AI profiles, notification targets, v.v...
+  - `page_ai_profile_version`: owner của versioned AI execution profile theo page và capability; active versions được tham chiếu từ `connected_page.active_ai_profiles_json`
   - `etl_run`: owner của scheduled/manual run, `target_date`, `snapshot`, `run_mode`, trạng thái run, publish state, requested window, effective window, v.v...
   - `conversation_day`: owner của conversation slice và evidence đã gom nhóm theo ngày như `customer_display_name` nguyên văn từ source, tags, normalized phone candidates
   - `message`: owner của transcript message-level, actor/message type chuẩn hoá, `redacted_text`, attachment metadata, và cờ `is_meaningful_human_message`, `is_opening_block_message`, v.v...
@@ -225,8 +235,7 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 - Schema lưu trữ business-facing của Seam 2 gồm:
   - `analysis_run`: owner của scheduled/manual conversation-analysis run, retry, coverage, prompt/model/schema snapshot và publish outcome
   - `analysis_result`: output table của conversation analysis
-  - `thread_customer_mapping_run`: owner của scheduled/manual AI mapping run, retry, coverage, prompt/model/schema snapshot và review outcome
-  - `thread_customer_mapping_decision`: append-only output table của AI-assisted CRM mapping
+  - `thread_customer_mapping_decision`: output/audit table duy nhất của AI-assisted CRM mapping; mỗi row vừa là decision của một thread, vừa mang metadata của mapping batch đó
 - Input AI cho một `conversation_day` phải là một evidence bundle đã được freeze ở thời điểm run, tối thiểu gồm:
   - toàn bộ transcript redacted của ngày `D` với `sender_role`, `message_type`, `is_meaningful_human_message`, `is_opening_block_message`
   - `opening_blocks_json` đã được giữ lại từ Seam 1, bao gồm cả parsed opening block và opening block candidate window nếu có
@@ -283,12 +292,15 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
   - chỉ các thread nhập nhằng mới đi vào AI mapping flow
   - `backend/` là owner của CRM candidate retrieval từ app nội bộ; `service/` chỉ nhận candidate set đã freeze cùng evidence bundle của thread
   - input của một mapping unit tối thiểu gồm `page_id`, `thread_id`, `customer_display_name`, `normalized_phone_candidates`, opening/tag evidence, transcript evidence đã redact, existing mapping state nếu có, và candidate set từ CRM nội bộ
-  - `thread_customer_mapping_run` phải snapshot `model_name`, `prompt_version`, `prompt_snapshot_json`, `output_schema_version`, `generation_config_json`, retry state và coverage giống logic audit của `analysis_run`
-  - `thread_customer_mapping_decision` phải là append-only, mỗi row tương ứng một thread trong một run, và tối thiểu giữ:
+  - `thread_customer_mapping_decision` phải là append-only, mỗi row tương ứng một thread trong một `mapping_batch_id`, và tối thiểu giữ:
+    - `mapping_batch_id`
+    - `run_mode`
+    - `source_etl_run_id` nếu batch đó bám vào một snapshot Seam 1 cụ thể
+    - runtime snapshot tối thiểu gồm `model_name`, `output_schema_version`, profile/config đã dùng
     - `selected_customer_id` hoặc `unknown`
     - `confidence_score`
     - `decision_status`
-    - `manual_review_required`
+    - `promotion_state`
     - `evidence_json`
     - `prompt_hash`
     - `failure_info_json`
@@ -303,40 +315,31 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 
 - AI seam không chạy ad-hoc trực tiếp trên dữ liệu sống, mà chạy thông qua job definition.
 - `backend/` là owner của scheduler, prompt snapshot freeze, CRM candidate retrieval, gRPC client, persistence, publish/supersede, review queue và read API.
-- `service/` là owner của prompt builder, validation, batch planning và code-based Google ADK runtime; `service/` không phải owner của business persistence hay CRM source integration.
+- `service/` là owner của prompt builder, validation, batch planning, model adapter và workflow adapter nội bộ; `service/` không phải owner của business persistence hay CRM source integration.
 - `frontend/` là owner của UI vận hành, manual rerun, màn đọc kết quả phân tích, review queue của CRM mapping, và prompt editor theo page ở config domain riêng.
 - `analysis_run` là owner của run-level state cho conversation analysis.
 - `analysis_result` là output table của conversation analysis:
   - mỗi row tương ứng đúng một `conversation_day` hoặc một `manual_slice`
   - chỉ chứa scalar dimensions, supporting text bounded, `prompt_hash`, `failure_info_json` và publish state
-- `thread_customer_mapping_run` là owner của run-level state cho AI-assisted CRM mapping.
-- `thread_customer_mapping_decision` là output/audit table của AI-assisted CRM mapping.
+- `thread_customer_mapping_decision` là output/audit table duy nhất của AI-assisted CRM mapping; mapping batch metadata được gộp thẳng trên mỗi row thay vì tách run table riêng.
 - `thread_customer_mapping` vẫn là current-state table được downstream join trực tiếp; nó không thay thế decision history.
-- Production path trong `service/` phải dùng Python ADK code-based runtime; không dùng `Agent Config` YAML làm production path.
-- Conversation analyzer trong `service/` phải dùng structured output cho từng unit và không phụ thuộc vào tool calling hoặc multi-agent delegation trong cùng request phân tích, vì output contract phải ổn định và dễ audit.
-- AI mapping agent cũng phải trả structured output theo mapping schema đã pin; nếu cần orchestration nhiều bước thì orchestration đó vẫn phải nằm sau cùng một external contract ổn định.
-- Batch planning, concurrency cap, retry với jitter, rate-limit handling, validation và terminalization phải nằm ở lớp orchestration của `service/`, không nhét vào business persistence và không dựa vào ADK session để làm source of truth.
-- ADK session/state chỉ là runtime scratchpad tạm thời cho một invocation; mỗi unit phân tích phải được coi là ephemeral và không được dùng thay cho `analysis_run` hoặc `analysis_result`.
-- Nếu sau này cần orchestration phức tạp hơn trong `service/`, có thể dùng custom ADK `BaseAgent`, nhưng external contract vẫn phải giữ nguyên `backend` owns persistence và output chính thức chỉ đi vào các bảng owner đã chốt của Seam 2.
+- External contract giữa `backend/` và `service/` phải framework-neutral, được version hoá bằng Python `pydantic` v2 models cho request/response, output schema và error envelope; gRPC chỉ là transport.
+- Production path trong `service/` mặc định dùng self-owned orchestration + structured generation; không hard-pin `ADK` hay `LangGraph` vào source of truth của domain.
+- Conversation analyzer trong `service/` phải dùng structured output theo `pydantic` schema cho từng unit và không phụ thuộc vào tool calling hoặc multi-agent delegation trong cùng request phân tích, vì output contract phải ổn định và dễ audit.
+- AI mapping capability cũng phải trả structured output theo mapping schema đã pin; nếu cần orchestration nhiều bước hoặc human review branch phức tạp thì có thể dùng `LangGraph` như implementation detail phía sau cùng một external contract ổn định.
+- Batch planning, concurrency cap, retry với jitter, rate-limit handling, validation và terminalization phải nằm ở lớp orchestration của `service/`, không nhét vào business persistence và không dựa vào framework session/checkpoint làm source of truth.
+- Session/checkpoint/state của framework chỉ là runtime scratchpad tạm thời cho một invocation; mỗi unit phân tích phải được coi là ephemeral và không được dùng thay cho `analysis_run`, `analysis_result` hoặc metadata persisted trong `thread_customer_mapping_decision`.
+- Nếu sau này cần orchestration phức tạp hơn trong `service/`, ưu tiên giữ orchestration owner ở `backend` + Postgres; chỉ đưa `LangGraph` vào các subflow thật sự cần branching/HITL mà không làm thay đổi external contract hoặc owner boundary của Seam 2.
 - Scheduled daily unique theo `source_etl_run_id`; retry chỉ nằm trong cùng `analysis_run`.
 - Scheduled daily được publish khi mọi unit đã terminal ở `succeeded` hoặc `unknown`.
 - `manual_slice` mặc định là `diagnostic`, không tự đi vào official dashboard.
 - `manual_day` có thể tạo `analysis_run` mới và publish để supersede official cũ nếu operator chủ động chọn.
-- AI mapping run có thể có queue riêng cho `manual_review_required`; publish của dashboard conversation analysis không được block bởi queue này.
+- AI mapping flow có thể có queue riêng cho các decision có `decision_status = 'manual_review_required'`; publish của dashboard conversation analysis không được block bởi queue này.
 - Thiết kế này cho phép chạy thử, chạy lại, backfill hoặc replay bằng prompt mới mà không làm thay đổi dữ liệu canonical của Seam 1.
 - Internal data path giữa `backend` và `service` phải tối ưu cho bulk processing:
   - public API vẫn là REST
   - bulk daily processing không dùng REST JSON gọi qua lại cho từng thread
   - `backend` gửi batch/unit payload sang `service` qua gRPC và nhận kết quả per-unit qua gRPC response hoặc stream
-
-## Yêu cầu kỹ thuật
-
-- Thiết kế datawarehouse vận dụng hết khả năng của postgres17, có thể sử dụng các tính năng mới nhất của postgres17 để tối ưu hiệu suất và khả năng mở rộng.
-- Tách biệt 2 seam rõ ràng là lưu trữ dữ liệu đã được chuẩn hoá và phân tích dữ liệu bằng AI, để có thể tối ưu hiệu suất và khả năng mở rộng của từng phần, đồng thời đảm bảo tính linh hoạt trong việc thay đổi hoặc nâng cấp từng phần mà không ảnh hưởng đến phần còn lại.
-- Không nhúng AI vào seam lưu trữ dữ liệu.
-- Liên kết được dữ liệu hội thoại sau transform với khách trong hệ thống app crm nội bộ.
-- Có khả năng linh hoạt trong những tình huống hệ thống mất ổn định và service chết, có thể đảm bảo tính toàn vẹn của dữ liệu và khả năng khôi phục nhanh chóng.
-- Có snapshot theo ngày để có thể dễ dàng theo dõi và phân tích dữ liệu theo thời gian, đồng thời có thể khôi phục dữ liệu về một thời điểm cụ thể nếu cần thiết.
 
 ## Các cơ chế giao tiếp
 

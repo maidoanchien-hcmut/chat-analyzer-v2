@@ -1,5 +1,7 @@
 # Seam 1 Lean Schema Matrix
 
+> Legacy draft. Source of truth mới nằm ở [system-schema-matrix.md](./system-schema-matrix.md).
+
 Tài liệu này mô tả schema rút gọn cho Seam 1 với 3 bảng canonical và 1 bảng mapping phụ trợ:
 
 - `etl_run`

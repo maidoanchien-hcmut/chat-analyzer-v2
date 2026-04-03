@@ -1,5 +1,7 @@
 # Seam 2 Analysis Schema Matrix
 
+> Legacy draft. Source of truth mới nằm ở [system-schema-matrix.md](./system-schema-matrix.md).
+
 Tài liệu này chốt schema của conversation-analysis path trong Seam 2 theo hướng tối giản:
 
 - chỉ có 2 bảng lưu trữ:
