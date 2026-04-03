@@ -177,13 +177,13 @@ function sanitizeAnalysisResult(runtime: AnalysisRuntimeSnapshot, bundle: Analys
     resultStatus: raw.resultStatus === "succeeded" ? "succeeded" : "unknown",
     promptHash: nonEmpty(raw.promptHash) ?? buildPromptHash(runtime, bundle.conversationDayId),
     openingTheme: nonEmpty(raw.openingTheme) ?? "unknown",
-    customerMood: nonEmpty(raw.customerMood) ?? "unknown",
+    customerMood: normalizeCustomerMood(nonEmpty(raw.customerMood)),
     primaryNeed: nonEmpty(raw.primaryNeed) ?? "unknown",
     primaryTopic: nonEmpty(raw.primaryTopic) ?? "unknown",
-    contentCustomerType: nonEmpty(raw.contentCustomerType) ?? "unknown",
-    closingOutcomeAsOfDay: nonEmpty(raw.closingOutcomeAsOfDay) ?? "unknown",
-    responseQualityLabel: nonEmpty(raw.responseQualityLabel) ?? "unknown",
-    processRiskLevel: nonEmpty(raw.processRiskLevel) ?? "unknown",
+    contentCustomerType: normalizeCustomerType(nonEmpty(raw.contentCustomerType)),
+    closingOutcomeAsOfDay: normalizeClosingOutcome(nonEmpty(raw.closingOutcomeAsOfDay)),
+    responseQualityLabel: normalizeResponseQualityLabel(nonEmpty(raw.responseQualityLabel)),
+    processRiskLevel: normalizeProcessRiskLevel(nonEmpty(raw.processRiskLevel)),
     responseQualityIssueText: raw.responseQualityIssueText ?? null,
     responseQualityImprovementText: raw.responseQualityImprovementText ?? null,
     processRiskReasonText: raw.processRiskReasonText ?? null,
@@ -271,6 +271,85 @@ function stringField(obj: Record<string, unknown>, key: string) {
 function numberField(obj: Record<string, unknown>, key: string) {
   const value = obj[key];
   return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function normalizeCustomerMood(value: string | null) {
+  return normalizeEnumValue(value, new Set(["positive", "neutral", "negative"]), {
+    tich_cuc: "positive",
+    tot: "positive",
+    binh_thuong: "neutral",
+    tieu_cuc: "negative",
+    xau: "negative"
+  });
+}
+
+function normalizeCustomerType(value: string | null) {
+  return normalizeEnumValue(value, new Set(["kh_moi", "tai_kham"]), {
+    khach_moi: "kh_moi",
+    first_time: "kh_moi",
+    lan_dau: "kh_moi",
+    new_customer: "kh_moi",
+    khach_tai_kham: "tai_kham",
+    revisit: "tai_kham",
+    returning_customer: "tai_kham",
+    tai_kham_lai: "tai_kham"
+  });
+}
+
+function normalizeClosingOutcome(value: string | null) {
+  return normalizeEnumValue(value, new Set(["booked", "follow_up", "not_closed"]), {
+    da_chot_hen: "booked",
+    book_appointment: "booked",
+    booking: "booked",
+    followup: "follow_up",
+    follow_up_later: "follow_up",
+    chua_chot: "not_closed",
+    not_booked: "not_closed"
+  });
+}
+
+function normalizeResponseQualityLabel(value: string | null) {
+  return normalizeEnumValue(value, new Set(["strong", "adequate", "needs_attention"]), {
+    tot: "strong",
+    dat: "adequate",
+    can_cai_thien: "needs_attention",
+    need_attention: "needs_attention"
+  });
+}
+
+function normalizeProcessRiskLevel(value: string | null) {
+  return normalizeEnumValue(value, new Set(["low", "medium", "high"]), {
+    thap: "low",
+    trung_binh: "medium",
+    cao: "high"
+  });
+}
+
+function normalizeEnumValue(
+  value: string | null,
+  allowed: Set<string>,
+  aliases: Record<string, string>
+) {
+  const key = canonicalEnumKey(value ?? "");
+  if (allowed.has(key)) {
+    return key;
+  }
+  const mapped = aliases[key];
+  if (mapped && allowed.has(mapped)) {
+    return mapped;
+  }
+  return "unknown";
+}
+
+function canonicalEnumKey(value: string) {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
 }
 
 export const analysisService = new AnalysisService();

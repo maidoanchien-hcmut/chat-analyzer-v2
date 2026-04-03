@@ -1,5 +1,5 @@
 import type { AppState, OnboardingSample, RunGroupSummary, ThreadDetail, ThreadSummary, View } from "./types.ts";
-import { compactText, escapeHtml, formatDateTime, shortId } from "./utils.ts";
+import { compactText, escapeHtml, formatDateTime, listTimezones, shortId } from "./utils.ts";
 
 const TAG_SIGNAL_OPTIONS = [
   "null",
@@ -97,7 +97,7 @@ function renderOnboarding(state: AppState) {
       <div class="grid two">
         <label><span>Token</span><input id="ob-token" type="password" value="${escapeHtml(state.onboardingToken)}" /></label>
         <label><span>Pancake page</span><select id="ob-page-id">${options}</select></label>
-        <label><span>Timezone</span><input id="ob-timezone" value="${escapeHtml(state.onboardingTimezone)}" /></label>
+        <label><span>Timezone</span>${renderTimezoneSelect("ob-timezone", state.onboardingTimezone)}</label>
         <label><span>Initial limit</span><input id="ob-limit" type="number" min="1" value="${escapeHtml(state.onboardingLimit)}" /></label>
         <label><span>Processing</span><select id="ob-mode"><option value="etl_only" ${state.onboardingMode === "etl_only" ? "selected" : ""}>etl_only</option><option value="etl_and_ai" ${state.onboardingMode === "etl_and_ai" ? "selected" : ""}>etl_and_ai</option></select></label>
         <div class="row"><label class="check"><input id="ob-etl" type="checkbox" ${state.onboardingEtlEnabled ? "checked" : ""} />etl_enabled</label><label class="check"><input id="ob-analysis" type="checkbox" ${state.onboardingAnalysisEnabled ? "checked" : ""} />analysis_enabled</label></div>
@@ -106,7 +106,7 @@ function renderOnboarding(state: AppState) {
       ${renderOnboardingTagCandidates(state)}
       ${renderOnboardingOpeningCandidates(state)}
       <label><span>Prompt</span><textarea id="ob-prompt" class="prompt-box">${escapeHtml(state.onboardingPrompt)}</textarea></label>
-      <p class="muted">Prompt này chỉ chứa quy trình vận hành và nguyên tắc đánh giá theo page. Vai trò "AI nhà phân tích hội thoại" được khóa cứng ở system prompt backend.</p>
+      <p class="muted">Prompt này chỉ chứa quy trình vận hành và nguyên tắc đánh giá theo page. Vai trò "AI nhà phân tích hội thoại" được khóa cứng ở system prompt của Python service.</p>
       ${state.onboardingSample ? renderOnboardingSampleSummary(state.onboardingSample) : `<p class="muted">Chưa có sample runtime. Bấm "2. Sample" để lấy tag candidates và opening candidates từ dữ liệu thật.</p>`}
     </section>
   `;
@@ -195,7 +195,7 @@ function renderSettings(state: AppState) {
       <div class="section">
         <h2>Config page</h2>
         <div class="grid two">
-          <label><span>Timezone</span><input id="setting-timezone" value="${escapeHtml(state.settingTimezone)}" /></label>
+          <label><span>Timezone</span>${renderTimezoneSelect("setting-timezone", state.settingTimezone)}</label>
           <div class="row"><label class="check"><input id="setting-etl" type="checkbox" ${state.settingEtlEnabled ? "checked" : ""} />etl_enabled</label><label class="check"><input id="setting-analysis" type="checkbox" ${state.settingAnalysisEnabled ? "checked" : ""} />analysis_enabled</label></div>
         </div>
         <div class="grid two">
@@ -203,7 +203,7 @@ function renderSettings(state: AppState) {
           <label><span>Opening rules (mỗi dòng: signal | decision | raw_text)</span><textarea id="setting-opening-rules" class="json-box">${escapeHtml(state.settingOpeningRulesText)}</textarea></label>
         </div>
         <label><span>Prompt</span><textarea id="setting-prompt" class="prompt-box">${escapeHtml(state.settingPrompt)}</textarea></label>
-        <p class="muted">Phần này chỉ chỉnh quy trình vận hành và nguyên tắc đánh giá. Vai trò hệ thống của AI được cố định trong backend.</p>
+        <p class="muted">Phần này chỉ chỉnh quy trình vận hành và nguyên tắc đánh giá. Vai trò hệ thống của AI được cố định trong Python service.</p>
         <div class="row"><button data-action="load-setting">Tải</button><button data-action="save-setting">Lưu config</button><button data-action="save-prompt">Lưu prompt mới</button></div>
       </div>
       <div class="section">
@@ -301,8 +301,8 @@ function renderOnboardingSampleSummary(sample: OnboardingSample) {
         ${renderKpi("matched selections", String(matchedCount))}
       </div>
       <table class="dense">
-        <thead><tr><th>Opening window tiêu biểu</th><th>Số lần</th></tr></thead>
-        <tbody>${sample.openingCandidates.topOpeningCandidateWindows.map((item) => `<tr><td>${escapeHtml(item.signature.join(" -> "))}</td><td>${item.count}</td></tr>`).join("") || `<tr><td colspan="2">Không có</td></tr>`}</tbody>
+        <thead><tr><th>Opening window tiêu biểu</th><th>Số lần</th><th>Ví dụ conversation</th></tr></thead>
+        <tbody>${sample.openingCandidates.topOpeningCandidateWindows.map((item) => `<tr><td>${escapeHtml(item.signature.join(" -> "))}</td><td>${item.count}</td><td>${escapeHtml((item.exampleConversationIds ?? []).slice(0, 3).join(", ") || "-")}</td></tr>`).join("") || `<tr><td colspan="3">Không có</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -313,8 +313,8 @@ function renderOnboardingTagCandidates(state: AppState) {
     <div class="section">
       <h3>Tag classification từ sample</h3>
       <table class="dense">
-        <thead><tr><th>Tag gốc</th><th>Số lần</th><th>Signal</th></tr></thead>
-        <tbody>${state.onboardingTagCandidates.map((item, index) => `<tr><td>${escapeHtml(item.rawLabel)}</td><td>${item.count}</td><td>${renderSignalSelect(`ob-tag-signal-${index}`, TAG_SIGNAL_OPTIONS, item.signal, true)}</td></tr>`).join("") || `<tr><td colspan="3">Chưa có candidate. Bấm "2. Sample".</td></tr>`}</tbody>
+        <thead><tr><th>Tag ID</th><th>Tag gốc</th><th>Số lần trong sample</th><th>Signal</th></tr></thead>
+        <tbody>${state.onboardingTagCandidates.map((item, index) => `<tr><td>${escapeHtml(item.pancakeTagId)}</td><td>${escapeHtml(item.rawLabel)}</td><td>${item.count}</td><td>${renderSignalSelect(`ob-tag-signal-${index}`, TAG_SIGNAL_OPTIONS, item.signal, true)}</td></tr>`).join("") || `<tr><td colspan="4">Chưa có candidate. Bấm "2. Sample".</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -328,8 +328,8 @@ function renderOnboardingOpeningCandidates(state: AppState) {
         <label><span>Boundary max_messages</span><input id="ob-opening-max" type="number" min="1" value="${escapeHtml(state.onboardingOpeningMaxMessages)}" /></label>
       </div>
       <table class="dense">
-        <thead><tr><th>Raw text trong opening</th><th>Số lần</th><th>Signal</th><th>Decision</th></tr></thead>
-        <tbody>${state.onboardingOpeningCandidates.map((item, index) => `<tr><td>${escapeHtml(item.rawText)}</td><td>${item.count}</td><td>${renderSignalSelect(`ob-opening-signal-${index}`, OPENING_SIGNAL_OPTIONS, item.signal, false)}</td><td><input id="ob-opening-decision-${index}" value="${escapeHtml(item.decision)}" placeholder="vd: revisit, first_time, book_appointment" /></td></tr>`).join("") || `<tr><td colspan="4">Chưa có candidate. Bấm "2. Sample".</td></tr>`}</tbody>
+        <thead><tr><th>Raw text trong opening</th><th>Số lần</th><th>Signal</th><th>Decision</th><th>Ví dụ conversation</th></tr></thead>
+        <tbody>${state.onboardingOpeningCandidates.map((item, index) => `<tr><td>${escapeHtml(item.rawText)}</td><td>${item.count}</td><td>${renderSignalSelect(`ob-opening-signal-${index}`, OPENING_SIGNAL_OPTIONS, item.signal, false)}</td><td><input id="ob-opening-decision-${index}" value="${escapeHtml(item.decision)}" placeholder="vd: revisit, first_time, book_appointment" /></td><td>${escapeHtml((item.exampleConversationIds ?? []).slice(0, 3).join(", ") || "-")}</td></tr>`).join("") || `<tr><td colspan="5">Chưa có candidate. Bấm "2. Sample".</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -346,6 +346,12 @@ function renderSignalSelect(id: string, options: string[], selected: string, inc
     rows.push(`<option value="${escapeHtml(option)}" ${option === selectedTrimmed ? "selected" : ""}>${escapeHtml(option)}</option>`);
   }
   return `<select id="${id}">${rows.join("")}</select>`;
+}
+
+function renderTimezoneSelect(id: string, selected: string) {
+  const all = listTimezones();
+  const merged = selected && !all.includes(selected) ? [selected, ...all] : all;
+  return `<select id="${id}">${merged.map((tz) => `<option value="${escapeHtml(tz)}" ${tz === selected ? "selected" : ""}>${escapeHtml(tz)}</option>`).join("")}</select>`;
 }
 
 function renderViewButton(state: AppState, view: View, label: string) {

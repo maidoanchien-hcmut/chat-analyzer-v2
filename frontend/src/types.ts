@@ -137,15 +137,16 @@ export type OnboardingSample = {
   windowStartAt: string;
   windowEndExclusiveAt: string;
   metrics: Record<string, unknown>;
-  tagCandidates: Array<{ text: string; count: number }>;
+  tagCandidates: Array<{ pancakeTagId: string; text: string; count: number; isDeactive?: boolean }>;
   openingCandidates: {
-    topOpeningCandidateWindows: Array<{ signature: string[]; count: number }>;
-    unmatchedOpeningTexts: Array<{ text: string; count: number }>;
-    matchedOpeningSelections?: Array<{ signal: string; rawText: string; decision: string; count: number }>;
+    topOpeningCandidateWindows: Array<{ signature: string[]; count: number; exampleConversationIds?: string[] }>;
+    unmatchedOpeningTexts: Array<{ text: string; count: number; exampleConversationIds?: string[] }>;
+    matchedOpeningSelections?: Array<{ signal: string; rawText: string; decision: string; count: number; exampleConversationIds?: string[] }>;
   };
 };
 
 export type OnboardingTagCandidate = {
+  pancakeTagId: string;
   rawLabel: string;
   count: number;
   signal: string;
@@ -156,6 +157,7 @@ export type OnboardingOpeningCandidate = {
   count: number;
   signal: string;
   decision: string;
+  exampleConversationIds?: string[];
 };
 
 export type AppState = {

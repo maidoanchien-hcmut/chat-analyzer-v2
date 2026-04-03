@@ -300,7 +300,7 @@ function syncInputs() {
   state.minMessages = readInput("#min-messages", state.minMessages).trim();
   state.sortBy = parseSortBy(readSelect("#sort-by", state.sortBy));
   state.sortOrder = parseSortOrder(readSelect("#sort-order", state.sortOrder));
-  state.settingTimezone = readInput("#setting-timezone", state.settingTimezone);
+  state.settingTimezone = readSelect("#setting-timezone", state.settingTimezone);
   state.settingEtlEnabled = readCheck("#setting-etl", state.settingEtlEnabled);
   state.settingAnalysisEnabled = readCheck("#setting-analysis", state.settingAnalysisEnabled);
   state.settingTagRulesText = readTextArea("#setting-tag-rules", state.settingTagRulesText);
@@ -316,7 +316,7 @@ function syncInputs() {
   state.selectedRunGroupId = readSelect("#run-group-id", state.selectedRunGroupId);
   state.onboardingToken = readInput("#ob-token", state.onboardingToken);
   state.onboardingPageId = readSelect("#ob-page-id", state.onboardingPageId);
-  state.onboardingTimezone = readInput("#ob-timezone", state.onboardingTimezone);
+  state.onboardingTimezone = readSelect("#ob-timezone", state.onboardingTimezone);
   state.onboardingLimit = readInput("#ob-limit", state.onboardingLimit);
   state.onboardingMode = parseProcessingMode(readSelect("#ob-mode", state.onboardingMode));
   state.onboardingEtlEnabled = readCheck("#ob-etl", state.onboardingEtlEnabled);

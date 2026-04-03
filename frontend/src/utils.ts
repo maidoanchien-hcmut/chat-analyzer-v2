@@ -13,6 +13,27 @@ export function dateToken(input: Date) {
   return `${year}-${month}-${day}`;
 }
 
+const FALLBACK_TIMEZONES = [
+  "Asia/Ho_Chi_Minh",
+  "Asia/Bangkok",
+  "Asia/Singapore",
+  "Asia/Tokyo",
+  "UTC"
+];
+
+export function listTimezones() {
+  const supportedValues = (Intl as unknown as {
+    supportedValuesOf?: (key: string) => string[];
+  }).supportedValuesOf;
+  if (typeof supportedValues === "function") {
+    const values = supportedValues("timeZone");
+    if (Array.isArray(values) && values.length > 0) {
+      return values;
+    }
+  }
+  return FALLBACK_TIMEZONES;
+}
+
 export function normalizeBaseUrl(value: string) {
   const trimmed = value.trim().replace(/\/+$/, "");
   return trimmed || "http://localhost:3000";

@@ -340,16 +340,17 @@ function buildOpeningRulesFromRulesText(value: string) {
 function buildTagMappingFromCandidateSelections(candidates: OnboardingTagCandidate[]) {
   const filtered = candidates
     .map((item) => ({
+      pancakeTagId: item.pancakeTagId.trim(),
       rawLabel: item.rawLabel.trim(),
-      signal: item.signal.trim()
+      signal: item.signal.trim() || "null"
     }))
-    .filter((item) => item.rawLabel.length > 0 && item.signal.length > 0);
+    .filter((item) => item.pancakeTagId.length > 0 && item.rawLabel.length > 0);
 
   return {
     version_no: 1,
     default_signal: "null",
-    entries: filtered.map((item, index) => ({
-      pancake_tag_id: buildStableTagId(item.rawLabel, index),
+    entries: filtered.map((item) => ({
+      pancake_tag_id: item.pancakeTagId,
       raw_label: item.rawLabel,
       signal: item.signal
     }))
@@ -392,20 +393,32 @@ function buildOpeningRulesFromCandidateSelections(candidates: OnboardingOpeningC
 }
 
 function hydrateOnboardingCandidatesFromSample(state: AppState, sample: OnboardingSample) {
-  const existingTagSignals = new Map<string, string>();
+  const existingTagSignalsById = new Map<string, string>();
+  const existingTagSignalsByLabel = new Map<string, string>();
   for (const item of state.onboardingTagCandidates) {
-    const key = normalizeKey(item.rawLabel);
-    if (key) {
-      existingTagSignals.set(key, item.signal.trim());
+    const idKey = item.pancakeTagId.trim();
+    if (idKey) {
+      existingTagSignalsById.set(idKey, item.signal.trim());
+    }
+    const labelKey = normalizeKey(item.rawLabel);
+    if (labelKey) {
+      existingTagSignalsByLabel.set(labelKey, item.signal.trim());
     }
   }
   state.onboardingTagCandidates = (sample.tagCandidates ?? [])
-    .map((item) => ({
-      rawLabel: item.text.trim(),
-      count: item.count,
-      signal: existingTagSignals.get(normalizeKey(item.text)) ?? ""
-    }))
-    .filter((item) => item.rawLabel.length > 0);
+    .map((item, index) => {
+      const pancakeTagId = (item.pancakeTagId ?? "").trim() || buildStableTagId(item.text, index);
+      const rawLabel = item.text.trim();
+      return {
+        pancakeTagId,
+        rawLabel,
+        count: item.count,
+        signal: existingTagSignalsById.get(pancakeTagId)
+          ?? existingTagSignalsByLabel.get(normalizeKey(rawLabel))
+          ?? ""
+      };
+    })
+    .filter((item) => item.pancakeTagId.length > 0 && item.rawLabel.length > 0);
 
   const matchedByText = new Map<string, { signal: string; decision: string }>();
   const matchedSelections = sample.openingCandidates?.matchedOpeningSelections ?? [];
@@ -431,41 +444,53 @@ function hydrateOnboardingCandidatesFromSample(state: AppState, sample: Onboardi
     }
   }
 
-  const textCount = new Map<string, number>();
+  const textCount = new Map<string, { count: number; exampleConversationIds: Set<string> }>();
   for (const row of sample.openingCandidates?.unmatchedOpeningTexts ?? []) {
-    addCount(textCount, row.text, row.count);
-  }
-  for (const row of sample.openingCandidates?.topOpeningCandidateWindows ?? []) {
-    for (const text of row.signature) {
-      addCount(textCount, text, row.count);
-    }
+    addCount(textCount, row.text, row.count, row.exampleConversationIds);
   }
   for (const row of matchedSelections) {
-    addCount(textCount, row.rawText, row.count);
+    addCount(textCount, row.rawText, row.count, row.exampleConversationIds);
   }
 
   state.onboardingOpeningCandidates = [...textCount.entries()]
-    .map(([rawText, count]) => {
+    .map(([rawText, value]) => {
       const key = normalizeKey(rawText);
       const matched = key ? matchedByText.get(key) : undefined;
       const existing = key ? existingOpening.get(key) : undefined;
       return {
         rawText,
-        count,
+        count: value.count,
         signal: matched?.signal ?? existing?.signal ?? "",
-        decision: matched?.decision ?? existing?.decision ?? ""
+        decision: matched?.decision ?? existing?.decision ?? "",
+        exampleConversationIds: [...value.exampleConversationIds].slice(0, 5)
       };
     })
     .sort((left, right) => right.count - left.count || left.rawText.localeCompare(right.rawText));
 }
 
-function addCount(map: Map<string, number>, rawText: string, amount: number) {
+function addCount(
+  map: Map<string, { count: number; exampleConversationIds: Set<string> }>,
+  rawText: string,
+  amount: number,
+  exampleConversationIds?: string[]
+) {
   const text = rawText.trim();
   if (!text) {
     return;
   }
   const count = Number.isFinite(amount) && amount > 0 ? amount : 1;
-  map.set(text, (map.get(text) ?? 0) + count);
+  const current = map.get(text) ?? {
+    count: 0,
+    exampleConversationIds: new Set<string>()
+  };
+  current.count += count;
+  for (const id of exampleConversationIds ?? []) {
+    const trimmed = id.trim();
+    if (trimmed) {
+      current.exampleConversationIds.add(trimmed);
+    }
+  }
+  map.set(text, current);
 }
 
 function normalizePositiveIntOrDefault(raw: string, fallback: number) {

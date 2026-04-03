@@ -17,6 +17,10 @@ type ConversationArtifactSource = {
 };
 
 export type OnboardingArtifacts = {
+  observedTagCounts: Array<{
+    text: string;
+    count: number;
+  }>;
   topObservedTags: Array<{
     text: string;
     count: number;
@@ -29,20 +33,22 @@ export type OnboardingArtifacts = {
   unmatchedOpeningTexts: Array<{
     text: string;
     count: number;
+    exampleConversationIds: string[];
   }>;
   matchedOpeningSelections: Array<{
     signal: string;
     rawText: string;
     decision: string;
     count: number;
+    exampleConversationIds: string[];
   }>;
 };
 
 export function buildOnboardingArtifacts(conversations: ConversationArtifactSource[]): OnboardingArtifacts {
   const tagCounts = new Map<string, number>();
   const openingWindowCounts = new Map<string, { count: number; exampleConversationIds: string[]; signature: string[] }>();
-  const unmatchedCounts = new Map<string, number>();
-  const matchedSelectionCounts = new Map<string, { signal: string; rawText: string; decision: string; count: number }>();
+  const unmatchedCounts = new Map<string, { count: number; exampleConversationIds: string[] }>();
+  const matchedSelectionCounts = new Map<string, { signal: string; rawText: string; decision: string; count: number; exampleConversationIds: string[] }>();
 
   for (const conversation of conversations) {
     const observedTags = asArray(conversation.observedTagsJson);
@@ -73,7 +79,15 @@ export function buildOnboardingArtifacts(conversations: ConversationArtifactSour
     }
 
     for (const text of asStringArray(opening.unmatched_candidate_texts)) {
-      unmatchedCounts.set(text, (unmatchedCounts.get(text) ?? 0) + 1);
+      const current = unmatchedCounts.get(text) ?? {
+        count: 0,
+        exampleConversationIds: [] as string[]
+      };
+      current.count += 1;
+      if (current.exampleConversationIds.length < 5) {
+        current.exampleConversationIds.push(conversation.conversationId);
+      }
+      unmatchedCounts.set(text, current);
     }
 
     for (const selection of asArray(opening.matched_selections)) {
@@ -88,19 +102,31 @@ export function buildOnboardingArtifacts(conversations: ConversationArtifactSour
         signal,
         rawText,
         decision,
-        count: 0
+        count: 0,
+        exampleConversationIds: [] as string[]
       };
       current.count += 1;
+      if (current.exampleConversationIds.length < 5) {
+        current.exampleConversationIds.push(conversation.conversationId);
+      }
       matchedSelectionCounts.set(key, current);
     }
   }
 
   return {
+    observedTagCounts: sortCounts(tagCounts).map(([text, count]) => ({ text, count })),
     topObservedTags: sortCounts(tagCounts).slice(0, 20).map(([text, count]) => ({ text, count })),
     topOpeningCandidateWindows: [...openingWindowCounts.values()]
       .sort((left, right) => right.count - left.count || left.signature.join(" ").localeCompare(right.signature.join(" ")))
       .slice(0, 20),
-    unmatchedOpeningTexts: sortCounts(unmatchedCounts).slice(0, 20).map(([text, count]) => ({ text, count })),
+    unmatchedOpeningTexts: [...unmatchedCounts.entries()]
+      .sort((left, right) => right[1].count - left[1].count || left[0].localeCompare(right[0]))
+      .slice(0, 20)
+      .map(([text, value]) => ({
+        text,
+        count: value.count,
+        exampleConversationIds: value.exampleConversationIds
+      })),
     matchedOpeningSelections: [...matchedSelectionCounts.values()]
       .sort((left, right) => right.count - left.count || `${left.signal}:${left.rawText}:${left.decision}`.localeCompare(`${right.signal}:${right.rawText}:${right.decision}`))
       .slice(0, 20)

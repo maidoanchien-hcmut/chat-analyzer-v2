@@ -67,6 +67,12 @@ type RuntimeSampleConversationArtifact = {
   openingBlocksJson: unknown;
 };
 
+type RuntimeSamplePageTag = {
+  pancakeTagId: string;
+  text: string;
+  isDeactive?: boolean;
+};
+
 type RuntimeSamplePreview = {
   pageId: string;
   targetDate: string;
@@ -74,6 +80,7 @@ type RuntimeSamplePreview = {
   windowStartAt: string;
   windowEndExclusiveAt: string;
   summary: Record<string, unknown>;
+  pageTags?: RuntimeSamplePageTag[];
   conversations: RuntimeSampleConversationArtifact[];
 };
 
@@ -208,6 +215,10 @@ export class ChatExtractorService {
     });
     const preview = await this.runRuntimeSampleImpl(workerJob);
     const artifacts = buildOnboardingArtifacts(preview.conversations);
+    const observedTagCountMap = new Map<string, number>(
+      artifacts.observedTagCounts.map((item) => [normalizeKey(item.text), item.count])
+    );
+    const pageTagCandidates = buildPageTagCandidates(preview.pageTags, observedTagCountMap);
 
     return {
       sample: {
@@ -220,7 +231,7 @@ export class ChatExtractorService {
         windowStartAt: preview.windowStartAt,
         windowEndExclusiveAt: preview.windowEndExclusiveAt,
         metrics: preview.summary,
-        tagCandidates: artifacts.topObservedTags,
+        tagCandidates: pageTagCandidates,
         openingCandidates: {
           topOpeningCandidateWindows: artifacts.topOpeningCandidateWindows,
           unmatchedOpeningTexts: artifacts.unmatchedOpeningTexts,
@@ -1005,6 +1016,29 @@ export function parseListPagesResponse(raw: string) {
 export function extractRunIDFromWorkerOutput(stdout: string) {
   const match = stdout.match(/etl_run_id=([0-9a-fA-F-]{36})/);
   return match?.[1] ?? null;
+}
+
+function buildPageTagCandidates(
+  tags: RuntimeSamplePageTag[] | undefined,
+  observedTagCountMap: Map<string, number>
+): Array<{ pancakeTagId: string; text: string; count: number; isDeactive: boolean }> {
+  const pageTags = Array.isArray(tags) ? tags : [];
+  return pageTags
+    .map((tag) => ({
+      pancakeTagId: (tag.pancakeTagId ?? "").trim(),
+      text: (tag.text ?? "").trim(),
+      isDeactive: Boolean(tag.isDeactive)
+    }))
+    .filter((tag) => tag.pancakeTagId.length > 0 && tag.text.length > 0 && !tag.isDeactive)
+    .map((tag) => ({
+      ...tag,
+      count: observedTagCountMap.get(normalizeKey(tag.text)) ?? 0
+    }))
+    .sort((left, right) => left.text.localeCompare(right.text));
+}
+
+function normalizeKey(value: string): string {
+  return value.trim().toLowerCase();
 }
 
 export function compactPayload(value: string) {

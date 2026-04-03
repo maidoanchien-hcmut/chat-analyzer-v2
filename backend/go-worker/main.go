@@ -111,6 +111,7 @@ func main() {
 			WindowStartAt:        extracted.Window.Start.Format(time.RFC3339),
 			WindowEndExclusiveAt: extracted.Window.EndExclusive.Format(time.RFC3339),
 			Summary:              metrics,
+			PageTags:             buildRuntimePreviewTags(extracted.Tags),
 			Conversations:        buildRuntimePreviewConversations(conversationDays),
 		}
 		encoder := json.NewEncoder(os.Stdout)
@@ -194,7 +195,14 @@ type runtimePreviewOutput struct {
 	WindowStartAt        string                       `json:"windowStartAt"`
 	WindowEndExclusiveAt string                       `json:"windowEndExclusiveAt"`
 	Summary              map[string]any               `json:"summary"`
+	PageTags             []runtimePreviewTag          `json:"pageTags"`
 	Conversations        []runtimePreviewConversation `json:"conversations"`
+}
+
+type runtimePreviewTag struct {
+	PancakeTagID string `json:"pancakeTagId"`
+	Text         string `json:"text"`
+	IsDeactive   bool   `json:"isDeactive"`
 }
 
 type runtimePreviewConversation struct {
@@ -213,6 +221,18 @@ func buildRuntimePreviewConversations(days []transform.ConversationDaySource) []
 		})
 	}
 	return conversations
+}
+
+func buildRuntimePreviewTags(tags []pancake.Tag) []runtimePreviewTag {
+	items := make([]runtimePreviewTag, 0, len(tags))
+	for _, tag := range tags {
+		items = append(items, runtimePreviewTag{
+			PancakeTagID: fmt.Sprintf("%d", tag.ID),
+			Text:         tag.Text,
+			IsDeactive:   tag.IsDeactive,
+		})
+	}
+	return items
 }
 
 func applyFlags(cfg *config.Config) error {

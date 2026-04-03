@@ -12,6 +12,8 @@ type Tag struct {
 	Text         string          `json:"text"`
 	Color        string          `json:"color"`
 	LightenColor string          `json:"lighten_color"`
+	IsDeactive   bool            `json:"is_deactive"`
+	IsLeadEvent  bool            `json:"is_lead_event"`
 	Raw          json.RawMessage `json:"-"`
 }
 

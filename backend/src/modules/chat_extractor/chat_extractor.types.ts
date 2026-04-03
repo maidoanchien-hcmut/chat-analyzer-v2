@@ -2,6 +2,9 @@ import { z } from "zod";
 
 export const processingModeSchema = z.enum(["etl_only", "etl_and_ai"]);
 export const capabilityKeySchema = z.enum(["conversation_analysis", "thread_customer_mapping"]);
+export const businessTimezoneSchema = z.string().min(1).refine(isValidIanaTimezone, {
+  message: "business_timezone phải là timezone IANA hợp lệ (vd: Asia/Ho_Chi_Minh)."
+});
 
 export const tagMappingEntrySchema = z.object({
   pancake_tag_id: z.string().min(1),
@@ -104,7 +107,7 @@ export const registerPageBodySchema = z
   .object({
     pancake_page_id: z.string().min(1),
     user_access_token: z.string().min(1),
-    business_timezone: z.string().min(1).default("Asia/Ho_Chi_Minh"),
+    business_timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
     etl_enabled: z.boolean().default(false),
     analysis_enabled: z.boolean().default(false)
   })
@@ -120,7 +123,7 @@ export const setupSampleBodySchema = z
   .object({
     pancake_page_id: z.string().min(1),
     user_access_token: z.string().min(1),
-    business_timezone: z.string().min(1).default("Asia/Ho_Chi_Minh"),
+    business_timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
     processing_mode: processingModeSchema.default("etl_only"),
     initial_conversation_limit: z.number().int().positive(),
     active_tag_mapping_json: z.unknown().optional(),
@@ -140,7 +143,7 @@ export const commitSetupBodySchema = z
   .object({
     pancake_page_id: z.string().min(1),
     user_access_token: z.string().min(1),
-    business_timezone: z.string().min(1).default("Asia/Ho_Chi_Minh"),
+    business_timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
     etl_enabled: z.boolean().default(true),
     analysis_enabled: z.boolean().default(true),
     active_tag_mapping_json: z.unknown().default({}),
@@ -179,7 +182,7 @@ export const commitSetupBodySchema = z
 
 export const updateConnectedPageBodySchema = z
   .object({
-    business_timezone: z.string().min(1).optional(),
+    business_timezone: businessTimezoneSchema.optional(),
     etl_enabled: z.boolean().optional(),
     analysis_enabled: z.boolean().optional(),
     active_tag_mapping_json: z.unknown().optional(),
@@ -637,4 +640,13 @@ export function buildPromptProfile(promptText: string, notes?: string | null, ov
 function normalizeOptionalText(value: string | undefined) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
+}
+
+function isValidIanaTimezone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
 }
