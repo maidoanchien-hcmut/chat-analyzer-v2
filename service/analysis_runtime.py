@@ -83,12 +83,32 @@ class ServiceResultModel(BaseModel):
   failure_info_json: dict[str, Any] | None = None
 
 
+SYSTEM_PROMPT_CONVERSATION_ANALYSIS = """Bạn là AI nhà phân tích hội thoại sales/cskh của hệ thống chat-analyzer cho một công ty duy nhất.
+
+Vai trò cố định:
+- Chỉ làm nhiệm vụ phân tích và đánh giá tuân thủ vận hành trong hội thoại.
+- Không nhập vai nhân viên tư vấn hoặc chatbot trả lời khách hàng.
+- Không tạo thông tin ngoài evidence.
+- Luôn ưu tiên evidence deterministic từ Seam 1 trước khi suy luận.
+
+Trọng tâm đánh giá:
+- Đánh giá nhân viên có làm đúng quy trình vận hành của page hay không.
+- Chỉ ra lỗi thao tác, thiếu bước, và dấu hiệu vi phạm quy định nếu có.
+- Nêu gợi ý cải thiện ngắn gọn, có thể hành động.
+
+Nguyên tắc bắt buộc:
+- Output phải ngắn gọn, rõ nghĩa, dùng được cho vận hành.
+- Khi thiếu dữ liệu hoặc quy trình page chưa đủ rõ, trả về "unknown" thay vì suy đoán.
+- Tôn trọng boundary ngày và snapshot; không trộn ngữ cảnh ngoài unit được cung cấp."""
+
+
 @dataclass(slots=True)
 class ConversationAnalysisEngine:
   config: ServiceConfig
 
   async def analyze(self, runtime: RuntimeSnapshotModel, bundles: list[UnitBundleModel]) -> list[ServiceResultModel]:
-    return [self._build_heuristic_result(runtime, bundle) for bundle in bundles]
+    effective_runtime = _with_system_prompt(runtime)
+    return [self._build_heuristic_result(effective_runtime, bundle) for bundle in bundles]
 
   def _build_heuristic_result(self, runtime: RuntimeSnapshotModel, bundle: UnitBundleModel) -> ServiceResultModel:
     transcript = "\n".join(
@@ -162,6 +182,19 @@ def _build_prompt_hash(runtime: RuntimeSnapshotModel, conversation_day_id: str) 
     sort_keys=True,
   )
   return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def _with_system_prompt(runtime: RuntimeSnapshotModel) -> RuntimeSnapshotModel:
+  page_rules = runtime.prompt_template.strip()
+  if page_rules:
+    merged = f"{SYSTEM_PROMPT_CONVERSATION_ANALYSIS}\n\n[PAGE_OPERATIONAL_RULES]\n{page_rules}"
+  else:
+    merged = (
+      f"{SYSTEM_PROMPT_CONVERSATION_ANALYSIS}\n\n"
+      "[PAGE_OPERATIONAL_RULES]\n"
+      "Không có quy trình vận hành riêng cho page; chỉ áp dụng quy tắc hệ thống."
+    )
+  return runtime.model_copy(update={"prompt_template": merged})
 
 
 def _normalize_output(output: AnalysisOutputModel) -> AnalysisOutputModel:
