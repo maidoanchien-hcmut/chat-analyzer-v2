@@ -70,7 +70,7 @@ func SaveSuccess(
 		if err != nil {
 			return err
 		}
-		if err := insertMessages(ctx, tx, etlRunID, conversationDayID, conversationDay.Messages, finishedAt); err != nil {
+		if err := insertMessages(ctx, tx, conversationDayID, conversationDay.Messages, finishedAt); err != nil {
 			return err
 		}
 	}
@@ -156,7 +156,6 @@ func insertETLRunStart(
 			run_group_id,
 			run_mode,
 			connected_page_id,
-			page_id,
 			processing_mode,
 			target_date,
 			business_timezone,
@@ -173,14 +172,13 @@ func insertETLRunStart(
 			started_at,
 			finished_at
 		) VALUES (
-			$1, NULLIF($2, ''), $3, NULLIF($4, '')::uuid, $5, $6, $7, $8, $9, $10, $11, 'running', $12, false, $13::jsonb, $14::jsonb, $15::jsonb, $16, NULL
+			$1, NULLIF($2, '')::uuid, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11, 'running', $12, false, $13::jsonb, $14::jsonb, $15::jsonb, $16, NULL
 		)
 	`,
 		etlRunID,
 		cfg.RunGroupID,
 		cfg.RunMode,
 		cfg.ConnectedPageID,
-		cfg.PageID,
 		cfg.ProcessingMode,
 		targetDate.Format(time.DateOnly),
 		cfg.BusinessTimezone,
@@ -260,38 +258,38 @@ func insertConversationDay(
 			id,
 			etl_run_id,
 			conversation_id,
+			thread_first_seen_at,
 			customer_display_name,
-			conversation_inserted_at,
 			conversation_updated_at,
+			message_count_persisted,
 			message_count_seen_from_source,
 			normalized_phone_candidates_json,
-			current_tags_json,
-			observed_tag_events_json,
+			observed_tags_json,
 			normalized_tag_signals_json,
 			opening_blocks_json,
 			first_meaningful_human_message_id,
 			first_meaningful_human_sender_role,
-			source_conversation_json,
+			source_conversation_json_redacted,
 			created_at
 		) VALUES (
-			$1, $2, $3, NULLIF($4, ''), $5, $6, $7, $8::jsonb, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, NULLIF($13, ''), NULLIF($14, ''), $15::jsonb, $16
+			$1, $2, $3, $4, NULLIF($5, ''), $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, NULLIF($13, ''), NULLIF($14, ''), $15::jsonb, $16
 		)
 	`,
 		conversationDayID,
 		etlRunID,
 		conversationDay.ConversationID,
+		conversationDay.ThreadFirstSeenAt,
 		conversationDay.CustomerDisplayName,
-		conversationDay.ConversationInsertedAt,
 		conversationDay.ConversationUpdatedAt,
+		conversationDay.MessageCountPersisted,
 		conversationDay.MessageCountSeenFromSource,
 		conversationDay.NormalizedPhoneCandidatesJSON,
-		conversationDay.CurrentTagsJSON,
-		conversationDay.ObservedTagEventsJSON,
+		conversationDay.ObservedTagsJSON,
 		conversationDay.NormalizedTagSignalsJSON,
 		conversationDay.OpeningBlocksJSON,
 		conversationDay.FirstMeaningfulHumanMessageID,
 		conversationDay.FirstMeaningfulHumanSenderRole,
-		conversationDay.SourceConversationJSON,
+		conversationDay.SourceConversationJSONRedacted,
 		createdAt,
 	)
 	if err != nil {
@@ -303,7 +301,6 @@ func insertConversationDay(
 func insertMessages(
 	ctx context.Context,
 	tx pgx.Tx,
-	etlRunID string,
 	conversationDayID string,
 	messages []transform.MessageSource,
 	createdAt time.Time,
@@ -313,7 +310,6 @@ func insertMessages(
 			INSERT INTO message (
 				id,
 				conversation_day_id,
-				etl_run_id,
 				message_id,
 				conversation_id,
 				inserted_at,
@@ -324,17 +320,16 @@ func insertMessages(
 				message_type,
 				redacted_text,
 				attachments_json,
-				message_tags_json,
 				is_meaningful_human_message,
+				is_opening_block_message,
 				source_message_json_redacted,
 				created_at
 			) VALUES (
-				$1, $2, $3, $4, $5, $6, NULLIF($7, ''), NULLIF($8, ''), $9, NULLIF($10, ''), $11, NULLIF($12, ''), $13::jsonb, $14::jsonb, $15, $16::jsonb, $17
+				$1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), $8, NULLIF($9, ''), $10, NULLIF($11, ''), $12::jsonb, $13, $14, $15::jsonb, $16
 			)
 		`,
 			uuid.NewString(),
 			conversationDayID,
-			etlRunID,
 			message.MessageID,
 			message.ConversationID,
 			message.InsertedAt,
@@ -345,8 +340,8 @@ func insertMessages(
 			message.MessageType,
 			message.RedactedText,
 			message.AttachmentsJSON,
-			message.MessageTagsJSON,
 			message.IsMeaningfulHumanMessage,
+			message.IsOpeningBlockMessage,
 			message.SourceMessageJSONRedacted,
 			createdAt,
 		)
@@ -363,33 +358,46 @@ func insertThreadCustomerMapping(
 	mapping transform.ThreadCustomerMapping,
 	timestamp time.Time,
 ) error {
-	if mapping.PageID == "" || mapping.ThreadID == "" || mapping.CustomerID == "" || mapping.MappingMethod == "" {
+	if mapping.ConnectedPageID == "" || mapping.ThreadID == "" || mapping.CustomerID == "" || mapping.MappingMethod == "" {
 		return nil
+	}
+	confidence := any(nil)
+	if mapping.ConfidenceScore != nil {
+		confidence = *mapping.ConfidenceScore
 	}
 
 	_, err := tx.Exec(ctx, `
 		INSERT INTO thread_customer_mapping (
-			page_id,
+			connected_page_id,
 			thread_id,
 			customer_id,
-			mapped_phone_e164,
 			mapping_method,
+			mapping_confidence_score,
+			mapped_phone_e164,
+			source_decision_id,
 			created_at,
 			updated_at
 		) VALUES (
-			$1, $2, $3, NULLIF($4, ''), $5, $6, $6
+			$1::uuid, $2, $3, $4, $5, NULLIF($6, ''), NULL, $7, $7
 		)
-		ON CONFLICT (page_id, thread_id) DO NOTHING
+		ON CONFLICT (connected_page_id, thread_id) DO UPDATE
+		SET customer_id = EXCLUDED.customer_id,
+		    mapping_method = EXCLUDED.mapping_method,
+		    mapping_confidence_score = EXCLUDED.mapping_confidence_score,
+		    mapped_phone_e164 = EXCLUDED.mapped_phone_e164,
+		    source_decision_id = EXCLUDED.source_decision_id,
+		    updated_at = EXCLUDED.updated_at
 	`,
-		mapping.PageID,
+		mapping.ConnectedPageID,
 		mapping.ThreadID,
 		mapping.CustomerID,
-		mapping.MappedPhoneE164,
 		mapping.MappingMethod,
+		confidence,
+		mapping.MappedPhoneE164,
 		timestamp,
 	)
 	if err != nil {
-		return fmt.Errorf("upsert thread_customer_mapping %s/%s: %w", mapping.PageID, mapping.ThreadID, err)
+		return fmt.Errorf("upsert thread_customer_mapping %s/%s: %w", mapping.ConnectedPageID, mapping.ThreadID, err)
 	}
 	return nil
 }

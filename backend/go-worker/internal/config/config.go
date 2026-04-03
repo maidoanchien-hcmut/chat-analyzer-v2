@@ -40,8 +40,8 @@ type Config struct {
 	MaxConversations               int
 	MaxMessagePagesPerConversation int
 	RequestTimeout                 time.Duration
-	TagRules                       []controlplane.TagRule
-	OpeningRules                   []controlplane.OpeningRule
+	TagMapping                     controlplane.TagMappingConfig
+	OpeningRules                   controlplane.OpeningRulesConfig
 	CustomerDirectory              []controlplane.CustomerDirectoryEntry
 }
 
@@ -77,6 +77,9 @@ func (c Config) Validate() error {
 	}
 	if c.RunMode == "" {
 		return errors.New("run_mode is required")
+	}
+	if strings.TrimSpace(c.RunGroupID) == "" {
+		return errors.New("run_group_id is required")
 	}
 	if c.ProcessingMode == "" {
 		return errors.New("processing_mode is required")

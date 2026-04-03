@@ -69,7 +69,7 @@ func main() {
 
 	conversationDays := make([]transform.ConversationDaySource, 0, len(extracted.ConversationDays))
 	policies := controlplane.RuntimeConfig{
-		TagRules:          cfg.TagRules,
+		TagMapping:        cfg.TagMapping,
 		OpeningRules:      cfg.OpeningRules,
 		CustomerDirectory: cfg.CustomerDirectory,
 	}
@@ -92,7 +92,7 @@ func main() {
 		}
 		conversationDays = append(conversationDays, conversationDay)
 	}
-	threadMappings, err := transform.BuildThreadCustomerMappings(extracted.PageID, conversationDays, policies)
+	threadMappings, err := transform.BuildThreadCustomerMappings(cfg.ConnectedPageID, conversationDays, policies)
 	if err != nil {
 		if cfg.RuntimeOnly {
 			logger.Fatal(err)
@@ -199,7 +199,7 @@ type runtimePreviewOutput struct {
 
 type runtimePreviewConversation struct {
 	ConversationID    string          `json:"conversationId"`
-	CurrentTagsJSON   json.RawMessage `json:"currentTagsJson"`
+	ObservedTagsJSON  json.RawMessage `json:"observedTagsJson"`
 	OpeningBlocksJSON json.RawMessage `json:"openingBlocksJson"`
 }
 
@@ -208,7 +208,7 @@ func buildRuntimePreviewConversations(days []transform.ConversationDaySource) []
 	for _, day := range days {
 		conversations = append(conversations, runtimePreviewConversation{
 			ConversationID:    day.ConversationID,
-			CurrentTagsJSON:   day.CurrentTagsJSON,
+			ObservedTagsJSON:  day.ObservedTagsJSON,
 			OpeningBlocksJSON: day.OpeningBlocksJSON,
 		})
 	}

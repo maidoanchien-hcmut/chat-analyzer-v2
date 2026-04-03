@@ -28,18 +28,18 @@ type Run struct {
 
 type ConversationDaySource struct {
 	ConversationID                 string
+	ThreadFirstSeenAt              *time.Time
 	CustomerDisplayName            string
-	ConversationInsertedAt         *time.Time
 	ConversationUpdatedAt          *time.Time
+	MessageCountPersisted          int
 	MessageCountSeenFromSource     int
 	NormalizedPhoneCandidatesJSON  json.RawMessage
-	CurrentTagsJSON                json.RawMessage
-	ObservedTagEventsJSON          json.RawMessage
+	ObservedTagsJSON               json.RawMessage
 	NormalizedTagSignalsJSON       json.RawMessage
 	OpeningBlocksJSON              json.RawMessage
 	FirstMeaningfulHumanMessageID  string
 	FirstMeaningfulHumanSenderRole string
-	SourceConversationJSON         json.RawMessage
+	SourceConversationJSONRedacted json.RawMessage
 	Messages                       []MessageSource
 }
 
@@ -54,22 +54,24 @@ type MessageSource struct {
 	MessageType               string
 	RedactedText              string
 	AttachmentsJSON           json.RawMessage
-	MessageTagsJSON           json.RawMessage
 	IsMeaningfulHumanMessage  bool
+	IsOpeningBlockMessage     bool
 	SourceMessageJSONRedacted json.RawMessage
 }
 
 type ThreadCustomerMapping struct {
-	PageID          string
+	ConnectedPageID string
 	ThreadID        string
 	CustomerID      string
 	MappedPhoneE164 string
 	MappingMethod   string
+	ConfidenceScore *float64
 }
 
 type openingBlocks struct {
 	OpeningCandidateWindow []openingBlockMessage `json:"opening_candidate_window"`
-	MatchedRules           []openingRuleMatch    `json:"matched_rules"`
+	MatchedSelections      []openingSelection    `json:"matched_selections"`
+	DeterministicSignals   map[string][]string   `json:"deterministic_signals"`
 	UnmatchedCandidateText []string              `json:"unmatched_candidate_texts"`
 }
 
@@ -81,7 +83,10 @@ type openingBlockMessage struct {
 	RedactedText string `json:"redacted_text"`
 }
 
-type openingRuleMatch struct {
-	Name    string         `json:"name"`
-	Signals map[string]any `json:"signals"`
+type openingSelection struct {
+	Signal      string `json:"signal"`
+	RawText     string `json:"raw_text"`
+	Decision    string `json:"decision"`
+	MessageID   string `json:"message_id"`
+	MessageType string `json:"message_type"`
 }

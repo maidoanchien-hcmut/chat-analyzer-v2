@@ -27,7 +27,7 @@ func BuildConversationDay(
 		return ConversationDaySource{}, err
 	}
 
-	conversationInsertedAt, err := parseOptionalSourceTime(conversation.InsertedAt, loc)
+	threadFirstSeenAt, err := parseOptionalSourceTime(conversation.InsertedAt, loc)
 	if err != nil {
 		return ConversationDaySource{}, fmt.Errorf("conversation inserted_at: %w", err)
 	}
@@ -40,7 +40,6 @@ func BuildConversationDay(
 	for _, message := range dedupedMessages {
 		insertedAt := insertedByID[message.ID]
 		attachmentsJSON := marshalJSON(message.Attachments, "[]")
-		messageTagsJSON := marshalJSON(compactRawItems(message.MessageTags), "[]")
 		sourceMessageJSONRedacted := redactJSON(message.Raw)
 		transformed = append(transformed, MessageSource{
 			MessageID:                 message.ID,
@@ -53,7 +52,6 @@ func BuildConversationDay(
 			MessageType:               normalizeMessageType(message),
 			RedactedText:              renderMessageText(message),
 			AttachmentsJSON:           redactJSON(attachmentsJSON),
-			MessageTagsJSON:           redactJSON(messageTagsJSON),
 			SourceMessageJSONRedacted: sourceMessageJSONRedacted,
 		})
 	}
@@ -71,12 +69,10 @@ func BuildConversationDay(
 		transformed[idx].IsMeaningfulHumanMessage = false
 	}
 
-	openingCandidateEnd := len(transformed)
-	if firstMeaningfulIndex >= 0 {
-		openingCandidateEnd = firstMeaningfulIndex
-	}
+	openingCandidateEnd := resolveOpeningCandidateEnd(firstMeaningfulIndex, len(transformed), policies.OpeningRules.Boundary)
 	openingMessages := make([]openingBlockMessage, 0, openingCandidateEnd)
-	for _, message := range transformed[:openingCandidateEnd] {
+	for idx, message := range transformed[:openingCandidateEnd] {
+		transformed[idx].IsOpeningBlockMessage = true
 		openingMessages = append(openingMessages, openingBlockMessage{
 			MessageID:    message.MessageID,
 			InsertedAt:   message.InsertedAt.Format(time.RFC3339Nano),
@@ -87,26 +83,25 @@ func BuildConversationDay(
 	}
 
 	phones := collectNormalizedPhones(conversation, messageContext, dedupedMessages)
-	currentTags := resolveCurrentTags(conversation.Tags, tagDictionary)
-	tagEvents := resolveObservedTagEvents(conversation.TagHistories, tagDictionary, window)
-	currentTagsJSON := marshalJSON(currentTags, "[]")
-	tagEventsJSON := marshalJSON(tagEvents, "[]")
-	normalizedTagSignals := buildNormalizedTagSignals(currentTags, tagEvents, policies.TagRules)
-	openingBlocksJSON := marshalJSON(buildOpeningBlocks(openingMessages, dedupedMessages[:openingCandidateEnd], policies.OpeningRules), `{"opening_candidate_window":[],"matched_rules":[],"unmatched_candidate_texts":[]}`)
+	observedTags := resolveObservedTags(conversation.Tags, conversation.TagHistories, tagDictionary, window)
+	openingBlocksJSON := marshalJSON(
+		buildOpeningBlocks(openingMessages, transformed[:openingCandidateEnd], dedupedMessages[:openingCandidateEnd], policies.OpeningRules),
+		`{"opening_candidate_window":[],"matched_selections":[],"deterministic_signals":{},"unmatched_candidate_texts":[]}`,
+	)
 
 	conversationDay := ConversationDaySource{
-		ConversationID:                conversation.ID,
-		CustomerDisplayName:           customerDisplayName(conversation, messageContext),
-		ConversationInsertedAt:        conversationInsertedAt,
-		ConversationUpdatedAt:         conversationUpdatedAt,
-		MessageCountSeenFromSource:    messagesSeen,
-		NormalizedPhoneCandidatesJSON: marshalJSON(phones, "[]"),
-		CurrentTagsJSON:               currentTagsJSON,
-		ObservedTagEventsJSON:         tagEventsJSON,
-		NormalizedTagSignalsJSON:      normalizedTagSignals,
-		OpeningBlocksJSON:             openingBlocksJSON,
-		SourceConversationJSON:        redactJSON(conversation.Raw),
-		Messages:                      transformed,
+		ConversationID:                 conversation.ID,
+		ThreadFirstSeenAt:              threadFirstSeenAt,
+		CustomerDisplayName:            customerDisplayName(conversation, messageContext),
+		ConversationUpdatedAt:          conversationUpdatedAt,
+		MessageCountPersisted:          len(transformed),
+		MessageCountSeenFromSource:     messagesSeen,
+		NormalizedPhoneCandidatesJSON:  marshalJSON(phones, "[]"),
+		ObservedTagsJSON:               marshalJSON(observedTags, "[]"),
+		NormalizedTagSignalsJSON:       buildNormalizedTagSignals(observedTags, policies.TagMapping),
+		OpeningBlocksJSON:              openingBlocksJSON,
+		SourceConversationJSONRedacted: redactJSON(conversation.Raw),
+		Messages:                       transformed,
 	}
 
 	if firstMeaningfulIndex >= 0 {
@@ -115,6 +110,24 @@ func BuildConversationDay(
 	}
 
 	return conversationDay, nil
+}
+
+func resolveOpeningCandidateEnd(firstMeaningfulIndex int, totalMessages int, boundary controlplane.OpeningBoundary) int {
+	end := totalMessages
+	mode := boundary.Mode
+	if mode == "" {
+		mode = "until_first_meaningful_human_message"
+	}
+	if firstMeaningfulIndex >= 0 && mode == "until_first_meaningful_human_message" {
+		end = firstMeaningfulIndex
+	}
+	if boundary.MaxMessages > 0 && end > boundary.MaxMessages {
+		end = boundary.MaxMessages
+	}
+	if end < 0 {
+		return 0
+	}
+	return end
 }
 
 func parseOptionalSourceTime(value string, loc *time.Location) (*time.Time, error) {
@@ -475,19 +488,32 @@ func collectNormalizedPhones(
 	return collected
 }
 
-func resolveCurrentTags(rawTags []json.RawMessage, tagDictionary map[int64]pancake.Tag) []map[string]any {
-	resolved := make([]map[string]any, 0, len(rawTags))
-	for _, rawTag := range compactRawItems(rawTags) {
-		tag, ok := resolveTag(rawTag, tagDictionary)
-		if ok {
-			resolved = append(resolved, tag)
-		}
-	}
-	return resolved
-}
+func resolveObservedTags(
+	rawCurrentTags []json.RawMessage,
+	rawEvents []json.RawMessage,
+	tagDictionary map[int64]pancake.Tag,
+	window DayWindow,
+) []map[string]any {
+	seen := map[string]struct{}{}
+	resolved := make([]map[string]any, 0, len(rawCurrentTags))
 
-func resolveObservedTagEvents(rawEvents []json.RawMessage, tagDictionary map[int64]pancake.Tag, window DayWindow) []map[string]any {
-	resolved := make([]map[string]any, 0, len(rawEvents))
+	appendTag := func(rawTag json.RawMessage) {
+		tag, ok := resolveTag(rawTag, tagDictionary)
+		if !ok {
+			return
+		}
+		key := tagIdentityKey(tag)
+		if _, exists := seen[key]; exists {
+			return
+		}
+		seen[key] = struct{}{}
+		resolved = append(resolved, tag)
+	}
+
+	for _, rawTag := range compactRawItems(rawCurrentTags) {
+		appendTag(rawTag)
+	}
+
 	for _, rawEvent := range compactRawItems(rawEvents) {
 		var event map[string]any
 		if err := json.Unmarshal(rawEvent, &event); err != nil {
@@ -499,19 +525,242 @@ func resolveObservedTagEvents(rawEvents []json.RawMessage, tagDictionary map[int
 				continue
 			}
 		}
-		if payload, ok := event["payload"].(map[string]any); ok {
-			if rawTag, exists := payload["tag"]; exists {
-				encoded, err := json.Marshal(rawTag)
-				if err == nil {
-					if tag, found := resolveTag(encoded, tagDictionary); found {
-						payload["resolved_tag"] = tag
-					}
+		payload, _ := event["payload"].(map[string]any)
+		rawTag, exists := payload["tag"]
+		if !exists {
+			continue
+		}
+		encoded, err := json.Marshal(rawTag)
+		if err != nil {
+			continue
+		}
+		appendTag(encoded)
+	}
+
+	slices.SortFunc(resolved, func(left, right map[string]any) int {
+		return strings.Compare(tagIdentityKey(left), tagIdentityKey(right))
+	})
+	return resolved
+}
+
+func buildNormalizedTagSignals(
+	observedTags []map[string]any,
+	config controlplane.TagMappingConfig,
+) json.RawMessage {
+	entryByID := map[string]controlplane.TagMappingEntry{}
+	entryByLabel := map[string]controlplane.TagMappingEntry{}
+	for _, entry := range config.Entries {
+		if entry.PancakeTagID != "" {
+			entryByID[entry.PancakeTagID] = entry
+		}
+		if normalizedLabel := normalizeControlText(entry.RawLabel); normalizedLabel != "" {
+			entryByLabel[normalizedLabel] = entry
+		}
+	}
+
+	matchedSignals := map[string][]string{}
+	for _, tag := range observedTags {
+		entry, ok := resolveTagMappingEntry(tag, entryByID, entryByLabel)
+		if !ok {
+			continue
+		}
+		signal := strings.TrimSpace(entry.Signal)
+		if signal == "" || signal == strings.TrimSpace(config.DefaultSignal) || signal == "null" {
+			continue
+		}
+		rawLabel := strings.TrimSpace(tagText(tag))
+		if rawLabel == "" {
+			rawLabel = strings.TrimSpace(entry.RawLabel)
+		}
+		if rawLabel == "" {
+			continue
+		}
+		if !slices.Contains(matchedSignals[signal], rawLabel) {
+			matchedSignals[signal] = append(matchedSignals[signal], rawLabel)
+		}
+	}
+
+	for key := range matchedSignals {
+		slices.Sort(matchedSignals[key])
+	}
+	if len(matchedSignals) == 0 {
+		return json.RawMessage("{}")
+	}
+	return marshalJSON(matchedSignals, "{}")
+}
+
+func resolveTagMappingEntry(
+	tag map[string]any,
+	entryByID map[string]controlplane.TagMappingEntry,
+	entryByLabel map[string]controlplane.TagMappingEntry,
+) (controlplane.TagMappingEntry, bool) {
+	if tagID := tagIDString(tag); tagID != "" {
+		if entry, ok := entryByID[tagID]; ok {
+			return entry, true
+		}
+	}
+	if label := normalizeControlText(tagText(tag)); label != "" {
+		if entry, ok := entryByLabel[label]; ok {
+			return entry, true
+		}
+	}
+	return controlplane.TagMappingEntry{}, false
+}
+
+func buildOpeningBlocks(
+	openingMessages []openingBlockMessage,
+	transformedOpeningMessages []MessageSource,
+	rawOpeningMessages []pancake.Message,
+	config controlplane.OpeningRulesConfig,
+) openingBlocks {
+	candidates := collectOpeningCandidates(transformedOpeningMessages, rawOpeningMessages)
+	matchedSelections, deterministicSignals := matchOpeningCandidates(candidates, config.Selectors)
+	unmatchedTexts := []string{}
+	if len(matchedSelections) == 0 && config.Fallback.StoreCandidateIfUnmatched {
+		unmatchedTexts = collectOpeningCandidateTexts(candidates)
+	}
+
+	return openingBlocks{
+		OpeningCandidateWindow: openingMessages,
+		MatchedSelections:      matchedSelections,
+		DeterministicSignals:   deterministicSignals,
+		UnmatchedCandidateText: unmatchedTexts,
+	}
+}
+
+type openingCandidate struct {
+	MessageID   string
+	MessageType string
+	RawText     string
+}
+
+func collectOpeningCandidates(
+	transformedOpeningMessages []MessageSource,
+	rawOpeningMessages []pancake.Message,
+) []openingCandidate {
+	collected := make([]openingCandidate, 0, len(transformedOpeningMessages)*2)
+	for idx, message := range transformedOpeningMessages {
+		if text := strings.TrimSpace(message.RedactedText); text != "" {
+			collected = append(collected, openingCandidate{
+				MessageID:   message.MessageID,
+				MessageType: message.MessageType,
+				RawText:     text,
+			})
+		}
+		if idx >= len(rawOpeningMessages) {
+			continue
+		}
+		for _, attachment := range rawOpeningMessages[idx].Attachments {
+			if !strings.EqualFold(attachment.Type, "template") || len(attachment.Payload) == 0 {
+				continue
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(attachment.Payload, &payload); err != nil {
+				continue
+			}
+			buttons, _ := payload["buttons"].([]any)
+			for _, rawButton := range buttons {
+				button, _ := rawButton.(map[string]any)
+				title, _ := button["title"].(string)
+				if strings.TrimSpace(title) == "" {
+					continue
+				}
+				collected = append(collected, openingCandidate{
+					MessageID:   message.MessageID,
+					MessageType: "template",
+					RawText:     title,
+				})
+			}
+		}
+	}
+	return collected
+}
+
+func matchOpeningCandidates(
+	candidates []openingCandidate,
+	selectors []controlplane.OpeningSelector,
+) ([]openingSelection, map[string][]string) {
+	matchedSelections := make([]openingSelection, 0)
+	deterministicSignals := map[string][]string{}
+	seenSelections := map[string]struct{}{}
+
+	for _, candidate := range candidates {
+		normalizedText := normalizeControlText(candidate.RawText)
+		if normalizedText == "" {
+			continue
+		}
+		for _, selector := range selectors {
+			if !selectorAllowsMessageType(selector, candidate.MessageType) {
+				continue
+			}
+			for _, option := range selector.Options {
+				if normalizeControlText(option.RawText) != normalizedText {
+					continue
+				}
+				selection := openingSelection{
+					Signal:      selector.Signal,
+					RawText:     strings.TrimSpace(candidate.RawText),
+					Decision:    option.Decision,
+					MessageID:   candidate.MessageID,
+					MessageType: candidate.MessageType,
+				}
+				key := strings.Join([]string{selection.Signal, selection.Decision, selection.RawText, selection.MessageID, selection.MessageType}, "|")
+				if _, exists := seenSelections[key]; !exists {
+					seenSelections[key] = struct{}{}
+					matchedSelections = append(matchedSelections, selection)
+				}
+				decision := strings.TrimSpace(option.Decision)
+				if decision != "" && !slices.Contains(deterministicSignals[selector.Signal], decision) {
+					deterministicSignals[selector.Signal] = append(deterministicSignals[selector.Signal], decision)
 				}
 			}
 		}
-		resolved = append(resolved, event)
 	}
-	return resolved
+
+	for key := range deterministicSignals {
+		slices.Sort(deterministicSignals[key])
+	}
+	return matchedSelections, deterministicSignals
+}
+
+func selectorAllowsMessageType(selector controlplane.OpeningSelector, messageType string) bool {
+	if len(selector.AllowedMessageTypes) == 0 {
+		return true
+	}
+	for _, allowed := range selector.AllowedMessageTypes {
+		if normalizeControlText(allowed) == normalizeControlText(messageType) {
+			return true
+		}
+	}
+	return false
+}
+
+func collectOpeningCandidateTexts(candidates []openingCandidate) []string {
+	collected := make([]string, 0, len(candidates))
+	for _, candidate := range candidates {
+		if text := strings.TrimSpace(candidate.RawText); text != "" {
+			collected = append(collected, text)
+		}
+	}
+	return uniqueSortedStrings(collected)
+}
+
+func uniqueSortedStrings(values []string) []string {
+	seen := map[string]struct{}{}
+	collected := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		if _, exists := seen[trimmed]; exists {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		collected = append(collected, trimmed)
+	}
+	slices.Sort(collected)
+	return collected
 }
 
 func resolveTag(rawTag json.RawMessage, tagDictionary map[int64]pancake.Tag) (map[string]any, bool) {
@@ -541,6 +790,28 @@ func resolveTag(rawTag json.RawMessage, tagDictionary map[int64]pancake.Tag) (ma
 	return tag, true
 }
 
+func tagIdentityKey(tag map[string]any) string {
+	tagID := tagIDString(tag)
+	label := normalizeControlText(tagText(tag))
+	if tagID != "" {
+		return fmt.Sprintf("%s|%s", tagID, label)
+	}
+	return label
+}
+
+func tagIDString(tag map[string]any) string {
+	tagID, ok := asInt64(tag["id"])
+	if !ok {
+		return ""
+	}
+	return fmt.Sprintf("%d", tagID)
+}
+
+func tagText(tag map[string]any) string {
+	text, _ := tag["text"].(string)
+	return text
+}
+
 func asInt64(value any) (int64, bool) {
 	switch typed := value.(type) {
 	case float64:
@@ -553,4 +824,9 @@ func asInt64(value any) (int64, bool) {
 	default:
 		return 0, false
 	}
+}
+
+func normalizeControlText(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return strings.Join(strings.Fields(value), " ")
 }

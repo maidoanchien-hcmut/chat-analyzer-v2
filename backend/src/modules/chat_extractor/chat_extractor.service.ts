@@ -6,9 +6,17 @@ import { AppError } from "../../core/errors.ts";
 import { buildOnboardingArtifacts } from "./chat_extractor.artifacts.ts";
 import { splitRequestedWindowByTargetDate } from "./chat_extractor.planner.ts";
 import {
-  parseOpeningRules,
-  parseTagRules,
+  buildPromptProfile,
+  parseNotificationTargets,
+  parseOpeningRulesConfig,
+  parseTagMappingConfig,
+  toWorkerOpeningRules,
+  toWorkerTagMapping,
+  type CapabilityKey,
+  type CloneAiProfileVersionBody,
   type CommitSetupBody,
+  type CreateAiProfileVersionBody,
+  type CreatePromptVersionBody,
   type ExecuteJobBody,
   type JobPreview,
   type ManualJobBody,
@@ -24,9 +32,9 @@ import {
   chatExtractorRepository,
   type ConnectedPageRecord,
   type ConversationArtifactRow,
-  type CreatePagePromptVersionInput,
+  type CreatePageAiProfileVersionInput,
   type EtlRunRow,
-  type PagePromptVersionRecord,
+  type PageAiProfileVersionRecord,
   type RunCounts,
   type UpdateConnectedPageInput,
   type UpsertConnectedPageInput
@@ -34,6 +42,8 @@ import {
 
 const backendRoot = resolve(import.meta.dir, "../../..");
 const workerRoot = resolve(backendRoot, "go-worker");
+const conversationAnalysisCapability: CapabilityKey = "conversation_analysis";
+const threadCustomerMappingCapability: CapabilityKey = "thread_customer_mapping";
 
 type ListedPage = {
   pageId: string;
@@ -44,43 +54,16 @@ export type WorkerExecution = {
   connectedPageId: string;
   pageId: string;
   targetDate: string;
+  runGroupId: string;
   exitCode: number;
   ok: boolean;
   stdout: string;
   stderr: string;
 };
 
-export type ChatExtractorRepositoryPort = {
-  nextSnapshotVersion(connectedPageId: string, targetDate: string): Promise<number>;
-  listRecentRuns(limit?: number): Promise<EtlRunRow[]>;
-  listRunsForConnectedPage(connectedPageId: string, limit?: number): Promise<EtlRunRow[]>;
-  getRunById(runId: string): Promise<EtlRunRow | null>;
-  getRunCounts(runId: string): Promise<RunCounts>;
-  listConversationArtifacts(runId: string): Promise<ConversationArtifactRow[]>;
-  listConnectedPages(): Promise<ConnectedPageRecord[]>;
-  getConnectedPageById(id: string): Promise<ConnectedPageRecord | null>;
-  upsertConnectedPage(input: UpsertConnectedPageInput): Promise<ConnectedPageRecord>;
-  updateConnectedPage(id: string, patch: UpdateConnectedPageInput): Promise<ConnectedPageRecord>;
-  updateConnectedPageOnboardingState(id: string, onboardingStateJson: unknown): Promise<ConnectedPageRecord>;
-  listSchedulerPages(): Promise<ConnectedPageRecord[]>;
-  listPagePromptVersions(connectedPageId: string): Promise<PagePromptVersionRecord[]>;
-  nextPromptVersionNo(connectedPageId: string): Promise<number>;
-  createPagePromptVersion(input: CreatePagePromptVersionInput): Promise<PagePromptVersionRecord>;
-  getPagePromptVersionById(id: string): Promise<PagePromptVersionRecord | null>;
-  getActivePromptVersion(connectedPageId: string): Promise<PagePromptVersionRecord | null>;
-  activatePagePromptVersion(connectedPageId: string, promptVersionId: string): Promise<ConnectedPageRecord>;
-};
-
-type ChatExtractorServiceDependencies = {
-  repository: ChatExtractorRepositoryPort;
-  listPagesFromToken: (userAccessToken: string) => Promise<ListedPage[]>;
-  runWorker: (workerJob: WorkerJob) => Promise<WorkerExecution>;
-  runRuntimeSample: (workerJob: WorkerJob) => Promise<RuntimeSamplePreview>;
-};
-
 type RuntimeSampleConversationArtifact = {
   conversationId: string;
-  currentTagsJson: unknown;
+  observedTagsJson: unknown;
   openingBlocksJson: unknown;
 };
 
@@ -92,6 +75,35 @@ type RuntimeSamplePreview = {
   windowEndExclusiveAt: string;
   summary: Record<string, unknown>;
   conversations: RuntimeSampleConversationArtifact[];
+};
+
+export type ChatExtractorRepositoryPort = {
+  nextSnapshotVersion(connectedPageId: string, targetDate: string): Promise<number>;
+  listRecentRuns(limit?: number): Promise<EtlRunRow[]>;
+  listRunsForConnectedPage(connectedPageId: string, limit?: number): Promise<EtlRunRow[]>;
+  listRunsByRunGroupId(runGroupId: string): Promise<EtlRunRow[]>;
+  getRunById(runId: string): Promise<EtlRunRow | null>;
+  getRunCounts(runId: string): Promise<RunCounts>;
+  listConversationArtifacts(runId: string): Promise<ConversationArtifactRow[]>;
+  listConnectedPages(): Promise<ConnectedPageRecord[]>;
+  getConnectedPageById(id: string): Promise<ConnectedPageRecord | null>;
+  upsertConnectedPage(input: UpsertConnectedPageInput): Promise<ConnectedPageRecord>;
+  updateConnectedPage(id: string, patch: UpdateConnectedPageInput): Promise<ConnectedPageRecord>;
+  updateConnectedPageOnboardingState(id: string, onboardingStateJson: unknown): Promise<ConnectedPageRecord>;
+  listSchedulerPages(): Promise<ConnectedPageRecord[]>;
+  listPageAiProfileVersions(connectedPageId: string, capabilityKey?: string): Promise<PageAiProfileVersionRecord[]>;
+  nextAiProfileVersionNo(connectedPageId: string, capabilityKey: string): Promise<number>;
+  createPageAiProfileVersion(input: CreatePageAiProfileVersionInput): Promise<PageAiProfileVersionRecord>;
+  getPageAiProfileVersionById(id: string): Promise<PageAiProfileVersionRecord | null>;
+  getActiveAiProfile(connectedPageId: string, capabilityKey: string): Promise<PageAiProfileVersionRecord | null>;
+  activatePageAiProfileVersion(connectedPageId: string, capabilityKey: string, profileVersionId: string): Promise<ConnectedPageRecord>;
+};
+
+type ChatExtractorServiceDependencies = {
+  repository: ChatExtractorRepositoryPort;
+  listPagesFromToken: (userAccessToken: string) => Promise<ListedPage[]>;
+  runWorker: (workerJob: WorkerJob) => Promise<WorkerExecution>;
+  runRuntimeSample: (workerJob: WorkerJob) => Promise<RuntimeSamplePreview>;
 };
 
 export class ChatExtractorService {
@@ -125,11 +137,22 @@ export class ChatExtractorService {
     };
   }
 
-  async listPageRuns(connectedPageId: string) {
+  async listPageRunGroups(connectedPageId: string) {
     await this.requireConnectedPage(connectedPageId);
-    const runs = await this.repository.listRunsForConnectedPage(connectedPageId, 30);
+    const runs = await this.repository.listRunsForConnectedPage(connectedPageId, 200);
     return {
-      runs: runs.map(serializeRunSummary)
+      runGroups: groupRunsByRunGroup(runs)
+    };
+  }
+
+  async getRunGroup(runGroupId: string) {
+    const runs = await this.repository.listRunsByRunGroupId(runGroupId);
+    if (runs.length === 0) {
+      throw new AppError(404, "CHAT_EXTRACTOR_RUN_GROUP_NOT_FOUND", `Run group ${runGroupId} was not found.`);
+    }
+    return {
+      runGroup: buildRunGroupSummary(runs),
+      childRuns: runs.map(serializeRunSummary)
     };
   }
 
@@ -137,18 +160,17 @@ export class ChatExtractorService {
     pancakePageId: string;
     userAccessToken: string;
     businessTimezone: string;
-    autoScraperEnabled: boolean;
-    autoAiAnalysisEnabled: boolean;
+    etlEnabled: boolean;
+    analysisEnabled: boolean;
   }) {
     const selectedPage = await this.resolveListedPage(input.userAccessToken, input.pancakePageId);
-
     const page = await this.repository.upsertConnectedPage({
       pancakePageId: input.pancakePageId,
       pageName: selectedPage.pageName,
       pancakeUserAccessToken: input.userAccessToken,
       businessTimezone: input.businessTimezone,
-      autoScraperEnabled: input.autoScraperEnabled,
-      autoAiAnalysisEnabled: input.autoAiAnalysisEnabled
+      etlEnabled: input.etlEnabled,
+      analysisEnabled: input.analysisEnabled
     });
 
     return {
@@ -174,7 +196,7 @@ export class ChatExtractorService {
       }),
       targetDate: formatDateInTimeZone(new Date(), input.businessTimezone),
       runMode: "onboarding_sample",
-      runGroupId: null,
+      runGroupId: randomUUID(),
       snapshotVersion: 1,
       isPublished: false,
       requestedWindowStartAt: null,
@@ -202,7 +224,7 @@ export class ChatExtractorService {
         openingCandidates: {
           topOpeningCandidateWindows: artifacts.topOpeningCandidateWindows,
           unmatchedOpeningTexts: artifacts.unmatchedOpeningTexts,
-          matchedOpeningRules: artifacts.matchedOpeningRules
+          matchedOpeningSelections: artifacts.matchedOpeningSelections
         }
       }
     };
@@ -210,37 +232,36 @@ export class ChatExtractorService {
 
   async commitSetupPage(input: CommitSetupBody) {
     const selectedPage = await this.resolveListedPage(input.userAccessToken, input.pancakePageId);
-
-    const page = await this.repository.upsertConnectedPage({
+    let page = await this.repository.upsertConnectedPage({
       pancakePageId: input.pancakePageId,
       pageName: selectedPage.pageName,
       pancakeUserAccessToken: input.userAccessToken,
       businessTimezone: input.businessTimezone,
-      autoScraperEnabled: input.autoScraperEnabled,
-      autoAiAnalysisEnabled: input.autoAiAnalysisEnabled
+      etlEnabled: input.etlEnabled,
+      analysisEnabled: input.analysisEnabled
     });
-    await this.repository.updateConnectedPage(page.id, {
+    page = await this.repository.updateConnectedPage(page.id, {
       activeTagMappingJson: input.activeTagMappingJson,
       activeOpeningRulesJson: input.activeOpeningRulesJson,
-      isActive: input.isActive
+      notificationTargetsJson: input.notificationTargetsJson
     });
 
-    const versionNo = await this.repository.nextPromptVersionNo(page.id);
-    const prompt = await this.repository.createPagePromptVersion({
-      connectedPageId: page.id,
-      versionNo,
-      promptText: input.promptText,
-      notes: input.promptNotes
-    });
+    const createdProfiles: PageAiProfileVersionRecord[] = [];
+    const conversationProfile = await this.createAiProfileVersionInternal(page.id, conversationAnalysisCapability, input.conversationAnalysisProfileJson, input.promptNotes, true);
+    createdProfiles.push(conversationProfile);
 
-    let finalPage = await this.repository.activatePagePromptVersion(page.id, prompt.id);
+    if (input.threadCustomerMappingProfileJson) {
+      const mappingProfile = await this.createAiProfileVersionInternal(page.id, threadCustomerMappingCapability, input.threadCustomerMappingProfileJson, input.promptNotes, true);
+      createdProfiles.push(mappingProfile);
+    }
+
     if (input.onboardingStateJson) {
-      finalPage = await this.repository.updateConnectedPageOnboardingState(page.id, input.onboardingStateJson);
+      page = await this.repository.updateConnectedPageOnboardingState(page.id, input.onboardingStateJson);
     }
 
     return {
-      page: serializeConnectedPage(finalPage),
-      prompt: serializePromptVersion(prompt)
+      page: serializeConnectedPage(page),
+      profiles: createdProfiles.map(serializeAiProfileVersion)
     };
   }
 
@@ -252,103 +273,118 @@ export class ChatExtractorService {
     };
   }
 
-  async listPagePrompts(connectedPageId: string) {
-    const page = await this.requireConnectedPage(connectedPageId);
-    const prompts = await this.repository.listPagePromptVersions(connectedPageId);
+  async listPageAiProfiles(connectedPageId: string) {
+    const [page, profiles] = await Promise.all([
+      this.requireConnectedPage(connectedPageId),
+      this.repository.listPageAiProfileVersions(connectedPageId)
+    ]);
+
     return {
       connectedPageId: page.id,
-      activePromptVersionId: page.activePromptVersionId,
-      prompts: prompts.map(serializePromptVersion)
+      activeAiProfiles: page.activeAiProfilesJson,
+      profiles: profiles.map(serializeAiProfileVersion)
     };
   }
 
-  async createPromptVersion(connectedPageId: string, input: { promptText: string; notes: string | null }) {
+  async createAiProfileVersion(connectedPageId: string, input: CreateAiProfileVersionBody) {
     await this.requireConnectedPage(connectedPageId);
-    const versionNo = await this.repository.nextPromptVersionNo(connectedPageId);
-    const prompt = await this.repository.createPagePromptVersion({
-      connectedPageId,
-      versionNo,
-      promptText: input.promptText,
-      notes: input.notes
-    });
+    const profile = await this.createAiProfileVersionInternal(connectedPageId, input.capabilityKey, input.profileJson, input.notes, input.activate);
     return {
-      prompt: serializePromptVersion(prompt)
+      profile: serializeAiProfileVersion(profile)
+    };
+  }
+
+  async cloneAiProfileVersion(connectedPageId: string, input: CloneAiProfileVersionBody) {
+    await this.requireConnectedPage(connectedPageId);
+    await this.requireConnectedPage(input.sourcePageId);
+    const activeProfile = await this.repository.getActiveAiProfile(input.sourcePageId, input.capabilityKey);
+    if (!activeProfile) {
+      throw new AppError(400, "CHAT_EXTRACTOR_SOURCE_PROFILE_NOT_FOUND", `Source page ${input.sourcePageId} does not have an active ${input.capabilityKey} profile.`);
+    }
+
+    const profile = await this.createAiProfileVersionInternal(connectedPageId, input.capabilityKey, activeProfile.profileJson, input.notes, input.activate);
+    return {
+      profile: serializeAiProfileVersion(profile)
+    };
+  }
+
+  async activateAiProfileVersion(connectedPageId: string, profileVersionId: string) {
+    await this.requireConnectedPage(connectedPageId);
+    const profile = await this.repository.getPageAiProfileVersionById(profileVersionId);
+    if (!profile || profile.connectedPageId !== connectedPageId) {
+      throw new AppError(404, "CHAT_EXTRACTOR_PROFILE_NOT_FOUND", `AI profile version ${profileVersionId} does not belong to page ${connectedPageId}.`);
+    }
+    const page = await this.repository.activatePageAiProfileVersion(connectedPageId, profile.capabilityKey, profileVersionId);
+    return {
+      page: serializeConnectedPage(page)
+    };
+  }
+
+  async listPagePrompts(connectedPageId: string) {
+    const page = await this.requireConnectedPage(connectedPageId);
+    const profiles = await this.repository.listPageAiProfileVersions(connectedPageId, conversationAnalysisCapability);
+    const activeProfile = await this.repository.getActiveAiProfile(connectedPageId, conversationAnalysisCapability);
+    return {
+      connectedPageId: page.id,
+      activePromptVersionId: activeProfile?.id ?? null,
+      prompts: profiles.map(serializePromptVersion)
+    };
+  }
+
+  async createPromptVersion(connectedPageId: string, input: CreatePromptVersionBody) {
+    await this.requireConnectedPage(connectedPageId);
+    const profile = await this.createAiProfileVersionInternal(
+      connectedPageId,
+      conversationAnalysisCapability,
+      buildPromptProfile(input.promptText, input.notes, {
+        modelName: input.modelName,
+        outputSchemaVersion: input.outputSchemaVersion
+      }),
+      input.notes,
+      false
+    );
+    return {
+      prompt: serializePromptVersion(profile)
     };
   }
 
   async clonePromptVersion(connectedPageId: string, input: { sourcePageId: string; notes: string | null }) {
     await this.requireConnectedPage(connectedPageId);
     await this.requireConnectedPage(input.sourcePageId);
-    const activePrompt = await this.repository.getActivePromptVersion(input.sourcePageId);
-    if (!activePrompt) {
+    const activeProfile = await this.repository.getActiveAiProfile(input.sourcePageId, conversationAnalysisCapability);
+    if (!activeProfile) {
       throw new AppError(400, "CHAT_EXTRACTOR_SOURCE_PROMPT_NOT_FOUND", `Source page ${input.sourcePageId} does not have an active prompt to clone.`);
     }
-
-    const versionNo = await this.repository.nextPromptVersionNo(connectedPageId);
-    const prompt = await this.repository.createPagePromptVersion({
+    const profile = await this.createAiProfileVersionInternal(
       connectedPageId,
-      versionNo,
-      promptText: activePrompt.promptText,
-      notes: input.notes
-    });
-
+      conversationAnalysisCapability,
+      activeProfile.profileJson,
+      input.notes,
+      false
+    );
     return {
-      prompt: serializePromptVersion(prompt)
+      prompt: serializePromptVersion(profile)
     };
   }
 
   async activatePromptVersion(connectedPageId: string, promptVersionId: string) {
-    await this.requireConnectedPage(connectedPageId);
-    const prompt = await this.repository.getPagePromptVersionById(promptVersionId);
-    if (!prompt || prompt.connectedPageId !== connectedPageId) {
-      throw new AppError(404, "CHAT_EXTRACTOR_PROMPT_NOT_FOUND", `Prompt version ${promptVersionId} does not belong to page ${connectedPageId}.`);
-    }
-
-    const page = await this.repository.activatePagePromptVersion(connectedPageId, promptVersionId);
-    return {
-      page: serializeConnectedPage(page)
-    };
+    return this.activateAiProfileVersion(connectedPageId, promptVersionId);
   }
 
   async getHealthSummary() {
-    const runs = await this.repository.listRecentRuns(50);
+    const runs = await this.repository.listRecentRuns(100);
+    const runGroups = groupRunsByRunGroup(runs);
     const totals = {
-      running: 0,
-      loaded: 0,
-      published: 0,
-      failed: 0
+      running: runGroups.filter((group) => group.status === "running").length,
+      loaded: runGroups.filter((group) => group.status === "loaded").length,
+      published: runGroups.filter((group) => group.status === "published").length,
+      failed: runGroups.filter((group) => group.status === "failed").length
     };
-
-    for (const run of runs) {
-      if (run.status === "running") {
-        totals.running++;
-      } else if (run.status === "loaded") {
-        totals.loaded++;
-      } else if (run.status === "published") {
-        totals.published++;
-      } else if (run.status === "failed") {
-        totals.failed++;
-      }
-    }
 
     return {
       totals,
-      recentRuns: runs,
-      recentFailures: runs
-        .filter((run) => run.status === "failed")
-        .slice(0, 20)
-        .map((run) => ({
-          id: run.id,
-          connectedPageId: run.connectedPageId,
-          pageId: run.pageId,
-          pageName: run.pageName,
-          targetDate: run.targetDate,
-          processingMode: run.processingMode,
-          errorText: run.errorText,
-          metricsJson: run.metricsJson,
-          startedAt: run.startedAt,
-          finishedAt: run.finishedAt
-        }))
+      recentRunGroups: runGroups,
+      recentFailures: runGroups.filter((group) => group.status === "failed").slice(0, 20)
     };
   }
 
@@ -359,7 +395,7 @@ export class ChatExtractorService {
     }
     const counts = await this.repository.getRunCounts(runId);
     return {
-      run,
+      run: serializeRunSummary(run),
       counts
     };
   }
@@ -437,14 +473,14 @@ export class ChatExtractorService {
     const artifacts = buildOnboardingArtifacts(conversations);
     const onboardingState = {
       latestOnboardingRunId: runId,
-      latestOnboardingTargetDate: run.run.targetDate.toISOString().slice(0, 10),
+      latestOnboardingTargetDate: run.run.targetDate as string,
       generatedAt: new Date().toISOString(),
       status: "ready",
       tagCandidates: artifacts.topObservedTags,
       openingCandidates: {
         topOpeningCandidateWindows: artifacts.topOpeningCandidateWindows,
         unmatchedOpeningTexts: artifacts.unmatchedOpeningTexts,
-        matchedOpeningRules: artifacts.matchedOpeningRules
+        matchedOpeningSelections: artifacts.matchedOpeningSelections
       }
     };
 
@@ -456,58 +492,69 @@ export class ChatExtractorService {
     };
   }
 
+  private async createAiProfileVersionInternal(
+    connectedPageId: string,
+    capabilityKey: CapabilityKey,
+    profileJson: unknown,
+    notes: string | null,
+    activate: boolean
+  ) {
+    const versionNo = await this.repository.nextAiProfileVersionNo(connectedPageId, capabilityKey);
+    const profile = await this.repository.createPageAiProfileVersion({
+      connectedPageId,
+      capabilityKey,
+      versionNo,
+      profileJson,
+      notes
+    });
+    if (activate) {
+      await this.repository.activatePageAiProfileVersion(connectedPageId, capabilityKey, profile.id);
+    }
+    return profile;
+  }
+
   private async buildWorkerJobsForManual(job: ManualJobBody, page: ConnectedPageRecord): Promise<WorkerJob[]> {
     const slices = job.windowStartAt || job.windowEndExclusiveAt
-      ? [
-          {
-            targetDate: job.targetDate!,
-            requestedWindowStartAt: job.requestedWindowStartAt,
-            requestedWindowEndExclusiveAt: job.requestedWindowEndExclusiveAt,
-            windowStartAt: job.windowStartAt,
-            windowEndExclusiveAt: job.windowEndExclusiveAt,
-            isFullDay: !(job.windowStartAt || job.windowEndExclusiveAt)
-          } satisfies RunSlice
-        ]
+      ? [{
+          targetDate: job.targetDate!,
+          requestedWindowStartAt: job.requestedWindowStartAt,
+          requestedWindowEndExclusiveAt: job.requestedWindowEndExclusiveAt,
+          windowStartAt: job.windowStartAt,
+          windowEndExclusiveAt: job.windowEndExclusiveAt,
+          isFullDay: !(job.windowStartAt || job.windowEndExclusiveAt)
+        } satisfies RunSlice]
       : job.targetDate
-      ? [
-          {
-            targetDate: job.targetDate,
-            requestedWindowStartAt: null,
-            requestedWindowEndExclusiveAt: null,
-            windowStartAt: null,
-            windowEndExclusiveAt: null,
-            isFullDay: true
-          } satisfies RunSlice
-        ]
-      : splitRequestedWindowByTargetDate(
-          job.requestedWindowStartAt!,
-          job.requestedWindowEndExclusiveAt!,
-          page.businessTimezone
-        );
+      ? [{
+          targetDate: job.targetDate,
+          requestedWindowStartAt: null,
+          requestedWindowEndExclusiveAt: null,
+          windowStartAt: null,
+          windowEndExclusiveAt: null,
+          isFullDay: true
+        } satisfies RunSlice]
+      : splitRequestedWindowByTargetDate(job.requestedWindowStartAt!, job.requestedWindowEndExclusiveAt!, page.businessTimezone);
 
-    const runGroupId = job.runGroupId ?? (slices.length > 1 ? randomUUID() : null);
+    const runGroupId = job.runGroupId ?? randomUUID();
     const workerJobs: WorkerJob[] = [];
 
     for (const slice of slices) {
       const snapshotVersion = job.snapshotVersion ?? await this.repository.nextSnapshotVersion(page.id, slice.targetDate);
-      workerJobs.push(
-        this.buildWorkerJob({
-          page,
-          processingMode: job.processingMode,
-          runParamsJson: buildManualRunParams(job),
-          targetDate: slice.targetDate,
-          runMode: job.runMode ?? (slice.isFullDay ? "backfill_day" : "manual_range"),
-          runGroupId,
-          snapshotVersion,
-          isPublished: job.publish && slice.isFullDay,
-          requestedWindowStartAt: slice.requestedWindowStartAt,
-          requestedWindowEndExclusiveAt: slice.requestedWindowEndExclusiveAt,
-          windowStartAt: slice.windowStartAt,
-          windowEndExclusiveAt: slice.windowEndExclusiveAt,
-          maxConversations: job.maxConversations,
-          maxMessagePagesPerConversation: job.maxMessagePagesPerConversation
-        })
-      );
+      workerJobs.push(this.buildWorkerJob({
+        page,
+        processingMode: job.processingMode,
+        runParamsJson: buildManualRunParams(job),
+        targetDate: slice.targetDate,
+        runMode: job.runMode ?? (slice.isFullDay ? "backfill_day" : "manual_range"),
+        runGroupId,
+        snapshotVersion,
+        isPublished: job.publish && slice.isFullDay,
+        requestedWindowStartAt: slice.requestedWindowStartAt,
+        requestedWindowEndExclusiveAt: slice.requestedWindowEndExclusiveAt,
+        windowStartAt: slice.windowStartAt,
+        windowEndExclusiveAt: slice.windowEndExclusiveAt,
+        maxConversations: job.maxConversations,
+        maxMessagePagesPerConversation: job.maxMessagePagesPerConversation
+      }));
     }
 
     return workerJobs;
@@ -515,24 +562,22 @@ export class ChatExtractorService {
 
   private async buildWorkerJobsForOnboarding(job: OnboardingJobBody, page: ConnectedPageRecord): Promise<WorkerJob[]> {
     const snapshotVersion = job.snapshotVersion ?? await this.repository.nextSnapshotVersion(page.id, job.targetDate);
-    return [
-      this.buildWorkerJob({
-        page,
-        processingMode: job.processingMode,
-        runParamsJson: buildOnboardingRunParams(job),
-        targetDate: job.targetDate,
-        runMode: "onboarding_sample",
-        runGroupId: null,
-        snapshotVersion,
-        isPublished: false,
-        requestedWindowStartAt: job.requestedWindowStartAt,
-        requestedWindowEndExclusiveAt: job.requestedWindowEndExclusiveAt,
-        windowStartAt: job.windowStartAt,
-        windowEndExclusiveAt: job.windowEndExclusiveAt,
-        maxConversations: job.initialConversationLimit,
-        maxMessagePagesPerConversation: job.maxMessagePagesPerConversation
-      })
-    ];
+    return [this.buildWorkerJob({
+      page,
+      processingMode: job.processingMode,
+      runParamsJson: buildOnboardingRunParams(job),
+      targetDate: job.targetDate,
+      runMode: "onboarding_sample",
+      runGroupId: randomUUID(),
+      snapshotVersion,
+      isPublished: false,
+      requestedWindowStartAt: job.requestedWindowStartAt,
+      requestedWindowEndExclusiveAt: job.requestedWindowEndExclusiveAt,
+      windowStartAt: job.windowStartAt,
+      windowEndExclusiveAt: job.windowEndExclusiveAt,
+      maxConversations: job.initialConversationLimit,
+      maxMessagePagesPerConversation: job.maxMessagePagesPerConversation
+    })];
   }
 
   private async buildWorkerJobsForScheduler(job: SchedulerJobBody, pages: ConnectedPageRecord[]): Promise<WorkerJob[]> {
@@ -540,24 +585,22 @@ export class ChatExtractorService {
 
     for (const page of pages) {
       const snapshotVersion = job.snapshotVersion ?? await this.repository.nextSnapshotVersion(page.id, job.targetDate);
-      workerJobs.push(
-        this.buildWorkerJob({
-          page,
-          processingMode: job.processingMode,
-          runParamsJson: buildSchedulerRunParams(job),
-          targetDate: job.targetDate,
-          runMode: "scheduled_daily",
-          runGroupId: null,
-          snapshotVersion,
-          isPublished: job.isPublished,
-          requestedWindowStartAt: null,
-          requestedWindowEndExclusiveAt: null,
-          windowStartAt: null,
-          windowEndExclusiveAt: null,
-          maxConversations: job.maxConversations,
-          maxMessagePagesPerConversation: job.maxMessagePagesPerConversation
-        })
-      );
+      workerJobs.push(this.buildWorkerJob({
+        page,
+        processingMode: job.processingMode,
+        runParamsJson: buildSchedulerRunParams(job),
+        targetDate: job.targetDate,
+        runMode: "scheduled_daily",
+        runGroupId: randomUUID(),
+        snapshotVersion,
+        isPublished: job.isPublished,
+        requestedWindowStartAt: null,
+        requestedWindowEndExclusiveAt: null,
+        windowStartAt: null,
+        windowEndExclusiveAt: null,
+        maxConversations: job.maxConversations,
+        maxMessagePagesPerConversation: job.maxMessagePagesPerConversation
+      }));
     }
 
     return workerJobs;
@@ -569,7 +612,7 @@ export class ChatExtractorService {
     runParamsJson: WorkerJob["run_params_json"];
     targetDate: string;
     runMode: WorkerJob["run_mode"];
-    runGroupId: string | null;
+    runGroupId: string;
     snapshotVersion: number;
     isPublished: boolean;
     requestedWindowStartAt: string | null;
@@ -597,8 +640,8 @@ export class ChatExtractorService {
       window_end_exclusive_at: input.windowEndExclusiveAt,
       max_conversations: input.maxConversations,
       max_message_pages_per_conversation: input.maxMessagePagesPerConversation,
-      tag_rules: parseTagRules(input.page.activeTagMappingJson),
-      opening_rules: parseOpeningRules(input.page.activeOpeningRulesJson),
+      tag_mapping: toWorkerTagMapping(parseTagMappingConfig(input.page.activeTagMappingJson)),
+      opening_rules: toWorkerOpeningRules(parseOpeningRulesConfig(input.page.activeOpeningRulesJson)),
       customer_directory: []
     };
   }
@@ -630,7 +673,7 @@ async function fetchPancakePages(userAccessToken: string): Promise<ListedPage[]>
   const response = await fetch(endpoint, {
     headers: {
       Accept: "application/json",
-      "User-Agent": "chat-analyzer-v2-chat-extractor-control-plane/0.1"
+      "User-Agent": "chat-analyzer-v2-control-plane/0.2"
     }
   });
   const raw = await response.text();
@@ -665,6 +708,7 @@ async function runWorkerJob(workerJob: WorkerJob): Promise<WorkerExecution> {
       connectedPageId: workerJob.connected_page_id,
       pageId: workerJob.page_id,
       targetDate: workerJob.target_date,
+      runGroupId: workerJob.run_group_id,
       exitCode,
       ok: exitCode === 0,
       stdout: stdout.trim(),
@@ -728,13 +772,13 @@ function buildRuntimeOnlyPageRecord(input: {
     pageName: input.pageName,
     pancakeUserAccessToken: input.userAccessToken,
     businessTimezone: input.businessTimezone,
-    autoScraperEnabled: false,
-    autoAiAnalysisEnabled: false,
-    activePromptVersionId: null,
+    etlEnabled: false,
+    analysisEnabled: false,
+    activeAiProfilesJson: {},
     activeTagMappingJson: input.activeTagMappingJson,
     activeOpeningRulesJson: input.activeOpeningRulesJson,
+    notificationTargetsJson: {},
     onboardingStateJson: {},
-    isActive: false,
     createdAt: new Date(0),
     updatedAt: new Date(0)
   };
@@ -746,41 +790,129 @@ function serializeConnectedPage(page: ConnectedPageRecord) {
     pancakePageId: page.pancakePageId,
     pageName: page.pageName,
     businessTimezone: page.businessTimezone,
-    autoScraperEnabled: page.autoScraperEnabled,
-    autoAiAnalysisEnabled: page.autoAiAnalysisEnabled,
-    activePromptVersionId: page.activePromptVersionId,
-    activeTagMappingJson: parseTagRules(page.activeTagMappingJson),
-    activeOpeningRulesJson: parseOpeningRules(page.activeOpeningRulesJson),
+    etlEnabled: page.etlEnabled,
+    analysisEnabled: page.analysisEnabled,
+    activeAiProfilesJson: page.activeAiProfilesJson,
+    activeTagMappingJson: parseTagMappingConfig(page.activeTagMappingJson),
+    activeOpeningRulesJson: parseOpeningRulesConfig(page.activeOpeningRulesJson),
+    notificationTargetsJson: parseNotificationTargets(page.notificationTargetsJson),
     onboardingStateJson: page.onboardingStateJson,
-    isActive: page.isActive,
     createdAt: page.createdAt,
     updatedAt: page.updatedAt
   };
 }
 
-function serializePromptVersion(prompt: PagePromptVersionRecord) {
+function serializeAiProfileVersion(profile: PageAiProfileVersionRecord) {
   return {
-    id: prompt.id,
-    connectedPageId: prompt.connectedPageId,
-    versionNo: prompt.versionNo,
-    promptText: prompt.promptText,
-    notes: prompt.notes,
-    createdAt: prompt.createdAt
+    id: profile.id,
+    connectedPageId: profile.connectedPageId,
+    capabilityKey: profile.capabilityKey,
+    versionNo: profile.versionNo,
+    profileJson: profile.profileJson,
+    notes: profile.notes,
+    createdAt: profile.createdAt
+  };
+}
+
+function serializePromptVersion(profile: PageAiProfileVersionRecord) {
+  return {
+    id: profile.id,
+    connectedPageId: profile.connectedPageId,
+    versionNo: profile.versionNo,
+    promptText: readStringProfileField(profile.profileJson, "prompt_template") ?? "",
+    notes: profile.notes,
+    createdAt: profile.createdAt,
+    modelName: readStringProfileField(profile.profileJson, "model_name"),
+    outputSchemaVersion: readStringProfileField(profile.profileJson, "output_schema_version")
   };
 }
 
 function serializeRunSummary(run: EtlRunRow) {
   return {
     id: run.id,
+    connectedPageId: run.connectedPageId,
+    runGroupId: run.runGroupId,
     runMode: run.runMode,
+    pancakePageId: run.pancakePageId,
+    pageName: run.pageName,
+    targetDate: run.targetDate.toISOString().slice(0, 10),
     processingMode: run.processingMode,
+    businessTimezone: run.businessTimezone,
+    requestedWindowStartAt: run.requestedWindowStartAt,
+    requestedWindowEndExclusiveAt: run.requestedWindowEndExclusiveAt,
+    windowStartAt: run.windowStartAt,
+    windowEndExclusiveAt: run.windowEndExclusiveAt,
     status: run.status,
-    targetDate: run.targetDate,
+    snapshotVersion: run.snapshotVersion,
+    isPublished: run.isPublished,
+    runParamsJson: run.runParamsJson,
+    metricsJson: run.metricsJson,
+    errorText: run.errorText,
     startedAt: run.startedAt,
     finishedAt: run.finishedAt,
-    snapshotVersion: run.snapshotVersion,
-    isPublished: run.isPublished
+    createdAt: run.createdAt
   };
+}
+
+function groupRunsByRunGroup(runs: EtlRunRow[]) {
+  const grouped = new Map<string, EtlRunRow[]>();
+  for (const run of runs) {
+    const bucket = grouped.get(run.runGroupId) ?? [];
+    bucket.push(run);
+    grouped.set(run.runGroupId, bucket);
+  }
+  return [...grouped.values()]
+    .map((bucket) => buildRunGroupSummary(bucket))
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+}
+
+function buildRunGroupSummary(runs: EtlRunRow[]) {
+  const sortedRuns = [...runs].sort((left, right) => left.createdAt.getTime() - right.createdAt.getTime());
+  const firstRun = sortedRuns[0]!;
+  const lastRun = sortedRuns[sortedRuns.length - 1]!;
+  const sortedDates = sortedRuns.map((run) => run.targetDate.toISOString().slice(0, 10)).sort();
+  return {
+    runGroupId: firstRun.runGroupId,
+    connectedPageId: firstRun.connectedPageId,
+    pancakePageId: firstRun.pancakePageId,
+    pageName: firstRun.pageName,
+    runMode: firstRun.runMode,
+    status: deriveRunGroupStatus(sortedRuns),
+    processingModes: [...new Set(sortedRuns.map((run) => run.processingMode))],
+    childRunCount: sortedRuns.length,
+    publishedChildCount: sortedRuns.filter((run) => run.isPublished).length,
+    targetDateStart: sortedDates[0] ?? null,
+    targetDateEnd: sortedDates[sortedDates.length - 1] ?? null,
+    createdAt: firstRun.createdAt.toISOString(),
+    startedAt: sortedRuns.find((run) => run.startedAt)?.startedAt?.toISOString() ?? null,
+    finishedAt: lastRun.finishedAt?.toISOString() ?? null,
+    childRuns: sortedRuns.map(serializeRunSummary)
+  };
+}
+
+function deriveRunGroupStatus(runs: EtlRunRow[]) {
+  const statuses = runs.map((run) => run.status);
+  if (statuses.includes("failed")) {
+    return "failed";
+  }
+  if (statuses.includes("running")) {
+    return "running";
+  }
+  if (statuses.every((status) => status === "published")) {
+    return "published";
+  }
+  if (statuses.every((status) => status === "loaded" || status === "published")) {
+    return "loaded";
+  }
+  return runs[runs.length - 1]?.status ?? "queued";
+}
+
+function readStringProfileField(profileJson: unknown, key: string) {
+  if (!profileJson || typeof profileJson !== "object" || Array.isArray(profileJson)) {
+    return null;
+  }
+  const value = (profileJson as Record<string, unknown>)[key];
+  return typeof value === "string" ? value : null;
 }
 
 function resolveManualJobName(job: ManualJobBody, page: ConnectedPageRecord): ManualJobBody {
@@ -870,7 +1002,7 @@ export function parseListPagesResponse(raw: string) {
     }));
 }
 
-export function extractRunIDFromWorkerOutput(stdout: string): string | null {
+export function extractRunIDFromWorkerOutput(stdout: string) {
   const match = stdout.match(/etl_run_id=([0-9a-fA-F-]{36})/);
   return match?.[1] ?? null;
 }

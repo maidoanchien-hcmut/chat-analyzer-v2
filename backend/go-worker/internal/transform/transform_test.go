@@ -114,23 +114,35 @@ func TestBuildConversationDayAppliesTagSignalsAndOpeningSignatures(t *testing.T)
 	}
 
 	day, err := BuildConversationDay(window, conversation, pancake.MessageContext{}, messages, len(messages), tagDictionary, controlplane.RuntimeConfig{
-		TagRules: []controlplane.TagRule{
-			{
-				Name:         "returning",
-				MatchAnyText: []string{"KH TÁI KHÁM"},
-				Signals: map[string]any{
-					"customer_type": "returning",
-					"need":          "booking",
+		TagMapping: controlplane.TagMappingConfig{
+			DefaultSignal: "null",
+			Entries: []controlplane.TagMappingEntry{
+				{
+					PancakeTagID: "101",
+					RawLabel:     "KH TÁI KHÁM",
+					Signal:       "customer_type",
 				},
 			},
 		},
-		OpeningRules: []controlplane.OpeningRule{
-			{
-				Name:         "bot_start",
-				MatchAnyText: []string{"bắt đầu"},
-				Signals: map[string]any{
-					"entry_flow": "welcome_bot",
+		OpeningRules: controlplane.OpeningRulesConfig{
+			Boundary: controlplane.OpeningBoundary{
+				Mode:        "until_first_meaningful_human_message",
+				MaxMessages: 12,
+			},
+			Selectors: []controlplane.OpeningSelector{
+				{
+					Signal:              "entry_flow",
+					AllowedMessageTypes: []string{"template", "text"},
+					Options: []controlplane.OpeningOption{
+						{
+							RawText:  "Bắt đầu",
+							Decision: "welcome_bot",
+						},
+					},
 				},
+			},
+			Fallback: controlplane.OpeningFallback{
+				StoreCandidateIfUnmatched: true,
 			},
 		},
 	})
@@ -138,10 +150,10 @@ func TestBuildConversationDayAppliesTagSignalsAndOpeningSignatures(t *testing.T)
 		t.Fatalf("BuildConversationDay returned error: %v", err)
 	}
 
-	if got := string(day.NormalizedTagSignalsJSON); !strings.Contains(got, `"customer_type":["returning"]`) {
+	if got := string(day.NormalizedTagSignalsJSON); !strings.Contains(got, `"customer_type":["KH TÁI KHÁM"]`) {
 		t.Fatalf("expected normalized tag signals to include customer_type, got %s", got)
 	}
-	if got := string(day.OpeningBlocksJSON); !strings.Contains(got, `"entry_flow":"welcome_bot"`) {
+	if got := string(day.OpeningBlocksJSON); !strings.Contains(got, `"entry_flow":["welcome_bot"]`) {
 		t.Fatalf("expected opening blocks to include matched signature payload, got %s", got)
 	}
 }
@@ -233,6 +245,9 @@ func TestBuildThreadCustomerMappingsUsesSingleDeterministicPhone(t *testing.T) {
 	}
 	if mappings[0].MappingMethod != "deterministic_single_phone" {
 		t.Fatalf("expected deterministic_single_phone mapping method, got %s", mappings[0].MappingMethod)
+	}
+	if mappings[0].ConnectedPageID != "page-1" {
+		t.Fatalf("expected connected page id to be page-1, got %s", mappings[0].ConnectedPageID)
 	}
 }
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"chat-analyzer-v2/backend/go-worker/internal/config"
+	"chat-analyzer-v2/backend/go-worker/internal/controlplane"
 )
 
 func TestRequestApplyPopulatesConfig(t *testing.T) {
@@ -17,18 +18,19 @@ func TestRequestApplyPopulatesConfig(t *testing.T) {
 		BusinessTimezone:               "Asia/Ho_Chi_Minh",
 		RunMode:                        "manual_range",
 		ProcessingMode:                 "etl_only",
-		RunGroupID:                     "group-1",
+		RunGroupID:                     "1e1f48ef-cd0f-4452-a5d6-533af1df4ef5",
 		SnapshotVersion:                2,
 		IsPublished:                    false,
 		RunParamsJSON:                  json.RawMessage(`{"max_conversations":10}`),
 		MaxConversations:               10,
 		MaxMessagePagesPerConversation: 3,
-		TagRules: []TagRule{
-			{
-				Name:         "kh-moi",
-				MatchAnyText: []string{"KH MỚI"},
-				Signals: map[string]any{
-					"customer_type": "new",
+		TagMapping: controlplane.TagMappingConfig{
+			DefaultSignal: "null",
+			Entries: []controlplane.TagMappingEntry{
+				{
+					PancakeTagID: "101",
+					RawLabel:     "KH MỚI",
+					Signal:       "customer_type",
 				},
 			},
 		},
@@ -79,7 +81,7 @@ func TestRequestApplyPopulatesConfig(t *testing.T) {
 	if got := cfg.BusinessDay.Format(time.DateOnly); got != "2026-03-31" {
 		t.Fatalf("expected business day 2026-03-31, got %s", got)
 	}
-	if len(cfg.TagRules) != 1 {
+	if len(cfg.TagMapping.Entries) != 1 {
 		t.Fatalf("expected tag mappings to be copied")
 	}
 	if len(cfg.CustomerDirectory) != 1 {
@@ -93,6 +95,7 @@ func TestRequestApplyDefaultsRunModeAndSnapshotVersion(t *testing.T) {
 		PageID:           "page-1",
 		TargetDate:       "2026-03-31",
 		BusinessTimezone: "",
+		RunGroupID:       "7656cdf2-db9d-4121-aef8-54f06ae97d58",
 	}
 
 	var cfg config.Config
@@ -120,22 +123,36 @@ func TestRequestApplyPopulatesControlPlaneRules(t *testing.T) {
 		PageID:           "page-1",
 		TargetDate:       "2026-03-31",
 		BusinessTimezone: "Asia/Ho_Chi_Minh",
-		TagRules: []TagRule{
-			{
-				Name:         "kh-moi",
-				MatchAnyText: []string{"KH mới"},
-				Signals: map[string]any{
-					"customer_type": "new",
+		RunGroupID:       "332f3ffc-cfd5-4fd3-abcf-3f4c3642d2a4",
+		TagMapping: controlplane.TagMappingConfig{
+			DefaultSignal: "null",
+			Entries: []controlplane.TagMappingEntry{
+				{
+					PancakeTagID: "101",
+					RawLabel:     "KH mới",
+					Signal:       "customer_type",
 				},
 			},
 		},
-		OpeningRules: []OpeningRule{
-			{
-				Name:         "dat-lich",
-				MatchAnyText: []string{"Đặt lịch hẹn"},
-				Signals: map[string]any{
-					"need": "booking",
+		OpeningRules: controlplane.OpeningRulesConfig{
+			Boundary: controlplane.OpeningBoundary{
+				Mode:        "until_first_meaningful_human_message",
+				MaxMessages: 12,
+			},
+			Selectors: []controlplane.OpeningSelector{
+				{
+					Signal:              "need",
+					AllowedMessageTypes: []string{"template", "text"},
+					Options: []controlplane.OpeningOption{
+						{
+							RawText:  "Đặt lịch hẹn",
+							Decision: "booking",
+						},
+					},
 				},
+			},
+			Fallback: controlplane.OpeningFallback{
+				StoreCandidateIfUnmatched: true,
 			},
 		},
 		CustomerDirectory: []CustomerDirectoryEntry{
@@ -151,11 +168,11 @@ func TestRequestApplyPopulatesControlPlaneRules(t *testing.T) {
 		t.Fatalf("Apply returned error: %v", err)
 	}
 
-	if got := len(cfg.TagRules); got != 1 {
-		t.Fatalf("expected 1 tag rule, got %d", got)
+	if got := len(cfg.TagMapping.Entries); got != 1 {
+		t.Fatalf("expected 1 tag mapping entry, got %d", got)
 	}
-	if got := len(cfg.OpeningRules); got != 1 {
-		t.Fatalf("expected 1 opening rule, got %d", got)
+	if got := len(cfg.OpeningRules.Selectors); got != 1 {
+		t.Fatalf("expected 1 opening selector, got %d", got)
 	}
 	if got := len(cfg.CustomerDirectory); got != 1 {
 		t.Fatalf("expected 1 customer directory entry, got %d", got)

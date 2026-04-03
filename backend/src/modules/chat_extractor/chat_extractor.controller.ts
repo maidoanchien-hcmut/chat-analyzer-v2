@@ -1,7 +1,9 @@
 import { Elysia, t } from "elysia";
 import {
-  commitSetupBodySchema,
+  cloneAiProfileVersionBodySchema,
   clonePromptVersionBodySchema,
+  commitSetupBodySchema,
+  createAiProfileVersionBodySchema,
   createPromptVersionBodySchema,
   executeJobBodySchema,
   listPagesBodySchema,
@@ -26,6 +28,11 @@ const promptVersionParamsSchema = t.Object({
   promptVersionId: t.String()
 });
 
+const aiProfileVersionParamsSchema = t.Object({
+  id: t.String(),
+  profileVersionId: t.String()
+});
+
 export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
   .post("/pages/list-from-token", async ({ body }) => {
     const parsed = listPagesBodySchema.parse(normalizeBodyKeys(body));
@@ -41,8 +48,12 @@ export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
     params: pageIdParamsSchema,
     response: t.Any()
   })
-  .get("/control-center/pages/:id/runs", async ({ params }) => chatExtractorService.listPageRuns(params.id), {
+  .get("/control-center/pages/:id/run-groups", async ({ params }) => chatExtractorService.listPageRunGroups(params.id), {
     params: pageIdParamsSchema,
+    response: t.Any()
+  })
+  .get("/control-center/run-groups/:id", async ({ params }) => chatExtractorService.getRunGroup(params.id), {
+    params: runIdParamsSchema,
     response: t.Any()
   })
   .post("/control-center/pages/register", async ({ body }) => {
@@ -99,6 +110,32 @@ export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
   }, {
     params: pageIdParamsSchema,
     body: t.Any(),
+    response: t.Any()
+  })
+  .get("/control-center/pages/:id/ai-profiles", async ({ params }) => chatExtractorService.listPageAiProfiles(params.id), {
+    params: pageIdParamsSchema,
+    response: t.Any()
+  })
+  .post("/control-center/pages/:id/ai-profiles", async ({ params, body }) => {
+    const parsed = createAiProfileVersionBodySchema.parse(normalizeBodyKeys(body));
+    return chatExtractorService.createAiProfileVersion(params.id, parsed);
+  }, {
+    params: pageIdParamsSchema,
+    body: t.Any(),
+    response: t.Any()
+  })
+  .post("/control-center/pages/:id/ai-profiles/clone", async ({ params, body }) => {
+    const parsed = cloneAiProfileVersionBodySchema.parse(normalizeBodyKeys(body));
+    return chatExtractorService.cloneAiProfileVersion(params.id, parsed);
+  }, {
+    params: pageIdParamsSchema,
+    body: t.Any(),
+    response: t.Any()
+  })
+  .post("/control-center/pages/:id/ai-profiles/:profileVersionId/activate", async ({ params }) => {
+    return chatExtractorService.activateAiProfileVersion(params.id, params.profileVersionId);
+  }, {
+    params: aiProfileVersionParamsSchema,
     response: t.Any()
   })
   .get("/control-center/pages/:id/prompts", async ({ params }) => chatExtractorService.listPagePrompts(params.id), {

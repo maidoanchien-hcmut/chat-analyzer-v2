@@ -37,6 +37,7 @@ func TestInsertETLRunStartPersistsControlPlaneOwnership(t *testing.T) {
 		PageID:           "1406535699642677",
 		BusinessTimezone: "Asia/Ho_Chi_Minh",
 		RunMode:          "onboarding_sample",
+		RunGroupID:       "ce3ee49c-cb9c-48d3-bf89-f34c419e726e",
 		ProcessingMode:   "etl_and_ai",
 		BusinessDay:      time.Date(2026, time.April, 1, 0, 0, 0, 0, time.FixedZone("ICT", 7*60*60)),
 		SnapshotVersion:  3,
@@ -64,10 +65,10 @@ func TestInsertETLRunStartPersistsControlPlaneOwnership(t *testing.T) {
 	if got := call.args[3]; got != "connected-page-1" {
 		t.Fatalf("expected connected_page_id arg, got %#v", got)
 	}
-	if got := call.args[5]; got != "etl_and_ai" {
+	if got := call.args[4]; got != "etl_and_ai" {
 		t.Fatalf("expected processing_mode arg, got %#v", got)
 	}
-	if got := string(call.args[13].(json.RawMessage)); got != string(runParams) {
+	if got := string(call.args[12].(json.RawMessage)); got != string(runParams) {
 		t.Fatalf("expected run_params_json %s, got %s", string(runParams), got)
 	}
 }

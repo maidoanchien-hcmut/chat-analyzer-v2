@@ -7,13 +7,13 @@ export type ConnectedPageRecord = {
   pageName: string;
   pancakeUserAccessToken: string;
   businessTimezone: string;
-  autoScraperEnabled: boolean;
-  autoAiAnalysisEnabled: boolean;
-  activePromptVersionId: string | null;
+  etlEnabled: boolean;
+  analysisEnabled: boolean;
+  activeAiProfilesJson: unknown;
   activeTagMappingJson: unknown;
   activeOpeningRulesJson: unknown;
+  notificationTargetsJson: unknown;
   onboardingStateJson: unknown;
-  isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
@@ -23,41 +23,45 @@ export type UpsertConnectedPageInput = {
   pageName: string;
   pancakeUserAccessToken: string;
   businessTimezone: string;
-  autoScraperEnabled: boolean;
-  autoAiAnalysisEnabled: boolean;
+  etlEnabled: boolean;
+  analysisEnabled: boolean;
 };
 
 export type UpdateConnectedPageInput = {
   businessTimezone?: string;
-  autoScraperEnabled?: boolean;
-  autoAiAnalysisEnabled?: boolean;
+  etlEnabled?: boolean;
+  analysisEnabled?: boolean;
+  activeAiProfilesJson?: unknown;
   activeTagMappingJson?: unknown;
   activeOpeningRulesJson?: unknown;
-  isActive?: boolean;
+  notificationTargetsJson?: unknown;
+  onboardingStateJson?: unknown;
 };
 
-export type PagePromptVersionRecord = {
+export type PageAiProfileVersionRecord = {
   id: string;
   connectedPageId: string;
+  capabilityKey: string;
   versionNo: number;
-  promptText: string;
+  profileJson: unknown;
   notes: string | null;
   createdAt: Date;
 };
 
-export type CreatePagePromptVersionInput = {
+export type CreatePageAiProfileVersionInput = {
   connectedPageId: string;
+  capabilityKey: string;
   versionNo: number;
-  promptText: string;
+  profileJson: unknown;
   notes: string | null;
 };
 
 export type EtlRunRow = {
   id: string;
-  connectedPageId: string | null;
-  runGroupId: string | null;
+  connectedPageId: string;
+  runGroupId: string;
   runMode: string;
-  pageId: string;
+  pancakePageId: string | null;
   pageName: string | null;
   targetDate: Date;
   processingMode: string;
@@ -72,8 +76,9 @@ export type EtlRunRow = {
   runParamsJson: unknown;
   metricsJson: unknown;
   errorText: string | null;
-  startedAt: Date;
+  startedAt: Date | null;
   finishedAt: Date | null;
+  createdAt: Date;
 };
 
 export type RunCounts = {
@@ -83,7 +88,7 @@ export type RunCounts = {
 
 export type ConversationArtifactRow = {
   conversationId: string;
-  currentTagsJson: unknown;
+  observedTagsJson: unknown;
   openingBlocksJson: unknown;
 };
 
@@ -93,22 +98,23 @@ type ConnectedPageModel = {
   pageName: string;
   pancakeUserAccessToken: string;
   businessTimezone: string;
-  autoScraperEnabled: boolean;
-  autoAiAnalysisEnabled: boolean;
-  activePromptVersionId: string | null;
+  etlEnabled: boolean;
+  analysisEnabled: boolean;
+  activeAiProfilesJson: Prisma.JsonValue;
   activeTagMappingJson: Prisma.JsonValue;
   activeOpeningRulesJson: Prisma.JsonValue;
+  notificationTargetsJson: Prisma.JsonValue;
   onboardingStateJson: Prisma.JsonValue;
-  isActive: boolean;
   createdAt: Date;
   updatedAt: Date;
 };
 
-type PromptVersionModel = {
+type AiProfileVersionModel = {
   id: string;
   connectedPageId: string;
+  capabilityKey: string;
   versionNo: number;
-  promptText: string;
+  profileJson: Prisma.JsonValue;
   notes: string | null;
   createdAt: Date;
 };
@@ -132,7 +138,7 @@ class ChatExtractorRepository {
         etl_run.connected_page_id AS "connectedPageId",
         etl_run.run_group_id AS "runGroupId",
         etl_run.run_mode AS "runMode",
-        etl_run.page_id AS "pageId",
+        connected_page.pancake_page_id AS "pancakePageId",
         connected_page.page_name AS "pageName",
         etl_run.target_date AS "targetDate",
         etl_run.processing_mode AS "processingMode",
@@ -148,22 +154,23 @@ class ChatExtractorRepository {
         etl_run.metrics_json AS "metricsJson",
         etl_run.error_text AS "errorText",
         etl_run.started_at AS "startedAt",
-        etl_run.finished_at AS "finishedAt"
+        etl_run.finished_at AS "finishedAt",
+        etl_run.created_at AS "createdAt"
       FROM etl_run
-      LEFT JOIN connected_page ON connected_page.id = etl_run.connected_page_id
-      ORDER BY etl_run.started_at DESC
+      INNER JOIN connected_page ON connected_page.id = etl_run.connected_page_id
+      ORDER BY etl_run.created_at DESC
       LIMIT ${limit}
     `);
   }
 
-  async listRunsForConnectedPage(connectedPageId: string, limit = 30): Promise<EtlRunRow[]> {
+  async listRunsForConnectedPage(connectedPageId: string, limit = 100): Promise<EtlRunRow[]> {
     return prisma.$queryRaw<EtlRunRow[]>(Prisma.sql`
       SELECT
         etl_run.id,
         etl_run.connected_page_id AS "connectedPageId",
         etl_run.run_group_id AS "runGroupId",
         etl_run.run_mode AS "runMode",
-        etl_run.page_id AS "pageId",
+        connected_page.pancake_page_id AS "pancakePageId",
         connected_page.page_name AS "pageName",
         etl_run.target_date AS "targetDate",
         etl_run.processing_mode AS "processingMode",
@@ -179,12 +186,45 @@ class ChatExtractorRepository {
         etl_run.metrics_json AS "metricsJson",
         etl_run.error_text AS "errorText",
         etl_run.started_at AS "startedAt",
-        etl_run.finished_at AS "finishedAt"
+        etl_run.finished_at AS "finishedAt",
+        etl_run.created_at AS "createdAt"
       FROM etl_run
-      LEFT JOIN connected_page ON connected_page.id = etl_run.connected_page_id
+      INNER JOIN connected_page ON connected_page.id = etl_run.connected_page_id
       WHERE etl_run.connected_page_id = ${connectedPageId}::uuid
-      ORDER BY etl_run.started_at DESC
+      ORDER BY etl_run.created_at DESC
       LIMIT ${limit}
+    `);
+  }
+
+  async listRunsByRunGroupId(runGroupId: string): Promise<EtlRunRow[]> {
+    return prisma.$queryRaw<EtlRunRow[]>(Prisma.sql`
+      SELECT
+        etl_run.id,
+        etl_run.connected_page_id AS "connectedPageId",
+        etl_run.run_group_id AS "runGroupId",
+        etl_run.run_mode AS "runMode",
+        connected_page.pancake_page_id AS "pancakePageId",
+        connected_page.page_name AS "pageName",
+        etl_run.target_date AS "targetDate",
+        etl_run.processing_mode AS "processingMode",
+        etl_run.business_timezone AS "businessTimezone",
+        etl_run.requested_window_start_at AS "requestedWindowStartAt",
+        etl_run.requested_window_end_exclusive_at AS "requestedWindowEndExclusiveAt",
+        etl_run.window_start_at AS "windowStartAt",
+        etl_run.window_end_exclusive_at AS "windowEndExclusiveAt",
+        etl_run.status,
+        etl_run.snapshot_version AS "snapshotVersion",
+        etl_run.is_published AS "isPublished",
+        etl_run.run_params_json AS "runParamsJson",
+        etl_run.metrics_json AS "metricsJson",
+        etl_run.error_text AS "errorText",
+        etl_run.started_at AS "startedAt",
+        etl_run.finished_at AS "finishedAt",
+        etl_run.created_at AS "createdAt"
+      FROM etl_run
+      INNER JOIN connected_page ON connected_page.id = etl_run.connected_page_id
+      WHERE etl_run.run_group_id = ${runGroupId}::uuid
+      ORDER BY etl_run.target_date ASC, etl_run.created_at ASC
     `);
   }
 
@@ -195,7 +235,7 @@ class ChatExtractorRepository {
         etl_run.connected_page_id AS "connectedPageId",
         etl_run.run_group_id AS "runGroupId",
         etl_run.run_mode AS "runMode",
-        etl_run.page_id AS "pageId",
+        connected_page.pancake_page_id AS "pancakePageId",
         connected_page.page_name AS "pageName",
         etl_run.target_date AS "targetDate",
         etl_run.processing_mode AS "processingMode",
@@ -211,9 +251,10 @@ class ChatExtractorRepository {
         etl_run.metrics_json AS "metricsJson",
         etl_run.error_text AS "errorText",
         etl_run.started_at AS "startedAt",
-        etl_run.finished_at AS "finishedAt"
+        etl_run.finished_at AS "finishedAt",
+        etl_run.created_at AS "createdAt"
       FROM etl_run
-      LEFT JOIN connected_page ON connected_page.id = etl_run.connected_page_id
+      INNER JOIN connected_page ON connected_page.id = etl_run.connected_page_id
       WHERE etl_run.id = ${runId}::uuid
       LIMIT 1
     `);
@@ -230,7 +271,8 @@ class ChatExtractorRepository {
       prisma.$queryRaw<Array<{ count: bigint }>>(Prisma.sql`
         SELECT COUNT(*) AS count
         FROM message
-        WHERE etl_run_id = ${runId}::uuid
+        INNER JOIN conversation_day ON conversation_day.id = message.conversation_day_id
+        WHERE conversation_day.etl_run_id = ${runId}::uuid
       `)
     ]);
 
@@ -244,7 +286,7 @@ class ChatExtractorRepository {
     return prisma.$queryRaw<ConversationArtifactRow[]>(Prisma.sql`
       SELECT
         conversation_id AS "conversationId",
-        current_tags_json AS "currentTagsJson",
+        observed_tags_json AS "observedTagsJson",
         opening_blocks_json AS "openingBlocksJson"
       FROM conversation_day
       WHERE etl_run_id = ${runId}::uuid
@@ -277,16 +319,16 @@ class ChatExtractorRepository {
         pageName: input.pageName,
         pancakeUserAccessToken: input.pancakeUserAccessToken,
         businessTimezone: input.businessTimezone,
-        autoScraperEnabled: input.autoScraperEnabled,
-        autoAiAnalysisEnabled: input.autoAiAnalysisEnabled
+        etlEnabled: input.etlEnabled,
+        analysisEnabled: input.analysisEnabled
       },
       create: {
         pancakePageId: input.pancakePageId,
         pageName: input.pageName,
         pancakeUserAccessToken: input.pancakeUserAccessToken,
         businessTimezone: input.businessTimezone,
-        autoScraperEnabled: input.autoScraperEnabled,
-        autoAiAnalysisEnabled: input.autoAiAnalysisEnabled
+        etlEnabled: input.etlEnabled,
+        analysisEnabled: input.analysisEnabled
       }
     });
     return mapConnectedPage(row);
@@ -299,11 +341,13 @@ class ChatExtractorRepository {
       },
       data: {
         businessTimezone: patch.businessTimezone,
-        autoScraperEnabled: patch.autoScraperEnabled,
-        autoAiAnalysisEnabled: patch.autoAiAnalysisEnabled,
+        etlEnabled: patch.etlEnabled,
+        analysisEnabled: patch.analysisEnabled,
+        activeAiProfilesJson: patch.activeAiProfilesJson as Prisma.InputJsonValue | undefined,
         activeTagMappingJson: patch.activeTagMappingJson as Prisma.InputJsonValue | undefined,
         activeOpeningRulesJson: patch.activeOpeningRulesJson as Prisma.InputJsonValue | undefined,
-        isActive: patch.isActive
+        notificationTargetsJson: patch.notificationTargetsJson as Prisma.InputJsonValue | undefined,
+        onboardingStateJson: patch.onboardingStateJson as Prisma.InputJsonValue | undefined
       }
     });
     return mapConnectedPage(row);
@@ -324,80 +368,101 @@ class ChatExtractorRepository {
   async listSchedulerPages(): Promise<ConnectedPageRecord[]> {
     const rows = await prisma.connectedPage.findMany({
       where: {
-        isActive: true,
-        autoScraperEnabled: true
+        etlEnabled: true
       },
       orderBy: [{ pageName: "asc" }]
     });
     return rows.map(mapConnectedPage);
   }
 
-  async listPagePromptVersions(connectedPageId: string): Promise<PagePromptVersionRecord[]> {
-    const rows = await prisma.pagePromptVersion.findMany({
+  async listPageAiProfileVersions(connectedPageId: string, capabilityKey?: string): Promise<PageAiProfileVersionRecord[]> {
+    const rows = await prisma.pageAiProfileVersion.findMany({
       where: {
-        connectedPageId
+        connectedPageId,
+        capabilityKey
       },
-      orderBy: [{ versionNo: "desc" }]
+      orderBy: [{ capabilityKey: "asc" }, { versionNo: "desc" }]
     });
-    return rows.map(mapPagePromptVersion);
+    return rows.map(mapAiProfileVersion);
   }
 
-  async nextPromptVersionNo(connectedPageId: string): Promise<number> {
-    const result = await prisma.pagePromptVersion.aggregate({
+  async nextAiProfileVersionNo(connectedPageId: string, capabilityKey: string): Promise<number> {
+    const result = await prisma.pageAiProfileVersion.aggregate({
       _max: {
         versionNo: true
       },
       where: {
-        connectedPageId
+        connectedPageId,
+        capabilityKey
       }
     });
     return (result._max.versionNo ?? 0) + 1;
   }
 
-  async createPagePromptVersion(input: CreatePagePromptVersionInput): Promise<PagePromptVersionRecord> {
-    const row = await prisma.pagePromptVersion.create({
+  async createPageAiProfileVersion(input: CreatePageAiProfileVersionInput): Promise<PageAiProfileVersionRecord> {
+    const row = await prisma.pageAiProfileVersion.create({
       data: {
         connectedPageId: input.connectedPageId,
+        capabilityKey: input.capabilityKey,
         versionNo: input.versionNo,
-        promptText: input.promptText,
+        profileJson: input.profileJson as Prisma.InputJsonValue,
         notes: input.notes
       }
     });
-    return mapPagePromptVersion(row);
+    return mapAiProfileVersion(row);
   }
 
-  async getPagePromptVersionById(id: string): Promise<PagePromptVersionRecord | null> {
-    const row = await prisma.pagePromptVersion.findUnique({
+  async getPageAiProfileVersionById(id: string): Promise<PageAiProfileVersionRecord | null> {
+    const row = await prisma.pageAiProfileVersion.findUnique({
       where: {
         id
       }
     });
-    return row ? mapPagePromptVersion(row) : null;
+    return row ? mapAiProfileVersion(row) : null;
   }
 
-  async getActivePromptVersion(connectedPageId: string): Promise<PagePromptVersionRecord | null> {
-    const row = await prisma.connectedPage.findUnique({
+  async getActiveAiProfile(connectedPageId: string, capabilityKey: string): Promise<PageAiProfileVersionRecord | null> {
+    const page = await prisma.connectedPage.findUnique({
+      where: { id: connectedPageId },
+      select: { activeAiProfilesJson: true }
+    });
+    const activeProfileId = extractActiveProfileId(page?.activeAiProfilesJson, capabilityKey);
+    if (!activeProfileId) {
+      return null;
+    }
+    const row = await prisma.pageAiProfileVersion.findUnique({
       where: {
-        id: connectedPageId
-      },
-      select: {
-        activePromptVersion: true
+        id: activeProfileId
       }
     });
-    return row?.activePromptVersion ? mapPagePromptVersion(row.activePromptVersion) : null;
+    return row ? mapAiProfileVersion(row) : null;
   }
 
-  async activatePagePromptVersion(connectedPageId: string, promptVersionId: string): Promise<ConnectedPageRecord> {
+  async activatePageAiProfileVersion(connectedPageId: string, capabilityKey: string, profileVersionId: string): Promise<ConnectedPageRecord> {
+    const currentPage = await prisma.connectedPage.findUniqueOrThrow({
+      where: { id: connectedPageId }
+    });
+    const activeProfiles = asJsonObject(currentPage.activeAiProfilesJson);
+    activeProfiles[capabilityKey] = profileVersionId;
+
     const row = await prisma.connectedPage.update({
-      where: {
-        id: connectedPageId
-      },
+      where: { id: connectedPageId },
       data: {
-        activePromptVersionId: promptVersionId
+        activeAiProfilesJson: activeProfiles as Prisma.InputJsonValue
       }
     });
     return mapConnectedPage(row);
   }
+}
+
+function extractActiveProfileId(value: Prisma.JsonValue | null | undefined, capabilityKey: string): string | null {
+  const map = asJsonObject(value ?? {});
+  const profileId = map[capabilityKey];
+  return typeof profileId === "string" && profileId.length > 0 ? profileId : null;
+}
+
+function asJsonObject(value: Prisma.JsonValue): Record<string, Prisma.JsonValue> {
+  return value && typeof value === "object" && !Array.isArray(value) ? { ...(value as Record<string, Prisma.JsonValue>) } : {};
 }
 
 function mapConnectedPage(row: ConnectedPageModel): ConnectedPageRecord {
@@ -407,24 +472,25 @@ function mapConnectedPage(row: ConnectedPageModel): ConnectedPageRecord {
     pageName: row.pageName,
     pancakeUserAccessToken: row.pancakeUserAccessToken,
     businessTimezone: row.businessTimezone,
-    autoScraperEnabled: row.autoScraperEnabled,
-    autoAiAnalysisEnabled: row.autoAiAnalysisEnabled,
-    activePromptVersionId: row.activePromptVersionId,
+    etlEnabled: row.etlEnabled,
+    analysisEnabled: row.analysisEnabled,
+    activeAiProfilesJson: row.activeAiProfilesJson,
     activeTagMappingJson: row.activeTagMappingJson,
     activeOpeningRulesJson: row.activeOpeningRulesJson,
+    notificationTargetsJson: row.notificationTargetsJson,
     onboardingStateJson: row.onboardingStateJson,
-    isActive: row.isActive,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt
   };
 }
 
-function mapPagePromptVersion(row: PromptVersionModel): PagePromptVersionRecord {
+function mapAiProfileVersion(row: AiProfileVersionModel): PageAiProfileVersionRecord {
   return {
     id: row.id,
     connectedPageId: row.connectedPageId,
+    capabilityKey: row.capabilityKey,
     versionNo: row.versionNo,
-    promptText: row.promptText,
+    profileJson: row.profileJson,
     notes: row.notes,
     createdAt: row.createdAt
   };

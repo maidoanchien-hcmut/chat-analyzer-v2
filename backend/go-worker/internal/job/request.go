@@ -13,31 +13,29 @@ import (
 
 const defaultRunMode = "scheduled_daily"
 
-type TagRule = controlplane.TagRule
-type OpeningRule = controlplane.OpeningRule
 type CustomerDirectoryEntry = controlplane.CustomerDirectoryEntry
 
 type Request struct {
-	ConnectedPageID                string                   `json:"connected_page_id"`
-	ProcessingMode                 string                   `json:"processing_mode"`
-	RunParamsJSON                  json.RawMessage          `json:"run_params_json"`
-	UserAccessToken                string                   `json:"user_access_token"`
-	PageID                         string                   `json:"page_id"`
-	TargetDate                     string                   `json:"target_date"`
-	BusinessTimezone               string                   `json:"business_timezone"`
-	RunMode                        string                   `json:"run_mode"`
-	RunGroupID                     string                   `json:"run_group_id"`
-	SnapshotVersion                int                      `json:"snapshot_version"`
-	IsPublished                    bool                     `json:"is_published"`
-	RequestedWindowStartAt         *string                  `json:"requested_window_start_at"`
-	RequestedWindowEndExclusiveAt  *string                  `json:"requested_window_end_exclusive_at"`
-	WindowStartAt                  *string                  `json:"window_start_at"`
-	WindowEndExclusiveAt           *string                  `json:"window_end_exclusive_at"`
-	MaxConversations               int                      `json:"max_conversations"`
-	MaxMessagePagesPerConversation int                      `json:"max_message_pages_per_conversation"`
-	TagRules                       []TagRule                `json:"tag_rules"`
-	OpeningRules                   []OpeningRule            `json:"opening_rules"`
-	CustomerDirectory              []CustomerDirectoryEntry `json:"customer_directory"`
+	ConnectedPageID                string                          `json:"connected_page_id"`
+	ProcessingMode                 string                          `json:"processing_mode"`
+	RunParamsJSON                  json.RawMessage                 `json:"run_params_json"`
+	UserAccessToken                string                          `json:"user_access_token"`
+	PageID                         string                          `json:"page_id"`
+	TargetDate                     string                          `json:"target_date"`
+	BusinessTimezone               string                          `json:"business_timezone"`
+	RunMode                        string                          `json:"run_mode"`
+	RunGroupID                     string                          `json:"run_group_id"`
+	SnapshotVersion                int                             `json:"snapshot_version"`
+	IsPublished                    bool                            `json:"is_published"`
+	RequestedWindowStartAt         *string                         `json:"requested_window_start_at"`
+	RequestedWindowEndExclusiveAt  *string                         `json:"requested_window_end_exclusive_at"`
+	WindowStartAt                  *string                         `json:"window_start_at"`
+	WindowEndExclusiveAt           *string                         `json:"window_end_exclusive_at"`
+	MaxConversations               int                             `json:"max_conversations"`
+	MaxMessagePagesPerConversation int                             `json:"max_message_pages_per_conversation"`
+	TagMapping                     controlplane.TagMappingConfig   `json:"tag_mapping"`
+	OpeningRules                   controlplane.OpeningRulesConfig `json:"opening_rules"`
+	CustomerDirectory              []CustomerDirectoryEntry        `json:"customer_directory"`
 }
 
 func LoadFile(path string) (Request, error) {
@@ -116,8 +114,8 @@ func (r Request) Apply(cfg *config.Config) error {
 	cfg.WindowEndExclusiveAt = windowEndExclusiveAt
 	cfg.MaxConversations = r.MaxConversations
 	cfg.MaxMessagePagesPerConversation = r.MaxMessagePagesPerConversation
-	cfg.TagRules = append([]controlplane.TagRule(nil), r.TagRules...)
-	cfg.OpeningRules = append([]controlplane.OpeningRule(nil), r.OpeningRules...)
+	cfg.TagMapping = r.TagMapping
+	cfg.OpeningRules = r.OpeningRules
 	cfg.CustomerDirectory = append([]controlplane.CustomerDirectoryEntry(nil), r.CustomerDirectory...)
 	return nil
 }

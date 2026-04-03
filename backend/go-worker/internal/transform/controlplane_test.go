@@ -41,23 +41,45 @@ func TestBuildConversationDayAppliesTagAndOpeningRules(t *testing.T) {
 		},
 	}
 	policies := controlplane.RuntimeConfig{
-		TagRules: []controlplane.TagRule{
-			{
-				Name:         "kh-moi",
-				MatchAnyText: []string{"KH mới"},
-				Signals: map[string]any{
-					"customer_type": "new",
+		TagMapping: controlplane.TagMappingConfig{
+			DefaultSignal: "null",
+			Entries: []controlplane.TagMappingEntry{
+				{
+					PancakeTagID: "101",
+					RawLabel:     "KH mới",
+					Signal:       "customer_type",
 				},
 			},
 		},
-		OpeningRules: []controlplane.OpeningRule{
-			{
-				Name:         "dat-lich",
-				MatchAnyText: []string{"Đặt lịch hẹn"},
-				Signals: map[string]any{
-					"need":       "booking",
-					"entry_flow": "chatbot",
+		OpeningRules: controlplane.OpeningRulesConfig{
+			Boundary: controlplane.OpeningBoundary{
+				Mode:        "until_first_meaningful_human_message",
+				MaxMessages: 12,
+			},
+			Selectors: []controlplane.OpeningSelector{
+				{
+					Signal:              "need",
+					AllowedMessageTypes: []string{"template", "text"},
+					Options: []controlplane.OpeningOption{
+						{
+							RawText:  "Đặt lịch hẹn",
+							Decision: "booking",
+						},
+					},
 				},
+				{
+					Signal:              "entry_flow",
+					AllowedMessageTypes: []string{"template", "text"},
+					Options: []controlplane.OpeningOption{
+						{
+							RawText:  "Đặt lịch hẹn",
+							Decision: "chatbot",
+						},
+					},
+				},
+			},
+			Fallback: controlplane.OpeningFallback{
+				StoreCandidateIfUnmatched: true,
 			},
 		},
 	}
@@ -67,24 +89,24 @@ func TestBuildConversationDayAppliesTagAndOpeningRules(t *testing.T) {
 		t.Fatalf("BuildConversationDay returned error: %v", err)
 	}
 
-	if got := string(day.NormalizedTagSignalsJSON); got != `{"customer_type":["new"]}` {
+	if got := string(day.NormalizedTagSignalsJSON); got != `{"customer_type":["KH mới"]}` {
 		t.Fatalf("expected normalized tag signals, got %s", got)
 	}
 
 	var opening struct {
-		MatchedRules []struct {
-			Name    string         `json:"name"`
-			Signals map[string]any `json:"signals"`
-		} `json:"matched_rules"`
+		MatchedSelections []struct {
+			Signal   string `json:"signal"`
+			Decision string `json:"decision"`
+		} `json:"matched_selections"`
 	}
 	if err := json.Unmarshal(day.OpeningBlocksJSON, &opening); err != nil {
 		t.Fatalf("unmarshal opening blocks: %v", err)
 	}
-	if len(opening.MatchedRules) != 1 {
-		t.Fatalf("expected 1 matched opening rule, got %d", len(opening.MatchedRules))
+	if len(opening.MatchedSelections) == 0 {
+		t.Fatalf("expected at least 1 matched opening selection, got 0")
 	}
-	if opening.MatchedRules[0].Name != "dat-lich" {
-		t.Fatalf("expected opening rule dat-lich, got %q", opening.MatchedRules[0].Name)
+	if opening.MatchedSelections[0].Signal != "entry_flow" && opening.MatchedSelections[0].Signal != "need" {
+		t.Fatalf("unexpected opening selection: %+v", opening.MatchedSelections[0])
 	}
 }
 
@@ -112,13 +134,29 @@ func TestBuildConversationDayMatchesOpeningRuleByBlockSignature(t *testing.T) {
 	}
 
 	policies := controlplane.RuntimeConfig{
-		OpeningRules: []controlplane.OpeningRule{
-			{
-				Name:         "full-opening-signature",
-				MatchAllText: []string{"Bắt đầu", "Khách hàng lần đầu", "Đặt lịch hẹn"},
-				Signals: map[string]any{
-					"opening_block_label": "bot-flow-booking",
+		OpeningRules: controlplane.OpeningRulesConfig{
+			Boundary: controlplane.OpeningBoundary{
+				Mode:        "until_first_meaningful_human_message",
+				MaxMessages: 12,
+			},
+			Selectors: []controlplane.OpeningSelector{
+				{
+					Signal:              "opening_block_label",
+					AllowedMessageTypes: []string{"template", "text"},
+					Options: []controlplane.OpeningOption{
+						{
+							RawText:  "Khách hàng lần đầu",
+							Decision: "bot-flow-booking",
+						},
+						{
+							RawText:  "Đặt lịch hẹn",
+							Decision: "bot-flow-booking",
+						},
+					},
 				},
+			},
+			Fallback: controlplane.OpeningFallback{
+				StoreCandidateIfUnmatched: true,
 			},
 		},
 	}
@@ -129,15 +167,13 @@ func TestBuildConversationDayMatchesOpeningRuleByBlockSignature(t *testing.T) {
 	}
 
 	var opening struct {
-		MatchedRules []struct {
-			Name string `json:"name"`
-		} `json:"matched_rules"`
+		DeterministicSignals map[string][]string `json:"deterministic_signals"`
 	}
 	if err := json.Unmarshal(day.OpeningBlocksJSON, &opening); err != nil {
 		t.Fatalf("unmarshal opening blocks: %v", err)
 	}
-	if len(opening.MatchedRules) != 1 || opening.MatchedRules[0].Name != "full-opening-signature" {
-		t.Fatalf("expected block-level opening rule to match, got %+v", opening.MatchedRules)
+	if got := opening.DeterministicSignals["opening_block_label"]; len(got) == 0 || got[0] != "bot-flow-booking" {
+		t.Fatalf("expected deterministic opening signals to include bot-flow-booking, got %+v", opening.DeterministicSignals)
 	}
 }
 

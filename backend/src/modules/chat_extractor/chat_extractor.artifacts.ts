@@ -2,15 +2,17 @@ type OpeningBlocks = {
   opening_candidate_window?: Array<{
     redacted_text?: string;
   }>;
-  matched_rules?: Array<{
-    name?: string;
+  matched_selections?: Array<{
+    signal?: string;
+    raw_text?: string;
+    decision?: string;
   }>;
   unmatched_candidate_texts?: string[];
 };
 
 type ConversationArtifactSource = {
   conversationId: string;
-  currentTagsJson: unknown;
+  observedTagsJson: unknown;
   openingBlocksJson: unknown;
 };
 
@@ -28,8 +30,10 @@ export type OnboardingArtifacts = {
     text: string;
     count: number;
   }>;
-  matchedOpeningRules: Array<{
-    name: string;
+  matchedOpeningSelections: Array<{
+    signal: string;
+    rawText: string;
+    decision: string;
     count: number;
   }>;
 };
@@ -38,11 +42,11 @@ export function buildOnboardingArtifacts(conversations: ConversationArtifactSour
   const tagCounts = new Map<string, number>();
   const openingWindowCounts = new Map<string, { count: number; exampleConversationIds: string[]; signature: string[] }>();
   const unmatchedCounts = new Map<string, number>();
-  const matchedRuleCounts = new Map<string, number>();
+  const matchedSelectionCounts = new Map<string, { signal: string; rawText: string; decision: string; count: number }>();
 
   for (const conversation of conversations) {
-    const currentTags = asArray(conversation.currentTagsJson);
-    for (const rawTag of currentTags) {
+    const observedTags = asArray(conversation.observedTagsJson);
+    for (const rawTag of observedTags) {
       const text = typeof rawTag?.text === "string" ? rawTag.text.trim() : "";
       if (!text) {
         continue;
@@ -72,12 +76,22 @@ export function buildOnboardingArtifacts(conversations: ConversationArtifactSour
       unmatchedCounts.set(text, (unmatchedCounts.get(text) ?? 0) + 1);
     }
 
-    for (const rule of asArray(opening.matched_rules)) {
-      const name = typeof rule?.name === "string" ? rule.name.trim() : "";
-      if (!name) {
+    for (const selection of asArray(opening.matched_selections)) {
+      const signal = typeof selection?.signal === "string" ? selection.signal.trim() : "";
+      const rawText = typeof selection?.raw_text === "string" ? selection.raw_text.trim() : "";
+      const decision = typeof selection?.decision === "string" ? selection.decision.trim() : "";
+      if (!signal || !rawText || !decision) {
         continue;
       }
-      matchedRuleCounts.set(name, (matchedRuleCounts.get(name) ?? 0) + 1);
+      const key = JSON.stringify([signal, rawText, decision]);
+      const current = matchedSelectionCounts.get(key) ?? {
+        signal,
+        rawText,
+        decision,
+        count: 0
+      };
+      current.count += 1;
+      matchedSelectionCounts.set(key, current);
     }
   }
 
@@ -87,7 +101,9 @@ export function buildOnboardingArtifacts(conversations: ConversationArtifactSour
       .sort((left, right) => right.count - left.count || left.signature.join(" ").localeCompare(right.signature.join(" ")))
       .slice(0, 20),
     unmatchedOpeningTexts: sortCounts(unmatchedCounts).slice(0, 20).map(([text, count]) => ({ text, count })),
-    matchedOpeningRules: sortCounts(matchedRuleCounts).slice(0, 20).map(([name, count]) => ({ name, count }))
+    matchedOpeningSelections: [...matchedSelectionCounts.values()]
+      .sort((left, right) => right.count - left.count || `${left.signal}:${left.rawText}:${left.decision}`.localeCompare(`${right.signal}:${right.rawText}:${right.decision}`))
+      .slice(0, 20)
   };
 }
 
