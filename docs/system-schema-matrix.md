@@ -18,6 +18,15 @@ Các matrix cũ ở:
 
 được xem là **legacy draft** và chỉ dùng để học lại reasoning cũ. Không dùng chúng làm source of truth mới.
 
+## Run Group Rule
+
+- `run_group_id` là bắt buộc cho mọi run path, kể cả khi chỉ có đúng một run kỹ thuật.
+- Ở góc nhìn UI/vận hành, "một run" chính là một `run_group_id`.
+- `etl_run.id` và `analysis_run.id` chỉ là child run kỹ thuật bên dưới group đó.
+- Với custom range, một `run_group_id` có thể chứa nhiều child run theo từng `target_date`.
+- Với scheduled daily hoặc single-run diagnostic, `run_group_id` vẫn phải tồn tại nhưng group đó chỉ có một child run.
+- Nếu mapping chạy riêng, toàn bộ decision rows của batch đó cũng phải dùng cùng một `run_group_id`.
+
 ## Final Table Set
 
 Hệ thống chốt 8 bảng vận hành lõi và 1 bảng riêng cho AI-assisted CRM mapping:
@@ -58,13 +67,13 @@ Giải thích điểm gộp:
 | --- | --- | --- | --- |
 | `connected_page` | 1 row / page | Control-plane config | Page config, active profile map, tag/opening config |
 | `page_ai_profile_version` | 1 row / page / capability / version | Versioned AI execution profile | Thay cho `page_prompt_version` |
-| `etl_run` | 1 row / ETL run | ETL audit + publish owner | Full-day, manual range, onboarding sample |
+| `etl_run` | 1 row / ETL child run | ETL audit + publish owner | Thuộc đúng một `run_group_id` |
 | `conversation_day` | 1 row / conversation / day / ETL run | Canonical conversation slice | Evidence bundle owner của Seam 1 |
 | `message` | 1 row / persisted message | Canonical transcript | Chỉ giữ message thuộc window của run |
 | `thread_customer_mapping` | 1 row / page / thread current state | Current CRM mapping | Không giữ history |
-| `analysis_run` | 1 row / conversation-analysis run | Conversation-analysis run owner | Chỉ dùng cho capability `conversation_analysis` |
+| `analysis_run` | 1 row / conversation-analysis child run | Conversation-analysis run owner | Thuộc đúng một `run_group_id` |
 | `analysis_result` | 1 row / conversation analysis unit | Conversation-analysis output | Chỉ cho `capability_key = conversation_analysis` |
-| `thread_customer_mapping_decision` | 1 row / thread / mapping batch | Mapping batch + decision owner | Không có run table riêng |
+| `thread_customer_mapping_decision` | 1 row / thread / run group | Mapping run-group + decision owner | Không có run table riêng |
 
 ## 1. `connected_page`
 
@@ -95,6 +104,104 @@ Owner:
 
 - `conversation_analysis`: `<uuid>`
 - `thread_customer_mapping`: `<uuid>`
+
+`active_tag_mapping_json`
+
+```json
+{
+  "version_no": 4,
+  "updated_at": "2026-04-03T10:30:00+07:00",
+  "default_signal": "null",
+  "entries": [
+    {
+      "pancake_tag_id": "123",
+      "raw_label": "KH mới",
+      "signal": "customer_type"
+    },
+    {
+      "pancake_tag_id": "124",
+      "raw_label": "Tái khám",
+      "signal": "customer_type"
+    },
+    {
+      "pancake_tag_id": "210",
+      "raw_label": "Đặt lịch",
+      "signal": "need"
+    },
+    {
+      "pancake_tag_id": "999",
+      "raw_label": "Spam",
+      "signal": "null"
+    }
+  ]
+}
+```
+
+Rule:
+
+- giữ nguyên văn tag của page
+- không lưu `normalized_value`
+- config này chỉ trả lời câu hỏi: tag đó đang mang loại tín hiệu gì
+- extractor vẫn phải carry raw tag sang `conversation_day`, không được thay raw tag bằng giá trị chuẩn hoá tự nghĩ ra
+
+`active_opening_rules_json`
+
+```json
+{
+  "version_no": 3,
+  "updated_at": "2026-04-03T10:30:00+07:00",
+  "boundary": {
+    "mode": "until_first_meaningful_human_message",
+    "max_messages": 12
+  },
+  "selectors": [
+    {
+      "signal": "customer_type",
+      "allowed_message_types": ["postback", "quick_reply_selection", "template"],
+      "options": [
+        {
+          "raw_text": "Khách hàng lần đầu",
+          "decision": "first_time"
+        },
+        {
+          "raw_text": "Tái khám",
+          "decision": "revisit"
+        }
+      ]
+    },
+    {
+      "signal": "entry_flow",
+      "allowed_message_types": ["postback", "quick_reply_selection", "template"],
+      "options": [
+        {
+          "raw_text": "Đặt lịch hẹn",
+          "decision": "book_appointment"
+        },
+        {
+          "raw_text": "Chat tư vấn",
+          "decision": "chat_consultation"
+        },
+        {
+          "raw_text": "Gọi tư vấn",
+          "decision": "call_consultation"
+        }
+      ]
+    }
+  ],
+  "fallback": {
+    "store_candidate_if_unmatched": true
+  }
+}
+```
+
+Rule:
+
+- `boundary` chỉ xác định cắt opening block tới đâu
+- `selectors` chỉ match các lựa chọn chuẩn trong opening block
+- `raw_text` luôn được giữ nguyên để carry sang evidence
+- `decision` chỉ dùng khi cần gắn cờ deterministic từ lựa chọn opening block, ví dụ `revisit`
+- không dùng JSON này làm rule engine tổng quát
+- không nhét `bot_signatures` vào đây
 
 `notification_targets_json`
 
@@ -149,7 +256,7 @@ Owner:
 | --- | --- | --- | --- | --- |
 | `id` | `uuid` | Không | PK | Định danh ETL run |
 | `connected_page_id` | `uuid` | Không | FK, index | Run thuộc page nào |
-| `run_group_id` | `uuid` | Có | index | Gom nhiều run con từ cùng manual range/backfill |
+| `run_group_id` | `uuid` | Không | index | User-facing run owner; gom các child run của cùng một yêu cầu vận hành |
 | `run_mode` | `text` | Không | index | `scheduled_daily`, `manual_range`, `backfill_day`, `onboarding_sample` |
 | `processing_mode` | `text` | Không | index | `etl_only`, `etl_and_ai` |
 | `target_date` | `date` | Không | index | Ngày local mà ETL build snapshot |
@@ -175,6 +282,13 @@ Owner:
 - partial unique published trên (`connected_page_id`, `target_date`) với `is_published = true`
 - index (`run_group_id`)
 - index (`status`, `created_at`)
+
+### Rule
+
+- Mọi `etl_run` đều phải có `run_group_id`.
+- Single-run scheduled cũng phải có group riêng.
+- Manual/custom range tạo nhiều `etl_run` cùng `run_group_id`.
+- Với manual/custom range, child run nào phủ trọn canonical full-day bucket của `target_date` thì có thể `is_published = true`; child run partial-day phải giữ `is_published = false`.
 
 ## 4. `conversation_day`
 
@@ -273,6 +387,7 @@ Owner:
 | --- | --- | --- | --- | --- |
 | `id` | `uuid` | Không | PK | Định danh AI run |
 | `connected_page_id` | `uuid` | Không | FK, index | Run thuộc page nào |
+| `run_group_id` | `uuid` | Không | index | User-facing run owner; thường kế thừa từ ETL group tương ứng |
 | `run_mode` | `text` | Không | index | `scheduled_daily`, `manual_day`, `manual_slice` |
 | `source_etl_run_id` | `uuid` | Có | FK, index | ETL snapshot mà run này bám vào nếu có |
 | `scope_ref_json` | `jsonb` | Có |  | Scope hẹp của manual slice nếu có |
@@ -286,7 +401,7 @@ Owner:
 | `attempt_count` | `integer` | Không |  | Retry count nằm trong cùng run |
 | `unit_count_planned` | `integer` | Không |  | Tổng unit planned |
 | `unit_count_succeeded` | `integer` | Không |  | Tổng unit succeeded |
-| `unit_count_unknown` | `integer` | Không |  | Tổng unit rơi về unknown |
+| `unit_count_unknown` | `integer` | Không |  | Tổng unit có `analysis_result.result_status = 'unknown'`; không đếm các field riêng lẻ mang giá trị `unknown` |
 | `unit_count_review_queue` | `integer` | Không |  | Tổng unit phải vào review queue |
 | `total_usage_json` | `jsonb` | Không |  | Token/usage aggregate của run |
 | `total_cost_micros` | `bigint` | Không | index | Tổng chi phí AI normalized ở run grain |
@@ -300,12 +415,18 @@ Owner:
 
 - unique (`idempotency_key`) với `idempotency_key is not null`
 - partial unique (`source_etl_run_id`) với `run_mode = 'scheduled_daily'` và `source_etl_run_id is not null`
+- index (`run_group_id`)
 - index (`connected_page_id`, `created_at desc`)
 
 ### Rule
 
 - Bảng này chỉ phục vụ `conversation_analysis`.
 - CRM mapping không dùng `analysis_run`.
+- Mọi `analysis_run` đều phải có `run_group_id`.
+- Nếu run này bám vào một `etl_run`, `analysis_run.run_group_id` phải bằng `etl_run.run_group_id`.
+- Một UI `manual custom range` có thể materialize thành hỗn hợp:
+  - `manual_day` cho child full-day có thể publish
+  - `manual_slice` cho child partial-day chỉ diagnostic
 
 ## 8. `analysis_result`
 
@@ -350,6 +471,12 @@ Logical rule:
 - index (`analysis_run_id`, `publish_state`)
 - index (`content_customer_type`, `primary_need`, `process_risk_level`)
 
+### Rule
+
+- `result_status = 'succeeded'` nghĩa là unit đã trả structured output hợp lệ và pass validation, kể cả khi một số field riêng lẻ có giá trị `unknown`.
+- `result_status = 'unknown'` chỉ dùng khi toàn bộ unit không tạo được output đáng tin cậy sau retry/repair/validation hợp lệ.
+- Khi `result_status = 'unknown'`, `failure_info_json` phải giải thích nguyên nhân terminalization ở mức unit.
+
 ## 9. `thread_customer_mapping_decision`
 
 Owner:
@@ -359,7 +486,7 @@ Owner:
 | Cột | Kiểu gợi ý | Null | Index / ràng buộc | Ý nghĩa |
 | --- | --- | --- | --- | --- |
 | `id` | `uuid` | Không | PK | Định danh decision row |
-| `mapping_batch_id` | `uuid` | Không | index | Gom các row cùng một đợt chạy mapping |
+| `run_group_id` | `uuid` | Không | index | User-facing run owner; gom các row cùng một đợt chạy mapping |
 | `connected_page_id` | `uuid` | Không | FK, index | Page owner của decision |
 | `run_mode` | `text` | Không | index | `scheduled_mapping_cleanup`, `manual_review_batch`, `manual_mapping_slice` |
 | `source_etl_run_id` | `uuid` | Có | FK, index | ETL snapshot mà mapping batch bám vào nếu có |
@@ -385,7 +512,8 @@ Owner:
 
 ### Constraint Tối Thiểu
 
-- unique (`mapping_batch_id`, `thread_id`)
+- unique (`run_group_id`, `thread_id`)
+- index (`run_group_id`)
 - index (`connected_page_id`, `created_at desc`)
 - index (`decision_status`, `promotion_state`, `created_at`)
 - index (`selected_customer_id`)
@@ -393,8 +521,8 @@ Owner:
 ### Rule
 
 - Không update row cũ; mọi decision là append-only.
-- Một mapping batch được nhận diện bằng `mapping_batch_id`.
-- Mỗi row vừa là unit output, vừa mang đủ metadata để audit batch khi chỉ chạy mapping riêng.
+- Một đợt chạy mapping được nhận diện bằng `run_group_id`.
+- Mỗi row vừa là unit output, vừa mang đủ metadata để audit run group khi chỉ chạy mapping riêng.
 - `thread_customer_mapping` current state chỉ được update khi:
   - deterministic fast-path thành công ở Seam 1
   - hoặc `thread_customer_mapping_decision` được promote theo policy
@@ -407,7 +535,7 @@ Owner:
 | Tag mapping version table riêng | Chưa cần; `connected_page.active_tag_mapping_json` đủ owner |
 | Opening rules version table riêng | Chưa cần; `connected_page.active_opening_rules_json` đủ owner |
 | Telegram/email config table riêng | Single-company, page-centric, `notification_targets_json` đủ |
-| Separate `thread_customer_mapping_run` | Batch metadata được gộp thẳng vào `thread_customer_mapping_decision` qua `mapping_batch_id` và runtime snapshot |
+| Separate `thread_customer_mapping_run` | Run-group metadata được gộp thẳng vào `thread_customer_mapping_decision` qua `run_group_id` và runtime snapshot |
 | Separate cost usage tables | Chưa cần; `usage_json` + `cost_micros` đủ cho dashboard và sorting |
 | Separate attachment table | Shape đa dạng, `attachments_json` phù hợp hơn |
 | Separate phone candidate table | `normalized_phone_candidates_json` đủ evidence và giảm join |
@@ -426,11 +554,15 @@ Owner:
 | Chủ đề | Rule |
 | --- | --- |
 | Official dashboard | Chỉ đọc `etl_run.is_published = true` và `analysis_result.publish_state = 'published'` của cùng kỳ |
+| Manual custom range publish | Trong một `run_group_id`, child day full-day vẫn có thể publish độc lập nếu ETL + analysis hoàn tất end-to-end; child partial-day không publish |
 | Inbox mới / cũ | Chỉ đọc từ deterministic fields của Seam 1 |
 | `tái khám` official | Resolve theo `Seam 1 > analysis_result.content_customer_type > observed tag signals > unknown` |
 | Thread history | Join `conversation_day` + `message` theo `conversation_id`, không duplicate transcript ở Seam 2 |
+| Multi-day list UI | Khi filter nhiều ngày, danh sách chính phải group theo `conversation_id` thành `thread`, không render 1 dòng cho mỗi `conversation_day` |
 | AI cost dashboard | Ưu tiên aggregate từ `analysis_result.cost_micros`; `analysis_run.total_cost_micros` dùng cho vận hành nhanh |
 | Mapping review queue | Đọc `thread_customer_mapping_decision` với `decision_status = 'manual_review_required'` và `promotion_state = 'not_applied'` |
+| Run history UI | List/filter theo `run_group_id`, không list theo từng child run kỹ thuật trước |
+| Run detail UI | Một run group hiển thị union các `thread` thuộc mọi child run trong group đó; nếu một thread có nhiều `conversation_day` thì list chỉ hiện 1 dòng thread và cho phép drill xuống history theo ngày cùng analysis |
 
 ## Chốt Cuối
 

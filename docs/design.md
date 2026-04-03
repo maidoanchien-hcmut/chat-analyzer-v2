@@ -21,7 +21,7 @@ Tôi muốn AI tự động phân tích mỗi hội thoại:
 
 Tôi muốn thống kê hiện trạng để ưu tiên cải tiến các kịch bản và quy trình cho các vấn đề khách hàng quan tâm nhất.
 
-Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
+Hệ thống phải xuất được file .xlsx báo cáo chuyên nghiệp, không phải raw data như json hay các raw name (e.g. `customer_type`).
 
 ## Yêu cầu kỹ thuật
 
@@ -142,6 +142,8 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 - `extract boundary`: mỗi run ngày `D` chỉ được persist conversation-day và message có timestamp thuộc ngày `D`
 - `target_date`: ngày local mà ETL đang build canonical slice; scope page/ngày của `conversation_day` và `message` được kế thừa qua `etl_run`
 - `manual custom range`: yêu cầu vận hành có thể chỉ định khoảng thời gian bất kỳ; hệ thống phải materialize yêu cầu đó thành một hoặc nhiều `etl_run` theo từng `target_date`, và các run partial-day không được tự động trở thành dashboard official
+- `run_group_id`: owner của một yêu cầu vận hành ở góc nhìn UI. Mọi run path đều phải thuộc đúng một `run_group_id`, kể cả khi group đó chỉ có đúng một run kỹ thuật.
+- `thread list read model`: ở các màn hình liệt kê khi slice phủ nhiều ngày hoặc khi mở một `run_group_id`, grain danh sách phải là `thread`; `conversation_day` chỉ là grain snapshot/phân tích nằm phía dưới để drill-down hoặc join history
 
 ## ETL và phân tích dữ liệu
 
@@ -150,6 +152,7 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 - Gọi API Pancake để lấy dữ liệu thay đổi theo cửa sổ thời gian.
 - Mỗi run phải được neo vào một `target_date` theo timezone mặc định là UTC+7 không phải thời gian trên hệ thống chạy script. Window canonical là `[00:00, ngày kế tiếp 00:00)` theo timezone đó; không dùng mốc `23:59:59` để tránh rơi message ở biên thời gian.
 - Với manual custom range, UI có thể nhận `requested_window_start_at` và `requested_window_end_exclusive_at` không bám mốc 0h. Orchestrator phải chia yêu cầu đó thành một hoặc nhiều run theo từng `target_date`; mỗi run giữ `window_start_at/window_end_exclusive_at` là phần giao giữa requested window và day bucket của `target_date`.
+- Mọi `etl_run` sinh ra từ cùng một yêu cầu manual/custom range phải dùng chung `run_group_id`; scheduled daily hoặc single-run diagnostic cũng phải tự tạo `run_group_id` riêng cho chính nó.
 - `go-worker` là process ETL phải kết nối trực tiếp Postgres để load; không đi vòng qua REST hoặc gRPC của backend cho hot path persistence.
 - Đơn vị ingest nhỏ nhất là message:
   - Source incremental unit là conversation.updated_at
@@ -217,7 +220,8 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 - `thread_customer_mapping` chỉ giữ current state của mapping thread -> customer; history quyết định AI/manual không được ghi đè trực tiếp vào đây mà phải có audit owner riêng ở Seam 2.
 - Các bảng không nên lặp lại dữ liệu lẫn nhau; ví dụ `conversation_day` không nên có cột `first_meaningful_human_message` nếu đã có trong bảng `message` với cờ `is_first_meaningful_human_message`.
 - Semantics daily snapshot được biểu diễn bằng `etl_run.snapshot`, `etl_run.status`, và `etl_run.is_published` thay vì tách thêm bảng.
-- Một manual custom range có thể tạo nhiều `etl_run` cùng `run_group_id`; các run partial-day phải mặc định `is_published = false` để không ghi đè snapshot official theo ngày.
+- Một manual custom range có thể tạo nhiều `etl_run` cùng `run_group_id`; child run nào phủ trọn canonical full-day bucket của `target_date` thì được phép publish cho ngày đó nếu end-to-end hoàn tất, còn child run partial-day phải mặc định `is_published = false`. Ví dụ range `20:00 01/04 - 10:00 03/04` có thể publish `02/04`, còn `01/04` và `03/04` vẫn là partial-day.
+- Read API và UI vận hành phải xem lịch sử theo `run_group_id`; child runs chỉ là breakdown kỹ thuật bên dưới group. Khi mở một run hoặc lọc nhiều ngày, danh sách chính phải là `thread` dedupe theo `conversation_id`; dữ liệu `conversation_day` và result AI chỉ là history/join phía dưới từng thread.
 - Các evidence page-local hoặc cấu trúc chưa ổn định nên được giữ trong `jsonb` thay vì tách nhiều bảng con.
 - Tối ưu sức mạnh của postgres17 để đảm bảo hiệu suất và khả năng mở rộng, ví dụ sử dụng partitioning, indexing, materialized view, v.v...
 
@@ -230,12 +234,15 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 - Bulk path giữa `backend/` và `service/` phải đi qua gRPC; public API vẫn là REST.
 - Scheduled automatic flow có analysis grain là đúng `1 conversation_day = 1 unit = 1 analysis_result`.
 - `manual_day` là rerun theo scope `etl_run` hoặc một ngày cụ thể; `manual_slice` là diagnostic scope hẹp và mặc định không tự đi vào official chain/publish.
+- Một yêu cầu UI kiểu `manual custom range` có thể materialize thành hỗn hợp child run cho Seam 2:
+  - child nào phủ full-day canonical thì đi theo semantics `manual_day` và có thể publish nếu ETL + analysis hoàn tất end-to-end
+  - child nào chỉ phủ một phần ngày thì đi theo semantics `manual_slice` và chỉ là diagnostic
 - AI-assisted CRM mapping có grain là đúng `1 thread = 1 mapping decision`; luồng này có thể chạy scheduled cleanup hoặc manual review batch, nhưng không được rewrite snapshot Seam 1 của ngày đã publish.
 - Batch chỉ là execution grouping để tiết kiệm RPM/token; batch không phải grain lưu trữ hay grain publish.
 - Schema lưu trữ business-facing của Seam 2 gồm:
   - `analysis_run`: owner của scheduled/manual conversation-analysis run, retry, coverage, prompt/model/schema snapshot và publish outcome
   - `analysis_result`: output table của conversation analysis
-  - `thread_customer_mapping_decision`: output/audit table duy nhất của AI-assisted CRM mapping; mỗi row vừa là decision của một thread, vừa mang metadata của mapping batch đó
+  - `thread_customer_mapping_decision`: output/audit table duy nhất của AI-assisted CRM mapping; mỗi row vừa là decision của một thread, vừa mang metadata của run group mapping đó
 - Input AI cho một `conversation_day` phải là một evidence bundle đã được freeze ở thời điểm run, tối thiểu gồm:
   - toàn bộ transcript redacted của ngày `D` với `sender_role`, `message_type`, `is_meaningful_human_message`, `is_opening_block_message`
   - `opening_blocks_json` đã được giữ lại từ Seam 1, bao gồm cả parsed opening block và opening block candidate window nếu có
@@ -281,6 +288,9 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 - Mỗi planned unit phải đi tới một trạng thái terminal:
   - `succeeded`
   - hoặc `unknown`
+- Phải tách rõ 2 mức `unknown`:
+  - `field-level unknown`: model vẫn trả structured output hợp lệ cho unit, nhưng một vài chiều riêng lẻ như `content_customer_type` hoặc `closing_outcome_as_of_day` không đủ evidence nên mang giá trị `unknown`; trường hợp này unit vẫn là `succeeded`
+  - `unit-level unknown`: toàn bộ unit không tạo được structured output đáng tin cậy sau retry/repair/validation hợp lệ; chỉ trường hợp này mới được terminalize unit về `unknown`
 - Nếu một unit không phân tích được sau retry/split hợp lệ thì unit đó phải được terminalize về `unknown`, lưu `failure_info_json`, và ngày vẫn được phép publish nếu mọi unit khác đã terminal.
 - Scheduled daily chỉ bị chặn publish nếu còn unit chưa terminal hoặc job chết giữa chừng mà không recover được.
 - Khi thay đổi prompt/model/schema, hệ thống phải có policy chống lệch pha báo cáo dài hạn:
@@ -292,8 +302,8 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
   - chỉ các thread nhập nhằng mới đi vào AI mapping flow
   - `backend/` là owner của CRM candidate retrieval từ app nội bộ; `service/` chỉ nhận candidate set đã freeze cùng evidence bundle của thread
   - input của một mapping unit tối thiểu gồm `page_id`, `thread_id`, `customer_display_name`, `normalized_phone_candidates`, opening/tag evidence, transcript evidence đã redact, existing mapping state nếu có, và candidate set từ CRM nội bộ
-  - `thread_customer_mapping_decision` phải là append-only, mỗi row tương ứng một thread trong một `mapping_batch_id`, và tối thiểu giữ:
-    - `mapping_batch_id`
+  - `thread_customer_mapping_decision` phải là append-only, mỗi row tương ứng một thread trong một `run_group_id`, và tối thiểu giữ:
+    - `run_group_id`
     - `run_mode`
     - `source_etl_run_id` nếu batch đó bám vào một snapshot Seam 1 cụ thể
     - runtime snapshot tối thiểu gồm `model_name`, `output_schema_version`, profile/config đã dùng
@@ -317,7 +327,7 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 - `backend/` là owner của scheduler, prompt snapshot freeze, CRM candidate retrieval, gRPC client, persistence, publish/supersede, review queue và read API.
 - `service/` là owner của prompt builder, validation, batch planning, model adapter và workflow adapter nội bộ; `service/` không phải owner của business persistence hay CRM source integration.
 - `frontend/` là owner của UI vận hành, manual rerun, màn đọc kết quả phân tích, review queue của CRM mapping, và prompt editor theo page ở config domain riêng.
-- `analysis_run` là owner của run-level state cho conversation analysis.
+- `analysis_run` là owner của run-level state cho conversation analysis; mọi `analysis_run` đều phải thuộc đúng một `run_group_id`.
 - `analysis_result` là output table của conversation analysis:
   - mỗi row tương ứng đúng một `conversation_day` hoặc một `manual_slice`
   - chỉ chứa scalar dimensions, supporting text bounded, `prompt_hash`, `failure_info_json` và publish state
@@ -335,6 +345,7 @@ Hệ thống phải xuất được file báo cáo dưới dạng .xlsx
 - `manual_slice` mặc định là `diagnostic`, không tự đi vào official dashboard.
 - `manual_day` có thể tạo `analysis_run` mới và publish để supersede official cũ nếu operator chủ động chọn.
 - AI mapping flow có thể có queue riêng cho các decision có `decision_status = 'manual_review_required'`; publish của dashboard conversation analysis không được block bởi queue này.
+- UI lịch sử run và màn xem run phải lọc theo `run_group_id`; nếu group gồm nhiều child run thì UI hiển thị union các `thread` của cả group đó. Nếu cùng một thread xuất hiện ở nhiều `conversation_day` trong group, UI chỉ hiển thị 1 dòng thread và cho phép drill xuống lịch sử theo ngày cùng các result AI tương ứng.
 - Thiết kế này cho phép chạy thử, chạy lại, backfill hoặc replay bằng prompt mới mà không làm thay đổi dữ liệu canonical của Seam 1.
 - Internal data path giữa `backend` và `service` phải tối ưu cho bulk processing:
   - public API vẫn là REST

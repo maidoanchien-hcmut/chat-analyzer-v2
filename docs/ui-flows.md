@@ -8,6 +8,8 @@ Lựa chọn lọc cho tất cả các view của hệ thống: 1 lần chỉ xe
 
 **Slice:** Cho phép chọn khoảng ngày để xem dữ liệu. Mặc định là 01 ngày - hôm qua vì hệ thống chạy ở cuối ngày. Nhưng vẫn cho phép chọn khoảng rộng hơn theo preset 1 ngày, 1 tuần, 1 tháng, 1 quý. Hoặc custom range chọn lịch nhưng phải giới hạn đến ngày hôm qua.
 
+Khi slice phủ nhiều ngày, mọi danh sách chính trong UI phải hiểu ở grain `thread`, không phải `conversation-day`. `conversation-day` chỉ dùng cho lịch sử theo ngày, breakdown và join kết quả phân tích bên dưới từng thread.
+
 ## View landing/dashboard
 
 **Dice:** Cho phép lọc các dữ liệu được phân tích: Ví dụ: Tâm trạng tốt. Có thể dice nhiều hơn, ví dụ tâm trạng tốt + khách tái khám.
@@ -24,7 +26,7 @@ Các KPI scorecard:
 - Tổng chi phí AI
 - Tỷ lệ chuyển đổi: số khách đặt hẹn thành công / số khách có nhu cầu đặt hẹn.
 
-- Một danh sách tổng hợp ngắn gọn các thread mới nhất trong bộ lọc đã chọn. Mỗi thread hiển thị thông tin cơ bản như: tên khách, nhu cầu, thời điểm bắt đầu. Bấm vào sẽ dẫn tới view lịch sử trò chuyện của thread đó.
+- Một danh sách tổng hợp ngắn gọn các thread mới nhất trong bộ lọc đã chọn. Mỗi thread hiển thị thông tin cơ bản của conversation-day gần nhất của thread đó như: tên khách, nhu cầu gần nhất, thời gian của tin nhắn mới nhất. Bấm vào sẽ dẫn tới view lịch sử trò chuyện của thread đó.
 
 **Breakdown:** Một khu vực hiển thị phân phối theo các chỉ số phân tích. Ví dụ: Phân phối số lượng thread theo nhu cầu trong khoảng dữ liệu được lọc.
 
@@ -59,12 +61,16 @@ Mặc định sẽ hiển thị các thông số trạng thái và config của 
 
 - Các config hiện tại là opening block, prompt, phân loại tag, v.v..
 - Xem được trạng thái của go-worker, của llm-service, lịch sử chạy end-to-end (thời gian trích xuất, thời gian phân tích, chi phí), log, v.v...
+- Lịch sử chạy phải xem theo `run_group_id`. Nếu một yêu cầu materialize thành nhiều run con theo ngày thì UI vẫn coi đó là một run ở góc nhìn người dùng.
 - Cho phép chỉnh sửa model và execution profile của từng capability AI; UI không được gắn chặt vào tên framework trừ màn diagnostic kỹ thuật.
 - Cho phép cài đặt tài khoản telegram nhận thông báo.
 - Cho phép tắt trang (tắt phân tích dữ liệu, hoặc tắt cả fetch dữ liệu)
 - Cho thấy các thông số và config của trang đó.
 - Cho phép chỉnh lại các thông số như lúc thêm trang.
 - Cho phép chạy trích xuất và phân tích tuỳ chỉnh. Những run này vẫn lưu vào db theo kiểu upsert. Ví dụ: hôm nay là giữa ngày 03/04, tôi chạy phân tích khoảng thời gian `20:00 ngày 01/04 - 10:00 ngày 03/04`. Hệ thống phải tự materialize thành các run như mô tả trong design, các run này là tạo mới, và lưu vào db. Những dữ liệu này có thể upsert vào ngày cũ hoặc thêm mới tuỳ theo khoảng thời gian chạy. Tới cuối ngày hệ thống chạy sẽ upsert lại phần của ngày hôm nay.
+- Về publish, trong một custom range nếu có child run nào phủ trọn 1 ngày canonical và chạy end-to-end có analysis thì child run đó vẫn phải được publish cho ngày đó. Ví dụ range `20:00 ngày 01/04 - 10:00 ngày 03/04` thì phần `02/04` là full-day nên được publish nếu chạy xong; phần `01/04` và `03/04` vẫn chỉ là partial-day.
+- Khi người dùng mở chi tiết một run, UI phải hiểu run đó là toàn bộ `thread` thuộc `run_group_id` đã chọn. Nếu group có nhiều run con và một thread xuất hiện ở nhiều `conversation_day`, danh sách vẫn chỉ hiện 1 dòng thread; bấm vào thread thì mới xem lịch sử message và lịch sử phân tích theo ngày.
+- Cho phép chạy mapping customer với crm để nối thread với khách hàng.
 
 ## Flow thêm trang
 

@@ -127,11 +127,15 @@ Từ [tags.json](D:/Code/chat-analyzer-v2/docs/pancake-api-samples/20260401T0420
 - `window_start_at`
 - `window_end_exclusive_at`
 - optional `run_mode`
-- optional `run_group_id`
+- `run_group_id`
 - optional `requested_window_start_at`
 - optional `requested_window_end_exclusive_at`
 - `request_timeout`
 - optional debug limits qua CLI flag hoặc job option, không phải production env bắt buộc
+
+Rule:
+
+- `run_group_id` là bắt buộc cho mọi run path, kể cả scheduler daily chỉ sinh đúng một run kỹ thuật.
 
 ### Bước 1: lấy page token
 
@@ -287,7 +291,7 @@ Constraint tối thiểu:
 - `message`: unique (`etl_run_id`, `message_id`)
 - `thread_customer_mapping`: unique (`page_id`, `thread_id`)
 
-Chi tiết cột và matrix canonical nằm ở [seam1-lean-schema-matrix.md](D:/Code/chat-analyzer-v2/docs/seam1-lean-schema-matrix.md).
+Chi tiết cột và matrix canonical nằm ở [system-schema-matrix.md](D:/Code/chat-analyzer-v2/docs/system-schema-matrix.md).
 
 ## Rule Phân Loại Actor
 
