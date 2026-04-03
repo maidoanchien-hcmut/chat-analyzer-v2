@@ -1,6 +1,123 @@
-def main():
-    print("Hello from service!")
+from __future__ import annotations
+
+import asyncio
+import json
+import logging
+from concurrent import futures
+
+import grpc
+
+import conversation_analysis_pb2 as conversation_analysis_pb2
+import conversation_analysis_pb2_grpc as conversation_analysis_pb2_grpc
+from analysis_runtime import ConversationAnalysisEngine, MessageModel, RuntimeSnapshotModel, UnitBundleModel
+from config import load_config
+
+
+class ConversationAnalysisServiceServicer(conversation_analysis_pb2_grpc.ConversationAnalysisServiceServicer):
+  def __init__(self, engine: ConversationAnalysisEngine):
+    self.engine = engine
+
+  def AnalyzeConversation(self, request, context):
+    runtime = RuntimeSnapshotModel(
+      profile_id=request.runtime.profile_id,
+      version_no=request.runtime.version_no,
+      model_name=request.runtime.model_name,
+      output_schema_version=request.runtime.output_schema_version,
+      prompt_template=request.runtime.prompt_template,
+      generation_config=_parse_json(request.runtime.generation_config_json, {}),
+      profile_json=_parse_json(request.runtime.profile_json, None),
+    )
+    bundles = [
+      UnitBundleModel(
+        conversation_day_id=bundle.conversation_day_id,
+        conversation_id=bundle.conversation_id,
+        connected_page_id=bundle.connected_page_id,
+        etl_run_id=bundle.etl_run_id,
+        run_group_id=bundle.run_group_id,
+        target_date=bundle.target_date,
+        business_timezone=bundle.business_timezone,
+        customer_display_name=bundle.customer_display_name or None,
+        normalized_tag_signals_json=_parse_json(bundle.normalized_tag_signals_json, {}),
+        observed_tags_json=_parse_json(bundle.observed_tags_json, []),
+        opening_blocks_json=_parse_json(bundle.opening_blocks_json, {}),
+        first_meaningful_human_message_id=bundle.first_meaningful_human_message_id or None,
+        first_meaningful_human_sender_role=bundle.first_meaningful_human_sender_role or None,
+        source_conversation_json_redacted=_parse_json(bundle.source_conversation_json_redacted, {}),
+        messages=[
+          MessageModel(
+            id=message.id,
+            inserted_at=message.inserted_at,
+            sender_role=message.sender_role,
+            sender_name=message.sender_name or None,
+            message_type=message.message_type,
+            redacted_text=message.redacted_text or None,
+            is_meaningful_human_message=message.is_meaningful_human_message,
+            is_opening_block_message=message.is_opening_block_message,
+          )
+          for message in bundle.messages
+        ],
+      )
+      for bundle in request.bundles
+    ]
+    results = asyncio.run(self.engine.analyze(runtime, bundles))
+    return conversation_analysis_pb2.AnalyzeConversationResponse(
+      results=[
+        conversation_analysis_pb2.AnalysisResult(
+          conversation_day_id=result.conversation_day_id,
+          result_status=result.result_status,
+          prompt_hash=result.prompt_hash,
+          opening_theme=result.opening_theme,
+          customer_mood=result.customer_mood,
+          primary_need=result.primary_need,
+          primary_topic=result.primary_topic,
+          content_customer_type=result.content_customer_type,
+          closing_outcome_as_of_day=result.closing_outcome_as_of_day,
+          response_quality_label=result.response_quality_label,
+          process_risk_level=result.process_risk_level,
+          response_quality_issue_text=result.response_quality_issue_text or "",
+          response_quality_improvement_text=result.response_quality_improvement_text or "",
+          process_risk_reason_text=result.process_risk_reason_text or "",
+          usage=conversation_analysis_pb2.Usage(json=json.dumps(result.usage_json, ensure_ascii=False)),
+          cost_micros=result.cost_micros,
+          failure_info_json="" if result.failure_info_json is None else json.dumps(result.failure_info_json, ensure_ascii=False),
+        )
+        for result in results
+      ]
+    )
+
+
+def serve() -> None:
+  config = load_config()
+  logging.basicConfig(
+    level=getattr(logging, config.log_level, logging.INFO),
+    format="%(asctime)s %(levelname)s %(name)s %(message)s",
+  )
+  server = grpc.server(
+    futures.ThreadPoolExecutor(max_workers=config.grpc_max_workers),
+    options=[
+      ("grpc.max_send_message_length", config.grpc_max_message_length),
+      ("grpc.max_receive_message_length", config.grpc_max_message_length),
+    ],
+  )
+  conversation_analysis_pb2_grpc.add_ConversationAnalysisServiceServicer_to_server(
+    ConversationAnalysisServiceServicer(ConversationAnalysisEngine(config)),
+    server,
+  )
+  bind_address = f"{config.grpc_host}:{config.grpc_port}"
+  server.add_insecure_port(bind_address)
+  server.start()
+  logging.getLogger(__name__).info("Analysis service listening at %s", bind_address)
+  server.wait_for_termination()
+
+
+def _parse_json(raw: str, default):
+  if not raw:
+    return default
+  try:
+    return json.loads(raw)
+  except json.JSONDecodeError:
+    return default
 
 
 if __name__ == "__main__":
-    main()
+  serve()

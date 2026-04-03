@@ -1,0 +1,79 @@
+syntax = "proto3";
+
+package chatanalyzer.conversationanalysis.v1;
+
+message RuntimeSnapshot {
+  string profile_id = 1;
+  int32 version_no = 2;
+  string model_name = 3;
+  string output_schema_version = 4;
+  string prompt_template = 5;
+  string generation_config_json = 6;
+  string profile_json = 7;
+}
+
+message Message {
+  string id = 1;
+  string inserted_at = 2;
+  string sender_role = 3;
+  string sender_name = 4;
+  string message_type = 5;
+  string redacted_text = 6;
+  bool is_meaningful_human_message = 7;
+  bool is_opening_block_message = 8;
+}
+
+message UnitBundle {
+  string conversation_day_id = 1;
+  string conversation_id = 2;
+  string connected_page_id = 3;
+  string etl_run_id = 4;
+  string run_group_id = 5;
+  string target_date = 6;
+  string business_timezone = 7;
+  string customer_display_name = 8;
+  string normalized_tag_signals_json = 9;
+  string observed_tags_json = 10;
+  string opening_blocks_json = 11;
+  string first_meaningful_human_message_id = 12;
+  string first_meaningful_human_sender_role = 13;
+  string source_conversation_json_redacted = 14;
+  repeated Message messages = 15;
+}
+
+message AnalyzeConversationRequest {
+  RuntimeSnapshot runtime = 1;
+  repeated UnitBundle bundles = 2;
+}
+
+message Usage {
+  string json = 1;
+}
+
+message AnalysisResult {
+  string conversation_day_id = 1;
+  string result_status = 2;
+  string prompt_hash = 3;
+  string opening_theme = 4;
+  string customer_mood = 5;
+  string primary_need = 6;
+  string primary_topic = 7;
+  string content_customer_type = 8;
+  string closing_outcome_as_of_day = 9;
+  string response_quality_label = 10;
+  string process_risk_level = 11;
+  string response_quality_issue_text = 12;
+  string response_quality_improvement_text = 13;
+  string process_risk_reason_text = 14;
+  Usage usage = 15;
+  int64 cost_micros = 16;
+  string failure_info_json = 17;
+}
+
+message AnalyzeConversationResponse {
+  repeated AnalysisResult results = 1;
+}
+
+service ConversationAnalysisService {
+  rpc AnalyzeConversation(AnalyzeConversationRequest) returns (AnalyzeConversationResponse);
+}

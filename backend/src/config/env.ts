@@ -5,6 +5,8 @@ const envSchema = z
     NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
     HOST: z.string().default("0.0.0.0"),
     PORT: z.coerce.number().int().min(1).max(65535).default(3000),
+    ANALYSIS_SERVICE_GRPC_TARGET: z.string().default("127.0.0.1:50051"),
+    ANALYSIS_SERVICE_GRPC_TIMEOUT_MS: z.coerce.number().int().positive().default(60000),
     DATABASE_URL: z.string().optional(),
     DB_PROTOCOL: z.string().default("postgresql"),
     DB_HOST: z.string().default("localhost"),
@@ -49,6 +51,8 @@ const envSchema = z
       nodeEnv: raw.NODE_ENV,
       host: raw.HOST,
       port: raw.PORT,
+      analysisServiceGrpcTarget: raw.ANALYSIS_SERVICE_GRPC_TARGET,
+      analysisServiceGrpcTimeoutMs: raw.ANALYSIS_SERVICE_GRPC_TIMEOUT_MS,
       databaseUrl,
       redisUrl,
       corsOrigin: raw.CORS_ORIGIN
