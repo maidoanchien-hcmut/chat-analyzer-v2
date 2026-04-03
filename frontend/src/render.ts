@@ -2,7 +2,6 @@ import type { AppState, OnboardingSample, RunGroupSummary, ThreadDetail, ThreadS
 import { compactText, escapeHtml, formatDateTime, listTimezones, shortId } from "./utils.ts";
 
 const TAG_SIGNAL_OPTIONS = [
-  "null",
   "customer_type",
   "need",
   "branch",
@@ -289,6 +288,7 @@ function renderOnboardingSampleSummary(sample: OnboardingSample) {
   const tagCandidates = sample.tagCandidates.length;
   const openingCandidates = sample.openingCandidates.topOpeningCandidateWindows.length;
   const matchedCount = sample.openingCandidates.matchedOpeningSelections?.length ?? 0;
+  const openingSampleConversationId = sample.openingSampleConversationId ?? "-";
   return `
     <div class="section">
       <h3>Sample runtime</h3>
@@ -299,6 +299,7 @@ function renderOnboardingSampleSummary(sample: OnboardingSample) {
         ${renderKpi("tag candidates", String(tagCandidates))}
         ${renderKpi("opening candidates", String(openingCandidates))}
         ${renderKpi("matched selections", String(matchedCount))}
+        ${renderKpi("opening sample", openingSampleConversationId)}
       </div>
       <table class="dense">
         <thead><tr><th>Opening window tiêu biểu</th><th>Số lần</th><th>Ví dụ conversation</th></tr></thead>
@@ -309,12 +310,17 @@ function renderOnboardingSampleSummary(sample: OnboardingSample) {
 }
 
 function renderOnboardingTagCandidates(state: AppState) {
+  const signalOptions = buildTagSignalOptions(state);
   return `
     <div class="section">
       <h3>Tag classification từ sample</h3>
+      <div class="row">
+        <input id="ob-new-tag-signal" value="${escapeHtml(state.onboardingNewTagSignal)}" placeholder="thêm signal mới (vd: service_line)" />
+        <button data-action="ob-add-tag-signal">Thêm signal</button>
+      </div>
       <table class="dense">
         <thead><tr><th>Tag ID</th><th>Tag gốc</th><th>Số lần trong sample</th><th>Signal</th></tr></thead>
-        <tbody>${state.onboardingTagCandidates.map((item, index) => `<tr><td>${escapeHtml(item.pancakeTagId)}</td><td>${escapeHtml(item.rawLabel)}</td><td>${item.count}</td><td>${renderSignalSelect(`ob-tag-signal-${index}`, TAG_SIGNAL_OPTIONS, item.signal, true)}</td></tr>`).join("") || `<tr><td colspan="4">Chưa có candidate. Bấm "2. Sample".</td></tr>`}</tbody>
+        <tbody>${state.onboardingTagCandidates.map((item, index) => `<tr><td>${escapeHtml(item.pancakeTagId)}</td><td>${escapeHtml(item.rawLabel)}</td><td>${item.count}</td><td>${renderSignalSelect(`ob-tag-signal-${index}`, signalOptions, item.signal, true)}</td></tr>`).join("") || `<tr><td colspan="4">Chưa có candidate. Bấm "2. Sample".</td></tr>`}</tbody>
       </table>
     </div>
   `;
@@ -346,6 +352,14 @@ function renderSignalSelect(id: string, options: string[], selected: string, inc
     rows.push(`<option value="${escapeHtml(option)}" ${option === selectedTrimmed ? "selected" : ""}>${escapeHtml(option)}</option>`);
   }
   return `<select id="${id}">${rows.join("")}</select>`;
+}
+
+function buildTagSignalOptions(state: AppState) {
+  const used = state.onboardingTagCandidates
+    .map((item) => item.signal.trim())
+    .filter((item) => item.length > 0);
+  const merged = new Set<string>([...TAG_SIGNAL_OPTIONS, ...state.onboardingCustomTagSignals, ...used]);
+  return [...merged].sort((left, right) => left.localeCompare(right));
 }
 
 function renderTimezoneSelect(id: string, selected: string) {

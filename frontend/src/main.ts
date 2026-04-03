@@ -94,6 +94,8 @@ const state: AppState = {
   onboardingEtlEnabled: true,
   onboardingAnalysisEnabled: true,
   onboardingTagCandidates: [],
+  onboardingCustomTagSignals: [],
+  onboardingNewTagSignal: "",
   onboardingOpeningCandidates: [],
   onboardingOpeningMaxMessages: "12",
   onboardingPrompt: `Mục tiêu vận hành theo page (SOP):
@@ -240,6 +242,17 @@ async function act(action: string, data: DOMStringMap) {
         state.info = "Đã thêm page thành công.";
       });
       return;
+    case "ob-add-tag-signal": {
+      const key = canonicalSignalKey(state.onboardingNewTagSignal);
+      if (!key) {
+        throw new Error("Signal mới không hợp lệ. Chỉ dùng chữ thường, số và dấu gạch dưới.");
+      }
+      if (!state.onboardingCustomTagSignals.includes(key)) {
+        state.onboardingCustomTagSignals = [...state.onboardingCustomTagSignals, key].sort();
+      }
+      state.onboardingNewTagSignal = "";
+      return;
+    }
     default:
       return;
   }
@@ -323,6 +336,7 @@ function syncInputs() {
   state.onboardingAnalysisEnabled = readCheck("#ob-analysis", state.onboardingAnalysisEnabled);
   state.onboardingOpeningMaxMessages = readInput("#ob-opening-max", state.onboardingOpeningMaxMessages).trim();
   state.onboardingPrompt = readTextArea("#ob-prompt", state.onboardingPrompt);
+  state.onboardingNewTagSignal = readInput("#ob-new-tag-signal", state.onboardingNewTagSignal);
   syncOnboardingCandidateInputs();
 }
 
@@ -337,4 +351,16 @@ function syncOnboardingCandidateInputs() {
     state.onboardingOpeningCandidates[index].signal = signal.trim();
     state.onboardingOpeningCandidates[index].decision = decision.trim();
   }
+}
+
+function canonicalSignalKey(value: string) {
+  const normalized = value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/đ/g, "d")
+    .replace(/Đ/g, "d")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+  return /^[a-z][a-z0-9_]*$/.test(normalized) ? normalized : "";
 }

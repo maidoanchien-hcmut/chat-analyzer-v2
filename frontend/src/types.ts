@@ -134,6 +134,7 @@ export type OnboardingSample = {
   businessTimezone: string;
   processingMode: ProcessingMode;
   initialConversationLimit: number;
+  openingSampleConversationId?: string | null;
   windowStartAt: string;
   windowEndExclusiveAt: string;
   metrics: Record<string, unknown>;
@@ -212,6 +213,8 @@ export type AppState = {
   onboardingEtlEnabled: boolean;
   onboardingAnalysisEnabled: boolean;
   onboardingTagCandidates: OnboardingTagCandidate[];
+  onboardingCustomTagSignals: string[];
+  onboardingNewTagSignal: string;
   onboardingOpeningCandidates: OnboardingOpeningCandidate[];
   onboardingOpeningMaxMessages: string;
   onboardingPrompt: string;
