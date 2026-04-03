@@ -12,7 +12,6 @@ export type ConnectedPageRecord = {
   activePromptVersionId: string | null;
   activeTagMappingJson: unknown;
   activeOpeningRulesJson: unknown;
-  activeBotSignaturesJson: unknown;
   onboardingStateJson: unknown;
   isActive: boolean;
   createdAt: Date;
@@ -34,7 +33,6 @@ export type UpdateConnectedPageInput = {
   autoAiAnalysisEnabled?: boolean;
   activeTagMappingJson?: unknown;
   activeOpeningRulesJson?: unknown;
-  activeBotSignaturesJson?: unknown;
   isActive?: boolean;
 };
 
@@ -100,7 +98,6 @@ type ConnectedPageModel = {
   activePromptVersionId: string | null;
   activeTagMappingJson: Prisma.JsonValue;
   activeOpeningRulesJson: Prisma.JsonValue;
-  activeBotSignaturesJson: Prisma.JsonValue;
   onboardingStateJson: Prisma.JsonValue;
   isActive: boolean;
   createdAt: Date;
@@ -154,6 +151,38 @@ class ChatExtractorRepository {
         etl_run.finished_at AS "finishedAt"
       FROM etl_run
       LEFT JOIN connected_page ON connected_page.id = etl_run.connected_page_id
+      ORDER BY etl_run.started_at DESC
+      LIMIT ${limit}
+    `);
+  }
+
+  async listRunsForConnectedPage(connectedPageId: string, limit = 30): Promise<EtlRunRow[]> {
+    return prisma.$queryRaw<EtlRunRow[]>(Prisma.sql`
+      SELECT
+        etl_run.id,
+        etl_run.connected_page_id AS "connectedPageId",
+        etl_run.run_group_id AS "runGroupId",
+        etl_run.run_mode AS "runMode",
+        etl_run.page_id AS "pageId",
+        connected_page.page_name AS "pageName",
+        etl_run.target_date AS "targetDate",
+        etl_run.processing_mode AS "processingMode",
+        etl_run.business_timezone AS "businessTimezone",
+        etl_run.requested_window_start_at AS "requestedWindowStartAt",
+        etl_run.requested_window_end_exclusive_at AS "requestedWindowEndExclusiveAt",
+        etl_run.window_start_at AS "windowStartAt",
+        etl_run.window_end_exclusive_at AS "windowEndExclusiveAt",
+        etl_run.status,
+        etl_run.snapshot_version AS "snapshotVersion",
+        etl_run.is_published AS "isPublished",
+        etl_run.run_params_json AS "runParamsJson",
+        etl_run.metrics_json AS "metricsJson",
+        etl_run.error_text AS "errorText",
+        etl_run.started_at AS "startedAt",
+        etl_run.finished_at AS "finishedAt"
+      FROM etl_run
+      LEFT JOIN connected_page ON connected_page.id = etl_run.connected_page_id
+      WHERE etl_run.connected_page_id = ${connectedPageId}::uuid
       ORDER BY etl_run.started_at DESC
       LIMIT ${limit}
     `);
@@ -274,7 +303,6 @@ class ChatExtractorRepository {
         autoAiAnalysisEnabled: patch.autoAiAnalysisEnabled,
         activeTagMappingJson: patch.activeTagMappingJson as Prisma.InputJsonValue | undefined,
         activeOpeningRulesJson: patch.activeOpeningRulesJson as Prisma.InputJsonValue | undefined,
-        activeBotSignaturesJson: patch.activeBotSignaturesJson as Prisma.InputJsonValue | undefined,
         isActive: patch.isActive
       }
     });
@@ -384,7 +412,6 @@ function mapConnectedPage(row: ConnectedPageModel): ConnectedPageRecord {
     activePromptVersionId: row.activePromptVersionId,
     activeTagMappingJson: row.activeTagMappingJson,
     activeOpeningRulesJson: row.activeOpeningRulesJson,
-    activeBotSignaturesJson: row.activeBotSignaturesJson,
     onboardingStateJson: row.onboardingStateJson,
     isActive: row.isActive,
     createdAt: row.createdAt,

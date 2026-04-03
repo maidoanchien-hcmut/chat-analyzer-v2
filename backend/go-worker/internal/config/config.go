@@ -23,6 +23,7 @@ type Config struct {
 	ConnectedPageID                string
 	UserAccessToken                string
 	DatabaseURL                    string
+	RuntimeOnly                    bool
 	PageID                         string
 	BusinessDay                    time.Time
 	BusinessTimezone               string
@@ -42,7 +43,6 @@ type Config struct {
 	TagRules                       []controlplane.TagRule
 	OpeningRules                   []controlplane.OpeningRule
 	CustomerDirectory              []controlplane.CustomerDirectoryEntry
-	BotSignatures                  []controlplane.BotSignature
 }
 
 func Load() (Config, error) {
@@ -69,7 +69,7 @@ func (c Config) Validate() error {
 	if c.UserAccessToken == "" {
 		return errors.New("user_access_token is required")
 	}
-	if c.DatabaseURL == "" {
+	if !c.RuntimeOnly && c.DatabaseURL == "" {
 		return errors.New("DATABASE_URL is required")
 	}
 	if c.BusinessDay.IsZero() {

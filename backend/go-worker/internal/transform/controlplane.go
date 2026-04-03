@@ -74,29 +74,30 @@ func buildOpeningBlocks(
 	rules []controlplane.OpeningRule,
 ) openingBlocks {
 	matchedRules := make([]openingRuleMatch, 0)
-	unmatched := make([]string, 0)
 	candidates := collectOpeningCandidateTexts(openingMessages, rawOpeningMessages)
+	normalizedCandidates := make(map[string]struct{}, len(candidates))
 	for _, candidate := range candidates {
-		normalizedCandidate := normalizeControlText(candidate)
-		if normalizedCandidate == "" {
+		normalized := normalizeControlText(candidate)
+		if normalized != "" {
+			normalizedCandidates[normalized] = struct{}{}
+		}
+	}
+	for _, rule := range rules {
+		if !matchesOpeningRuleBlock(normalizedCandidates, rule) {
 			continue
 		}
-		matched := false
-		for _, rule := range rules {
-			if !matchesAnyControlText(normalizedCandidate, rule.MatchAnyText) {
-				continue
-			}
-			matched = true
-			if !openingRuleAlreadyMatched(matchedRules, rule.Name) {
-				matchedRules = append(matchedRules, openingRuleMatch{
-					Name:    rule.Name,
-					Signals: cloneSignals(rule.Signals),
-				})
-			}
+		if openingRuleAlreadyMatched(matchedRules, rule.Name) {
+			continue
 		}
-		if !matched {
-			unmatched = append(unmatched, candidate)
-		}
+		matchedRules = append(matchedRules, openingRuleMatch{
+			Name:    rule.Name,
+			Signals: cloneSignals(rule.Signals),
+		})
+	}
+
+	unmatched := make([]string, 0)
+	if len(matchedRules) == 0 {
+		unmatched = append(unmatched, candidates...)
 	}
 
 	return openingBlocks{
@@ -169,6 +170,39 @@ func matchesAnyControlText(candidate string, patterns []string) bool {
 		}
 	}
 	return false
+}
+
+func matchesOpeningRuleBlock(candidates map[string]struct{}, rule controlplane.OpeningRule) bool {
+	if len(candidates) == 0 {
+		return false
+	}
+	required := normalizedPatterns(rule.MatchAllText)
+	if len(required) > 0 {
+		for _, pattern := range required {
+			if _, ok := candidates[pattern]; !ok {
+				return false
+			}
+		}
+		return true
+	}
+	for _, pattern := range normalizedPatterns(rule.MatchAnyText) {
+		if _, ok := candidates[pattern]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizedPatterns(values []string) []string {
+	result := make([]string, 0, len(values))
+	for _, value := range values {
+		normalized := normalizeControlText(value)
+		if normalized == "" {
+			continue
+		}
+		result = append(result, normalized)
+	}
+	return uniqueSortedStrings(result)
 }
 
 func normalizeControlText(value string) string {

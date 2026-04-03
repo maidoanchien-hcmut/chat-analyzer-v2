@@ -88,6 +88,59 @@ func TestBuildConversationDayAppliesTagAndOpeningRules(t *testing.T) {
 	}
 }
 
+func TestBuildConversationDayMatchesOpeningRuleByBlockSignature(t *testing.T) {
+	location := time.FixedZone("ICT", 7*60*60)
+	window := DayWindow{
+		Start:        time.Date(2026, 3, 31, 0, 0, 0, 0, location),
+		EndExclusive: time.Date(2026, 4, 1, 0, 0, 0, 0, location),
+	}
+
+	conversation := pancake.Conversation{
+		ID:         "conv-2",
+		PageID:     "page-1",
+		InsertedAt: "2026-03-31T08:00:00",
+		UpdatedAt:  "2026-03-31T08:10:00",
+		From:       pancake.Actor{ID: "customer-1", Name: "Khách A"},
+	}
+	messages := []pancake.Message{
+		mustMessage(t, "m-1", "2026-03-31T08:00:00", "customer-1", "Bắt đầu", nil),
+		mustTemplateMessage(t, "m-2", "2026-03-31T08:00:02", "page-1", "Botcake", []string{"Khách hàng lần đầu", "Khách hàng tái khám"}),
+		mustMessage(t, "m-3", "2026-03-31T08:00:03", "customer-1", "Khách hàng lần đầu", nil),
+		mustTemplateMessage(t, "m-4", "2026-03-31T08:00:04", "page-1", "Botcake", []string{"Đặt lịch hẹn"}),
+		mustMessage(t, "m-5", "2026-03-31T08:00:05", "customer-1", "Đặt lịch hẹn", nil),
+		mustMessage(t, "m-6", "2026-03-31T08:01:00", "customer-1", "Em muốn đặt lịch", nil),
+	}
+
+	policies := controlplane.RuntimeConfig{
+		OpeningRules: []controlplane.OpeningRule{
+			{
+				Name:         "full-opening-signature",
+				MatchAllText: []string{"Bắt đầu", "Khách hàng lần đầu", "Đặt lịch hẹn"},
+				Signals: map[string]any{
+					"opening_block_label": "bot-flow-booking",
+				},
+			},
+		},
+	}
+
+	day, err := BuildConversationDay(window, conversation, pancake.MessageContext{}, messages, len(messages), nil, policies)
+	if err != nil {
+		t.Fatalf("BuildConversationDay returned error: %v", err)
+	}
+
+	var opening struct {
+		MatchedRules []struct {
+			Name string `json:"name"`
+		} `json:"matched_rules"`
+	}
+	if err := json.Unmarshal(day.OpeningBlocksJSON, &opening); err != nil {
+		t.Fatalf("unmarshal opening blocks: %v", err)
+	}
+	if len(opening.MatchedRules) != 1 || opening.MatchedRules[0].Name != "full-opening-signature" {
+		t.Fatalf("expected block-level opening rule to match, got %+v", opening.MatchedRules)
+	}
+}
+
 func TestBuildThreadCustomerMappingsUsesSingleResolvedPhoneOnly(t *testing.T) {
 	conversationDays := []ConversationDaySource{
 		{

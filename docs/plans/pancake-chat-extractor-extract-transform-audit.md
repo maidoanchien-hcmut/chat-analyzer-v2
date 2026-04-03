@@ -304,7 +304,7 @@ Không có một field duy nhất đủ để phân biệt chắc chắn mọi l
 
 - `from.id == page_id`
 - có `admin_name` là người thật
-- không match `bot_signatures`
+- không match bot/system heuristics
 - `uid` chỉ là tín hiệu phụ, không phải điều kiện bắt buộc
 - kể cả message được gửi bằng template/attachment của nhân viên thì vẫn thuộc `staff_via_pancake`
 - ví dụ:
@@ -337,14 +337,14 @@ Không có một field duy nhất đủ để phân biệt chắc chắn mọi l
 5. `unclassified_page_actor`
 
 - mọi message còn lại từ phía page nhưng không match rule trên
-- sẽ cần fallback qua `bot_signatures`, content heuristics, hoặc review sau
+- sẽ cần fallback qua content heuristics hoặc review sau
 - đây là bucket phòng thủ nội bộ cho parser, không phải taxonomy business-facing
 
 ## Quy Tắc Lọc Để Tìm `first_meaningful_human_message`
 
 Message bị loại khỏi candidate mở đầu nếu rơi vào một trong các nhóm sau:
 
-- bot/system message theo `bot_signatures`
+- bot/system message theo sender/app/flow markers và message structure heuristics
 - auto greeting hoặc quick-reply system text
 - message rỗng chỉ có wrapper HTML
 - sticker/reaction only

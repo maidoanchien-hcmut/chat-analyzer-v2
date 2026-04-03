@@ -99,7 +99,7 @@ Mục tiêu là giảm số lượng bảng nhưng vẫn giữ được:
 | `redacted_text` | `text` | Có |  | Nội dung sau khi che dữ liệu nhạy cảm | Đây là text canonical duy nhất được phép persist cho downstream |
 | `attachments_json` | `jsonb` | Không |  | Attachment và metadata liên quan | Giữ raw shape đủ để audit |
 | `message_tags_json` | `jsonb` | Không |  | Tag/message markers gắn riêng trên message nếu source có | Không phải current tag state của conversation |
-| `is_meaningful_human_message` | `boolean` | Không | index | Message này có được coi là một human message có ý nghĩa không | Tính deterministic từ `sender_role`, `message_type`, content, `bot_signatures`, opening rules |
+| `is_meaningful_human_message` | `boolean` | Không | index | Message này có được coi là một human message có ý nghĩa không | Tính deterministic từ `sender_role`, `message_type`, content, opening rules và cấu trúc template/quick-reply |
 | `source_message_json_redacted` | `jsonb` | Không |  | Payload message từ Pancake sau khi đã redact text và dữ liệu nhạy cảm | Giữ đủ shape để audit/debug mà không lưu original text |
 | `created_at` | `timestamptz` | Không | index | Thời điểm row được ghi vào DB |  |
 

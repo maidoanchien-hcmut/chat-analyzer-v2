@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -33,17 +34,26 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		logger.Fatal(err)
 	}
+	if cfg.RuntimeOnly {
+		logger = log.New(os.Stderr, "pancake-etl: ", log.LstdFlags)
+	}
 
 	ctx := context.Background()
 	client := pancake.NewClient(cfg.UserAccessToken, cfg.RequestTimeout)
 	startedAt := time.Now().UTC()
-	runState, err := load.StartRun(ctx, cfg)
-	if err != nil {
-		logger.Fatal(err)
+	runState := load.Result{}
+	if !cfg.RuntimeOnly {
+		runState, err = load.StartRun(ctx, cfg)
+		if err != nil {
+			logger.Fatal(err)
+		}
 	}
 
 	extracted, err := extract.Run(ctx, cfg, client)
 	if err != nil {
+		if cfg.RuntimeOnly {
+			logger.Fatal(err)
+		}
 		failRun(logger, ctx, cfg, runState.ETLRunID, baseMetrics(cfg, client, nil, nil, startedAt), err)
 		logger.Fatal(err)
 	}
@@ -62,7 +72,6 @@ func main() {
 		TagRules:          cfg.TagRules,
 		OpeningRules:      cfg.OpeningRules,
 		CustomerDirectory: cfg.CustomerDirectory,
-		BotSignatures:     cfg.BotSignatures,
 	}
 	for _, candidate := range extracted.ConversationDays {
 		conversationDay, err := transform.BuildConversationDay(
@@ -75,6 +84,9 @@ func main() {
 			policies,
 		)
 		if err != nil {
+			if cfg.RuntimeOnly {
+				logger.Fatal(err)
+			}
 			failRun(logger, ctx, cfg, runState.ETLRunID, baseMetrics(cfg, client, &extracted.Summary, nil, startedAt), err)
 			logger.Fatal(err)
 		}
@@ -82,12 +94,32 @@ func main() {
 	}
 	threadMappings, err := transform.BuildThreadCustomerMappings(extracted.PageID, conversationDays, policies)
 	if err != nil {
+		if cfg.RuntimeOnly {
+			logger.Fatal(err)
+		}
 		failRun(logger, ctx, cfg, runState.ETLRunID, baseMetrics(cfg, client, &extracted.Summary, nil, startedAt), err)
 		logger.Fatal(err)
 	}
 	metrics := baseMetrics(cfg, client, &extracted.Summary, map[string]any{
 		"thread_customer_mappings_created": len(threadMappings),
 	}, startedAt)
+	if cfg.RuntimeOnly {
+		output := runtimePreviewOutput{
+			PageID:               extracted.Summary.PageID,
+			TargetDate:           cfg.BusinessDay.Format(time.DateOnly),
+			BusinessTimezone:     cfg.BusinessTimezone,
+			WindowStartAt:        extracted.Window.Start.Format(time.RFC3339),
+			WindowEndExclusiveAt: extracted.Window.EndExclusive.Format(time.RFC3339),
+			Summary:              metrics,
+			Conversations:        buildRuntimePreviewConversations(conversationDays),
+		}
+		encoder := json.NewEncoder(os.Stdout)
+		encoder.SetIndent("", "  ")
+		if err := encoder.Encode(output); err != nil {
+			logger.Fatal(err)
+		}
+		return
+	}
 	if err := load.SaveSuccess(ctx, cfg, runState.ETLRunID, metrics, extracted.Tags, conversationDays, threadMappings); err != nil {
 		failRun(logger, ctx, cfg, runState.ETLRunID, metrics, err)
 		logger.Fatal(err)
@@ -155,6 +187,34 @@ func failRun(
 	}
 }
 
+type runtimePreviewOutput struct {
+	PageID               string                       `json:"pageId"`
+	TargetDate           string                       `json:"targetDate"`
+	BusinessTimezone     string                       `json:"businessTimezone"`
+	WindowStartAt        string                       `json:"windowStartAt"`
+	WindowEndExclusiveAt string                       `json:"windowEndExclusiveAt"`
+	Summary              map[string]any               `json:"summary"`
+	Conversations        []runtimePreviewConversation `json:"conversations"`
+}
+
+type runtimePreviewConversation struct {
+	ConversationID    string          `json:"conversationId"`
+	CurrentTagsJSON   json.RawMessage `json:"currentTagsJson"`
+	OpeningBlocksJSON json.RawMessage `json:"openingBlocksJson"`
+}
+
+func buildRuntimePreviewConversations(days []transform.ConversationDaySource) []runtimePreviewConversation {
+	conversations := make([]runtimePreviewConversation, 0, len(days))
+	for _, day := range days {
+		conversations = append(conversations, runtimePreviewConversation{
+			ConversationID:    day.ConversationID,
+			CurrentTagsJSON:   day.CurrentTagsJSON,
+			OpeningBlocksJSON: day.OpeningBlocksJSON,
+		})
+	}
+	return conversations
+}
+
 func applyFlags(cfg *config.Config) error {
 	databaseURL := flag.String("database-url", cfg.DatabaseURL, "PostgreSQL connection string for direct chat-extractor load")
 	jobFile := flag.String("job-file", "", "Path to a JSON job payload emitted by backend orchestration")
@@ -174,10 +234,12 @@ func applyFlags(cfg *config.Config) error {
 	requestedWindowEndExclusiveAt := flag.String("requested-window-end-exclusive-at", "", "Optional RFC3339 requested window end for audit metadata")
 	maxConversations := flag.Int("max-conversations", 0, "Optional conversation cap for debug or onboarding runs (0 means no limit)")
 	maxMessagePages := flag.Int("max-message-pages", 0, "Optional message page cap per conversation (0 means no limit)")
+	runtimeOnly := flag.Bool("runtime-only", false, "Run extract/transform only and print preview JSON without writing to PostgreSQL")
 
 	flag.Parse()
 
 	cfg.DatabaseURL = *databaseURL
+	cfg.RuntimeOnly = *runtimeOnly
 
 	if *jobFile != "" && *jobJSON != "" {
 		return errors.New("use only one of -job-file or -job-json")

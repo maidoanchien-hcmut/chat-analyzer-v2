@@ -18,6 +18,5 @@
   "max_message_pages_per_conversation": 0,
   "tag_rules": [],
   "opening_rules": [],
-  "customer_directory": [],
-  "bot_signatures": []
+  "customer_directory": []
 }

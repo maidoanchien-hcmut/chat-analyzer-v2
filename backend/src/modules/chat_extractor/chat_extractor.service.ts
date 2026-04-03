@@ -6,9 +6,9 @@ import { AppError } from "../../core/errors.ts";
 import { buildOnboardingArtifacts } from "./chat_extractor.artifacts.ts";
 import { splitRequestedWindowByTargetDate } from "./chat_extractor.planner.ts";
 import {
-  parseBotSignatures,
   parseOpeningRules,
   parseTagRules,
+  type CommitSetupBody,
   type ExecuteJobBody,
   type JobPreview,
   type ManualJobBody,
@@ -16,6 +16,7 @@ import {
   type PreviewJobBody,
   type RunSlice,
   type SchedulerJobBody,
+  type SetupSampleBody,
   type UpdateConnectedPageBody,
   type WorkerJob
 } from "./chat_extractor.types.ts";
@@ -52,6 +53,7 @@ export type WorkerExecution = {
 export type ChatExtractorRepositoryPort = {
   nextSnapshotVersion(connectedPageId: string, targetDate: string): Promise<number>;
   listRecentRuns(limit?: number): Promise<EtlRunRow[]>;
+  listRunsForConnectedPage(connectedPageId: string, limit?: number): Promise<EtlRunRow[]>;
   getRunById(runId: string): Promise<EtlRunRow | null>;
   getRunCounts(runId: string): Promise<RunCounts>;
   listConversationArtifacts(runId: string): Promise<ConversationArtifactRow[]>;
@@ -73,17 +75,36 @@ type ChatExtractorServiceDependencies = {
   repository: ChatExtractorRepositoryPort;
   listPagesFromToken: (userAccessToken: string) => Promise<ListedPage[]>;
   runWorker: (workerJob: WorkerJob) => Promise<WorkerExecution>;
+  runRuntimeSample: (workerJob: WorkerJob) => Promise<RuntimeSamplePreview>;
+};
+
+type RuntimeSampleConversationArtifact = {
+  conversationId: string;
+  currentTagsJson: unknown;
+  openingBlocksJson: unknown;
+};
+
+type RuntimeSamplePreview = {
+  pageId: string;
+  targetDate: string;
+  businessTimezone: string;
+  windowStartAt: string;
+  windowEndExclusiveAt: string;
+  summary: Record<string, unknown>;
+  conversations: RuntimeSampleConversationArtifact[];
 };
 
 export class ChatExtractorService {
   private readonly repository: ChatExtractorRepositoryPort;
   private readonly listPagesFromTokenImpl: ChatExtractorServiceDependencies["listPagesFromToken"];
   private readonly runWorkerImpl: ChatExtractorServiceDependencies["runWorker"];
+  private readonly runRuntimeSampleImpl: ChatExtractorServiceDependencies["runRuntimeSample"];
 
   constructor(deps: Partial<ChatExtractorServiceDependencies> = {}) {
     this.repository = deps.repository ?? chatExtractorRepository;
     this.listPagesFromTokenImpl = deps.listPagesFromToken ?? fetchPancakePages;
     this.runWorkerImpl = deps.runWorker ?? runWorkerJob;
+    this.runRuntimeSampleImpl = deps.runRuntimeSample ?? runRuntimePreviewJob;
   }
 
   async listPagesFromToken(userAccessToken: string) {
@@ -104,6 +125,14 @@ export class ChatExtractorService {
     };
   }
 
+  async listPageRuns(connectedPageId: string) {
+    await this.requireConnectedPage(connectedPageId);
+    const runs = await this.repository.listRunsForConnectedPage(connectedPageId, 30);
+    return {
+      runs: runs.map(serializeRunSummary)
+    };
+  }
+
   async registerPageConfig(input: {
     pancakePageId: string;
     userAccessToken: string;
@@ -111,11 +140,7 @@ export class ChatExtractorService {
     autoScraperEnabled: boolean;
     autoAiAnalysisEnabled: boolean;
   }) {
-    const pages = await this.listPagesFromTokenImpl(input.userAccessToken);
-    const selectedPage = pages.find((page) => page.pageId === input.pancakePageId);
-    if (!selectedPage) {
-      throw new AppError(400, "CHAT_EXTRACTOR_PAGE_SELECTION_INVALID", `Pancake page ${input.pancakePageId} was not found for the provided user_access_token.`);
-    }
+    const selectedPage = await this.resolveListedPage(input.userAccessToken, input.pancakePageId);
 
     const page = await this.repository.upsertConnectedPage({
       pancakePageId: input.pancakePageId,
@@ -128,6 +153,94 @@ export class ChatExtractorService {
 
     return {
       page: serializeConnectedPage(page)
+    };
+  }
+
+  async previewSetupSample(input: SetupSampleBody) {
+    const selectedPage = await this.resolveListedPage(input.userAccessToken, input.pancakePageId);
+    const runtimePage = buildRuntimeOnlyPageRecord({
+      pancakePageId: selectedPage.pageId,
+      pageName: selectedPage.pageName,
+      userAccessToken: input.userAccessToken,
+      businessTimezone: input.businessTimezone,
+      activeTagMappingJson: input.activeTagMappingJson,
+      activeOpeningRulesJson: input.activeOpeningRulesJson
+    });
+    const workerJob = this.buildWorkerJob({
+      page: runtimePage,
+      processingMode: input.processingMode,
+      runParamsJson: compactObject({
+        initial_conversation_limit: input.initialConversationLimit
+      }),
+      targetDate: formatDateInTimeZone(new Date(), input.businessTimezone),
+      runMode: "onboarding_sample",
+      runGroupId: null,
+      snapshotVersion: 1,
+      isPublished: false,
+      requestedWindowStartAt: null,
+      requestedWindowEndExclusiveAt: null,
+      windowStartAt: null,
+      windowEndExclusiveAt: new Date().toISOString(),
+      maxConversations: input.initialConversationLimit,
+      maxMessagePagesPerConversation: 0
+    });
+    const preview = await this.runRuntimeSampleImpl(workerJob);
+    const artifacts = buildOnboardingArtifacts(preview.conversations);
+
+    return {
+      sample: {
+        pageId: preview.pageId,
+        pageName: selectedPage.pageName,
+        targetDate: preview.targetDate,
+        businessTimezone: preview.businessTimezone,
+        processingMode: input.processingMode,
+        initialConversationLimit: input.initialConversationLimit,
+        windowStartAt: preview.windowStartAt,
+        windowEndExclusiveAt: preview.windowEndExclusiveAt,
+        metrics: preview.summary,
+        tagCandidates: artifacts.topObservedTags,
+        openingCandidates: {
+          topOpeningCandidateWindows: artifacts.topOpeningCandidateWindows,
+          unmatchedOpeningTexts: artifacts.unmatchedOpeningTexts,
+          matchedOpeningRules: artifacts.matchedOpeningRules
+        }
+      }
+    };
+  }
+
+  async commitSetupPage(input: CommitSetupBody) {
+    const selectedPage = await this.resolveListedPage(input.userAccessToken, input.pancakePageId);
+
+    const page = await this.repository.upsertConnectedPage({
+      pancakePageId: input.pancakePageId,
+      pageName: selectedPage.pageName,
+      pancakeUserAccessToken: input.userAccessToken,
+      businessTimezone: input.businessTimezone,
+      autoScraperEnabled: input.autoScraperEnabled,
+      autoAiAnalysisEnabled: input.autoAiAnalysisEnabled
+    });
+    await this.repository.updateConnectedPage(page.id, {
+      activeTagMappingJson: input.activeTagMappingJson,
+      activeOpeningRulesJson: input.activeOpeningRulesJson,
+      isActive: input.isActive
+    });
+
+    const versionNo = await this.repository.nextPromptVersionNo(page.id);
+    const prompt = await this.repository.createPagePromptVersion({
+      connectedPageId: page.id,
+      versionNo,
+      promptText: input.promptText,
+      notes: input.promptNotes
+    });
+
+    let finalPage = await this.repository.activatePagePromptVersion(page.id, prompt.id);
+    if (input.onboardingStateJson) {
+      finalPage = await this.repository.updateConnectedPageOnboardingState(page.id, input.onboardingStateJson);
+    }
+
+    return {
+      page: serializeConnectedPage(finalPage),
+      prompt: serializePromptVersion(prompt)
     };
   }
 
@@ -254,10 +367,11 @@ export class ChatExtractorService {
   async previewJobRequest(body: PreviewJobBody): Promise<JobPreview> {
     if (body.kind === "manual") {
       const page = await this.requireConnectedPage(body.connectedPageId);
-      const workerJobs = await this.buildWorkerJobsForManual(body.job, page);
+      const job = resolveManualJobName(body.job, page);
+      const workerJobs = await this.buildWorkerJobsForManual(job, page);
       return {
         kind: "manual",
-        jobName: body.job.jobName,
+        jobName: job.jobName,
         connectedPageId: page.id,
         pageName: page.pageName,
         workerJobs
@@ -331,8 +445,7 @@ export class ChatExtractorService {
         topOpeningCandidateWindows: artifacts.topOpeningCandidateWindows,
         unmatchedOpeningTexts: artifacts.unmatchedOpeningTexts,
         matchedOpeningRules: artifacts.matchedOpeningRules
-      },
-      botCandidates: []
+      }
     };
 
     const page = await this.repository.updateConnectedPageOnboardingState(connectedPageId, onboardingState);
@@ -486,8 +599,7 @@ export class ChatExtractorService {
       max_message_pages_per_conversation: input.maxMessagePagesPerConversation,
       tag_rules: parseTagRules(input.page.activeTagMappingJson),
       opening_rules: parseOpeningRules(input.page.activeOpeningRulesJson),
-      customer_directory: [],
-      bot_signatures: parseBotSignatures(input.page.activeBotSignaturesJson)
+      customer_directory: []
     };
   }
 
@@ -497,6 +609,15 @@ export class ChatExtractorService {
       throw new AppError(404, "CHAT_EXTRACTOR_CONNECTED_PAGE_NOT_FOUND", `Connected page ${id} was not found.`);
     }
     return page;
+  }
+
+  private async resolveListedPage(userAccessToken: string, pancakePageId: string) {
+    const pages = await this.listPagesFromTokenImpl(userAccessToken);
+    const selectedPage = pages.find((page) => page.pageId === pancakePageId);
+    if (!selectedPage) {
+      throw new AppError(400, "CHAT_EXTRACTOR_PAGE_SELECTION_INVALID", `Pancake page ${pancakePageId} was not found for the provided user_access_token.`);
+    }
+    return selectedPage;
   }
 }
 
@@ -554,6 +675,71 @@ async function runWorkerJob(workerJob: WorkerJob): Promise<WorkerExecution> {
   }
 }
 
+async function runRuntimePreviewJob(workerJob: WorkerJob): Promise<RuntimeSamplePreview> {
+  await mkdir(resolve(workerRoot, "tmp"), { recursive: true });
+  const tempDir = await mkdtemp(resolve(tmpdir(), "chat-analyzer-chat-extractor-preview-"));
+  const tempFile = resolve(tempDir, `${workerJob.page_id}-${workerJob.target_date}.json`);
+  await writeFile(tempFile, JSON.stringify(workerJob, null, 2), "utf8");
+
+  try {
+    const proc = Bun.spawn(["go", "run", ".", "-job-file", tempFile, "-runtime-only"], {
+      cwd: workerRoot,
+      stdout: "pipe",
+      stderr: "pipe"
+    });
+    const [stdout, stderr, exitCode] = await Promise.all([
+      new Response(proc.stdout).text(),
+      new Response(proc.stderr).text(),
+      proc.exited
+    ]);
+
+    if (exitCode !== 0) {
+      throw new AppError(500, "CHAT_EXTRACTOR_RUNTIME_SAMPLE_FAILED", "Runtime sample execution failed.", {
+        stdout: compactPayload(stdout),
+        stderr: compactPayload(stderr)
+      });
+    }
+
+    try {
+      return JSON.parse(stdout) as RuntimeSamplePreview;
+    } catch (error) {
+      throw new AppError(500, "CHAT_EXTRACTOR_RUNTIME_SAMPLE_PARSE_FAILED", "Runtime sample output was not valid JSON.", {
+        stdout: compactPayload(stdout),
+        stderr: compactPayload(stderr),
+        error: error instanceof Error ? error.message : String(error)
+      });
+    }
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+function buildRuntimeOnlyPageRecord(input: {
+  pancakePageId: string;
+  pageName: string;
+  userAccessToken: string;
+  businessTimezone: string;
+  activeTagMappingJson: unknown;
+  activeOpeningRulesJson: unknown;
+}): ConnectedPageRecord {
+  return {
+    id: "",
+    pancakePageId: input.pancakePageId,
+    pageName: input.pageName,
+    pancakeUserAccessToken: input.userAccessToken,
+    businessTimezone: input.businessTimezone,
+    autoScraperEnabled: false,
+    autoAiAnalysisEnabled: false,
+    activePromptVersionId: null,
+    activeTagMappingJson: input.activeTagMappingJson,
+    activeOpeningRulesJson: input.activeOpeningRulesJson,
+    onboardingStateJson: {},
+    isActive: false,
+    createdAt: new Date(0),
+    updatedAt: new Date(0)
+  };
+}
+
 function serializeConnectedPage(page: ConnectedPageRecord) {
   return {
     id: page.id,
@@ -565,7 +751,6 @@ function serializeConnectedPage(page: ConnectedPageRecord) {
     activePromptVersionId: page.activePromptVersionId,
     activeTagMappingJson: parseTagRules(page.activeTagMappingJson),
     activeOpeningRulesJson: parseOpeningRules(page.activeOpeningRulesJson),
-    activeBotSignaturesJson: parseBotSignatures(page.activeBotSignaturesJson),
     onboardingStateJson: page.onboardingStateJson,
     isActive: page.isActive,
     createdAt: page.createdAt,
@@ -582,6 +767,41 @@ function serializePromptVersion(prompt: PagePromptVersionRecord) {
     notes: prompt.notes,
     createdAt: prompt.createdAt
   };
+}
+
+function serializeRunSummary(run: EtlRunRow) {
+  return {
+    id: run.id,
+    runMode: run.runMode,
+    processingMode: run.processingMode,
+    status: run.status,
+    targetDate: run.targetDate,
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    snapshotVersion: run.snapshotVersion,
+    isPublished: run.isPublished
+  };
+}
+
+function resolveManualJobName(job: ManualJobBody, page: ConnectedPageRecord): ManualJobBody {
+  if (job.jobName && job.jobName !== "manual-run") {
+    return job;
+  }
+
+  return {
+    ...job,
+    jobName: buildManualJobName(page.pageName, job)
+  };
+}
+
+function buildManualJobName(pageName: string, job: ManualJobBody) {
+  const pageSlug = slugifyForJob(pageName);
+  if (job.runMode === "manual_range" && job.requestedWindowStartAt && job.requestedWindowEndExclusiveAt) {
+    return `${pageSlug}-manual-range-${compactIsoToken(job.requestedWindowStartAt)}-${compactIsoToken(job.requestedWindowEndExclusiveAt)}`;
+  }
+
+  const targetDate = job.targetDate ?? formatDateInTimeZone(new Date(), "Asia/Ho_Chi_Minh");
+  return `${pageSlug}-${job.processingMode}-${targetDate}`;
 }
 
 function buildManualRunParams(job: ManualJobBody) {
@@ -607,6 +827,30 @@ function buildSchedulerRunParams(job: SchedulerJobBody) {
 
 function compactObject(value: Record<string, unknown>) {
   return Object.fromEntries(Object.entries(value).filter(([, item]) => item !== undefined));
+}
+
+function slugifyForJob(value: string) {
+  const slug = value
+    .toLowerCase()
+    .normalize("NFKD")
+    .replaceAll(/[^\w\s-]/g, "")
+    .trim()
+    .replaceAll(/[\s_-]+/g, "-");
+  return slug || "chat-extractor";
+}
+
+function compactIsoToken(value: string) {
+  return value.replaceAll(/[-:]/g, "").replaceAll(".000", "").replaceAll("T", "t").replaceAll("Z", "z").replaceAll("+", "p");
+}
+
+function formatDateInTimeZone(date: Date, timeZone: string) {
+  const formatter = new Intl.DateTimeFormat("en-CA", {
+    timeZone,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit"
+  });
+  return formatter.format(date);
 }
 
 export function parseListPagesResponse(raw: string) {

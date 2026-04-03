@@ -1,5 +1,6 @@
 import { Elysia, t } from "elysia";
 import {
+  commitSetupBodySchema,
   clonePromptVersionBodySchema,
   createPromptVersionBodySchema,
   executeJobBodySchema,
@@ -7,6 +8,7 @@ import {
   onboardingJobBodySchema,
   previewJobBodySchema,
   registerPageBodySchema,
+  setupSampleBodySchema,
   updateConnectedPageBodySchema
 } from "./chat_extractor.types.ts";
 import { chatExtractorService } from "./chat_extractor.service.ts";
@@ -39,9 +41,27 @@ export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
     params: pageIdParamsSchema,
     response: t.Any()
   })
+  .get("/control-center/pages/:id/runs", async ({ params }) => chatExtractorService.listPageRuns(params.id), {
+    params: pageIdParamsSchema,
+    response: t.Any()
+  })
   .post("/control-center/pages/register", async ({ body }) => {
     const parsed = registerPageBodySchema.parse(normalizeBodyKeys(body));
     return chatExtractorService.registerPageConfig(parsed);
+  }, {
+    body: t.Any(),
+    response: t.Any()
+  })
+  .post("/control-center/setup/sample", async ({ body }) => {
+    const parsed = setupSampleBodySchema.parse(normalizeBodyKeys(body));
+    return chatExtractorService.previewSetupSample(parsed);
+  }, {
+    body: t.Any(),
+    response: t.Any()
+  })
+  .post("/control-center/setup/commit", async ({ body }) => {
+    const parsed = commitSetupBodySchema.parse(normalizeBodyKeys(body));
+    return chatExtractorService.commitSetupPage(parsed);
   }, {
     body: t.Any(),
     response: t.Any()

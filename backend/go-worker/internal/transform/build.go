@@ -48,7 +48,7 @@ func BuildConversationDay(
 			InsertedAt:                insertedAt,
 			SenderSourceID:            message.From.ID,
 			SenderName:                selectSenderName(message.From),
-			SenderRole:                classifySenderRole(message, policies.BotSignatures),
+			SenderRole:                classifySenderRole(message),
 			SourceMessageTypeRaw:      message.Type,
 			MessageType:               normalizeMessageType(message),
 			RedactedText:              renderMessageText(message),
@@ -58,9 +58,10 @@ func BuildConversationDay(
 		})
 	}
 
+	templateButtonTitles := collectTemplateButtonTitles(dedupedMessages)
 	firstMeaningfulIndex := -1
 	for idx := range transformed {
-		if isMeaningfulHumanMessage(dedupedMessages, transformed, idx) {
+		if isMeaningfulHumanMessage(dedupedMessages, transformed, idx, templateButtonTitles) {
 			transformed[idx].IsMeaningfulHumanMessage = true
 			if firstMeaningfulIndex < 0 {
 				firstMeaningfulIndex = idx
@@ -198,7 +199,7 @@ func selectSenderName(actor pancake.Actor) string {
 	return strings.TrimSpace(actor.Name)
 }
 
-func classifySenderRole(message pancake.Message, botSignatures []controlplane.BotSignature) string {
+func classifySenderRole(message pancake.Message) string {
 	if message.From.ID == "" || message.PageID == "" {
 		return "unclassified_page_actor"
 	}
@@ -207,7 +208,7 @@ func classifySenderRole(message pancake.Message, botSignatures []controlplane.Bo
 	}
 
 	adminName := strings.ToLower(strings.TrimSpace(message.From.AdminName))
-	if matchesBotSignature(message, botSignatures) || looksLikeBotActor(adminName, message.From.AppID, message.From.FlowID, message.From.AIGenerated) {
+	if looksLikeBotActor(adminName, message.From.AppID, message.From.FlowID, message.From.AIGenerated) {
 		return "third_party_bot"
 	}
 	if strings.TrimSpace(message.From.AdminName) != "" {
@@ -217,30 +218,6 @@ func classifySenderRole(message pancake.Message, botSignatures []controlplane.Bo
 		return "page_system_auto_message"
 	}
 	return "unclassified_page_actor"
-}
-
-func matchesBotSignature(message pancake.Message, botSignatures []controlplane.BotSignature) bool {
-	if len(botSignatures) == 0 {
-		return false
-	}
-	adminName := strings.ToLower(strings.TrimSpace(message.From.AdminName))
-	for _, signature := range botSignatures {
-		if contains := strings.ToLower(strings.TrimSpace(signature.AdminNameContains)); contains != "" && !strings.Contains(adminName, contains) {
-			continue
-		}
-		if signature.AppID != nil {
-			if message.From.AppID == nil || *message.From.AppID != *signature.AppID {
-				continue
-			}
-		}
-		if signature.FlowID != nil {
-			if message.From.FlowID == nil || *message.From.FlowID != *signature.FlowID {
-				continue
-			}
-		}
-		return true
-	}
-	return false
 }
 
 func looksLikeBotActor(adminName string, appID, flowID *int64, aiGenerated bool) bool {
@@ -294,12 +271,17 @@ func normalizeAttachmentType(value string) string {
 	}
 }
 
-func isMeaningfulHumanMessage(rawMessages []pancake.Message, messages []MessageSource, idx int) bool {
+func isMeaningfulHumanMessage(
+	rawMessages []pancake.Message,
+	messages []MessageSource,
+	idx int,
+	templateButtonTitles map[string]struct{},
+) bool {
 	message := messages[idx]
 	if message.SenderRole != "customer" && message.SenderRole != "staff_via_pancake" {
 		return false
 	}
-	if isLikelyStructuredSelection(rawMessages, messages, idx) {
+	if isLikelyStructuredSelection(rawMessages, messages, idx, templateButtonTitles) {
 		return false
 	}
 
@@ -313,7 +295,12 @@ func isMeaningfulHumanMessage(rawMessages []pancake.Message, messages []MessageS
 	return !looksLikeOnlyEmojiOrPunctuation(text)
 }
 
-func isLikelyStructuredSelection(rawMessages []pancake.Message, messages []MessageSource, idx int) bool {
+func isLikelyStructuredSelection(
+	rawMessages []pancake.Message,
+	messages []MessageSource,
+	idx int,
+	templateButtonTitles map[string]struct{},
+) bool {
 	text := strings.TrimSpace(messages[idx].RedactedText)
 	if text == "" {
 		return false
@@ -323,6 +310,9 @@ func isLikelyStructuredSelection(rawMessages []pancake.Message, messages []Messa
 	}
 
 	normalizedText := normalizeSelectionKey(text)
+	if _, ok := templateButtonTitles[normalizedText]; ok {
+		return true
+	}
 	for _, neighbor := range nearbyMessages(rawMessages, idx) {
 		if hasMatchingTemplateButton(neighbor, normalizedText) {
 			return true
@@ -333,6 +323,31 @@ func isLikelyStructuredSelection(rawMessages []pancake.Message, messages []Messa
 		return true
 	}
 	return false
+}
+
+func collectTemplateButtonTitles(messages []pancake.Message) map[string]struct{} {
+	collected := map[string]struct{}{}
+	for _, message := range messages {
+		for _, attachment := range message.Attachments {
+			if !strings.EqualFold(attachment.Type, "template") || len(attachment.Payload) == 0 {
+				continue
+			}
+			var payload map[string]any
+			if err := json.Unmarshal(attachment.Payload, &payload); err != nil {
+				continue
+			}
+			buttons, _ := payload["buttons"].([]any)
+			for _, rawButton := range buttons {
+				button, _ := rawButton.(map[string]any)
+				title, _ := button["title"].(string)
+				normalized := normalizeSelectionKey(title)
+				if normalized != "" {
+					collected[normalized] = struct{}{}
+				}
+			}
+		}
+	}
+	return collected
 }
 
 func nearbyMessages(messages []pancake.Message, idx int) []pancake.Message {

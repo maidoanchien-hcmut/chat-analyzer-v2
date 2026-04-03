@@ -2,13 +2,6 @@ import { z } from "zod";
 
 export const processingModeSchema = z.enum(["etl_only", "etl_and_ai"]);
 
-export const botSignatureSchema = z.object({
-  name: z.string().min(1),
-  admin_name_contains: z.string().default(""),
-  app_id: z.number().int().optional(),
-  flow_id: z.number().int().optional()
-});
-
 export const tagRuleSchema = z.object({
   name: z.string().min(1),
   match_any_text: z.array(z.string().min(1)).min(1),
@@ -16,11 +9,22 @@ export const tagRuleSchema = z.object({
   noise: z.boolean().optional()
 });
 
-export const openingRuleSchema = z.object({
-  name: z.string().min(1),
-  match_any_text: z.array(z.string().min(1)).min(1),
-  signals: z.record(z.string(), z.any())
-});
+export const openingRuleSchema = z
+  .object({
+    name: z.string().min(1),
+    match_all_text: z.array(z.string().min(1)).min(1).optional(),
+    match_any_text: z.array(z.string().min(1)).min(1).optional(),
+    signals: z.record(z.string(), z.any()).default({})
+  })
+  .refine((raw) => (raw.match_all_text?.length ?? 0) > 0 || (raw.match_any_text?.length ?? 0) > 0, {
+    message: "opening rule requires at least one matcher"
+  })
+  .transform((raw) => ({
+    name: raw.name,
+    match_all_text: raw.match_all_text ?? raw.match_any_text ?? [],
+    match_any_text: raw.match_any_text ?? [],
+    signals: raw.signals
+  }));
 
 export const customerDirectoryEntrySchema = z.object({
   customer_id: z.string().min(1),
@@ -47,6 +51,54 @@ export const registerPageBodySchema = z
     autoAiAnalysisEnabled: raw.auto_ai_analysis_enabled
   }));
 
+export const setupSampleBodySchema = z
+  .object({
+    pancake_page_id: z.string().min(1),
+    user_access_token: z.string().min(1),
+    business_timezone: z.string().min(1).default("Asia/Ho_Chi_Minh"),
+    processing_mode: processingModeSchema.default("etl_only"),
+    initial_conversation_limit: z.number().int().positive(),
+    active_tag_mapping_json: z.array(tagRuleSchema).optional(),
+    active_opening_rules_json: z.array(openingRuleSchema).optional()
+  })
+  .transform((raw) => ({
+    pancakePageId: raw.pancake_page_id,
+    userAccessToken: raw.user_access_token,
+    businessTimezone: raw.business_timezone,
+    processingMode: raw.processing_mode,
+    initialConversationLimit: raw.initial_conversation_limit,
+    activeTagMappingJson: raw.active_tag_mapping_json ?? [],
+    activeOpeningRulesJson: raw.active_opening_rules_json ?? []
+  }));
+
+export const commitSetupBodySchema = z
+  .object({
+    pancake_page_id: z.string().min(1),
+    user_access_token: z.string().min(1),
+    business_timezone: z.string().min(1).default("Asia/Ho_Chi_Minh"),
+    auto_scraper_enabled: z.boolean().default(true),
+    auto_ai_analysis_enabled: z.boolean().default(true),
+    is_active: z.boolean().default(true),
+    active_tag_mapping_json: z.array(tagRuleSchema).default([]),
+    active_opening_rules_json: z.array(openingRuleSchema).default([]),
+    prompt_text: z.string().min(1),
+    prompt_notes: z.string().trim().optional(),
+    onboarding_state_json: z.record(z.string(), z.any()).optional()
+  })
+  .transform((raw) => ({
+    pancakePageId: raw.pancake_page_id,
+    userAccessToken: raw.user_access_token,
+    businessTimezone: raw.business_timezone,
+    autoScraperEnabled: raw.auto_scraper_enabled,
+    autoAiAnalysisEnabled: raw.auto_ai_analysis_enabled,
+    isActive: raw.is_active,
+    activeTagMappingJson: raw.active_tag_mapping_json,
+    activeOpeningRulesJson: raw.active_opening_rules_json,
+    promptText: raw.prompt_text,
+    promptNotes: normalizeOptionalText(raw.prompt_notes),
+    onboardingStateJson: raw.onboarding_state_json ?? null
+  }));
+
 export const updateConnectedPageBodySchema = z
   .object({
     business_timezone: z.string().min(1).optional(),
@@ -54,7 +106,6 @@ export const updateConnectedPageBodySchema = z
     auto_ai_analysis_enabled: z.boolean().optional(),
     active_tag_mapping_json: z.array(tagRuleSchema).optional(),
     active_opening_rules_json: z.array(openingRuleSchema).optional(),
-    active_bot_signatures_json: z.array(botSignatureSchema).optional(),
     is_active: z.boolean().optional()
   })
   .refine((raw) => Object.keys(raw).length > 0, {
@@ -66,7 +117,6 @@ export const updateConnectedPageBodySchema = z
     autoAiAnalysisEnabled: raw.auto_ai_analysis_enabled,
     activeTagMappingJson: raw.active_tag_mapping_json,
     activeOpeningRulesJson: raw.active_opening_rules_json,
-    activeBotSignaturesJson: raw.active_bot_signatures_json,
     isActive: raw.is_active
   }));
 
@@ -265,8 +315,9 @@ export type ProcessingMode = z.infer<typeof processingModeSchema>;
 export type TagRule = z.infer<typeof tagRuleSchema>;
 export type OpeningRule = z.infer<typeof openingRuleSchema>;
 export type CustomerDirectoryEntry = z.infer<typeof customerDirectoryEntrySchema>;
-export type BotSignature = z.infer<typeof botSignatureSchema>;
 export type RegisterPageBody = z.infer<typeof registerPageBodySchema>;
+export type SetupSampleBody = z.infer<typeof setupSampleBodySchema>;
+export type CommitSetupBody = z.infer<typeof commitSetupBodySchema>;
 export type UpdateConnectedPageBody = z.infer<typeof updateConnectedPageBodySchema>;
 export type CreatePromptVersionBody = z.infer<typeof createPromptVersionBodySchema>;
 export type ClonePromptVersionBody = z.infer<typeof clonePromptVersionBodySchema>;
@@ -297,7 +348,6 @@ export type WorkerJob = {
   tag_rules: TagRule[];
   opening_rules: OpeningRule[];
   customer_directory: CustomerDirectoryEntry[];
-  bot_signatures: BotSignature[];
 };
 
 export type RunSlice = {
@@ -338,11 +388,6 @@ export function parseTagRules(value: unknown): TagRule[] {
 
 export function parseOpeningRules(value: unknown): OpeningRule[] {
   const parsed = z.array(openingRuleSchema).safeParse(value);
-  return parsed.success ? parsed.data : [];
-}
-
-export function parseBotSignatures(value: unknown): BotSignature[] {
-  const parsed = z.array(botSignatureSchema).safeParse(value);
   return parsed.success ? parsed.data : [];
 }
 

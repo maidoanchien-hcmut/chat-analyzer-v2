@@ -16,7 +16,6 @@ const defaultRunMode = "scheduled_daily"
 type TagRule = controlplane.TagRule
 type OpeningRule = controlplane.OpeningRule
 type CustomerDirectoryEntry = controlplane.CustomerDirectoryEntry
-type BotSignature = controlplane.BotSignature
 
 type Request struct {
 	ConnectedPageID                string                   `json:"connected_page_id"`
@@ -39,7 +38,6 @@ type Request struct {
 	TagRules                       []TagRule                `json:"tag_rules"`
 	OpeningRules                   []OpeningRule            `json:"opening_rules"`
 	CustomerDirectory              []CustomerDirectoryEntry `json:"customer_directory"`
-	BotSignatures                  []BotSignature           `json:"bot_signatures"`
 }
 
 func LoadFile(path string) (Request, error) {
@@ -121,7 +119,6 @@ func (r Request) Apply(cfg *config.Config) error {
 	cfg.TagRules = append([]controlplane.TagRule(nil), r.TagRules...)
 	cfg.OpeningRules = append([]controlplane.OpeningRule(nil), r.OpeningRules...)
 	cfg.CustomerDirectory = append([]controlplane.CustomerDirectoryEntry(nil), r.CustomerDirectory...)
-	cfg.BotSignatures = append([]controlplane.BotSignature(nil), r.BotSignatures...)
 	return nil
 }
 

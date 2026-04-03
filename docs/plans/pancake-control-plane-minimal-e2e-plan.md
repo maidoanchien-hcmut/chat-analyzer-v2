@@ -69,7 +69,7 @@ Thông số này chỉ nên được lưu trong run-level metadata để audit.
 
 ### 3. Tối thiểu số bảng control-plane
 
-Không tách tag mapper, opening mapper, bot signatures thành nhiều bảng riêng ở phase này.
+Không tách tag mapper, opening mapper thành nhiều bảng riêng ở phase này.
 
 Thiết kế tối thiểu:
 
@@ -83,7 +83,7 @@ Thiết kế tối thiểu:
 
 Lý do:
 
-- tag mapping, opening rules, bot signatures đều là page-local config
+- tag mapping và opening rules đều là page-local config
 - shape của chúng còn thay đổi nhiều
 - dùng `jsonb` trên `connected_page` là cách ít rủi ro hơn so với nổ thêm nhiều bảng versioning quá sớm
 
@@ -132,14 +132,12 @@ Sau onboarding run đầu tiên, UI phải hiện:
 
 - tag đang xuất hiện và thống kê cơ bản
 - `opening_candidate_window` phổ biến nhất
-- bot signature candidates
 - dữ liệu phục vụ chỉnh pipeline tự động
 
 IT được chỉnh:
 
 - tag mapping
 - opening rules
-- bot signatures
 - prompt riêng của page
 
 ### Bước 3: Bật vận hành
@@ -168,7 +166,6 @@ Sau khi page hoạt động ổn định, IT vẫn phải vào chỉnh được:
 - auto flags
 - tag mapping
 - opening rules
-- bot signatures
 - prompt
 
 Không có bước nào bị khóa vĩnh viễn sau onboarding.
@@ -222,7 +219,6 @@ Cho phép update:
 - `auto_ai_analysis_enabled`
 - `active_tag_mapping_json`
 - `active_opening_rules_json`
-- `active_bot_signatures_json`
 
 Artifacts onboarding gần nhất được lưu ngay trên `connected_page.onboarding_state_json`.
 
@@ -276,7 +272,6 @@ Giữ ở `connected_page` dưới dạng `jsonb`:
 
 - tag mapping
 - opening rules
-- bot signatures
 - onboarding artifacts / candidates gần nhất
 
 Lý do:

@@ -13,7 +13,6 @@ function createConnectedPage(overrides: Record<string, unknown> = {}) {
     activePromptVersionId: null,
     activeTagMappingJson: [],
     activeOpeningRulesJson: [],
-    activeBotSignaturesJson: [],
     onboardingStateJson: {},
     isActive: true,
     createdAt: new Date("2026-04-02T08:00:00.000Z"),
@@ -37,6 +36,7 @@ function createPromptVersion(overrides: Record<string, unknown> = {}) {
 function createRepository(overrides: Record<string, unknown> = {}) {
   return {
     listRecentRuns: async () => [],
+    listRunsForConnectedPage: async () => [],
     getRunById: async () => null,
     getRunCounts: async () => ({
       conversationDayCount: 0,
@@ -126,12 +126,6 @@ describe("ChatExtractorService control-plane", () => {
                 lead_tier: "vip"
               }
             }
-          ],
-          activeBotSignaturesJson: [
-            {
-              name: "Bot tu dong",
-              admin_name_contains: "Bot"
-            }
           ]
         }),
       nextSnapshotVersion: async () => 3
@@ -178,12 +172,66 @@ describe("ChatExtractorService control-plane", () => {
           name: "vip"
         }
       ],
-      bot_signatures: [
+      run_params_json: {}
+    });
+  });
+
+  it("builds a runtime-only setup sample without persisting the page first", async () => {
+    const service = new ChatExtractorService({
+      repository: createRepository() as never,
+      listPagesFromToken: async () => [
         {
-          name: "Bot tu dong"
+          pageId: "1406535699642677",
+          pageName: "O2 SKIN - Tri Mun Chuan Y Khoa"
         }
       ],
-      run_params_json: {}
+      runRuntimeSample: async (workerJob) => ({
+        pageId: workerJob.page_id,
+        targetDate: workerJob.target_date,
+        businessTimezone: workerJob.business_timezone,
+        windowStartAt: "2026-04-02T00:00:00+07:00",
+        windowEndExclusiveAt: "2026-04-02T10:30:00+07:00",
+        summary: {
+          conversations_scanned: 5,
+          conversation_days_built: 4,
+          messages_selected: 42
+        },
+        conversations: [
+          {
+            conversationId: "conv-1",
+            currentTagsJson: [{ text: "KH mới" }],
+            openingBlocksJson: {
+              opening_candidate_window: [{ redacted_text: "Bắt đầu" }]
+            }
+          }
+        ]
+      })
+    });
+
+    const result = await service.previewSetupSample({
+      pancakePageId: "1406535699642677",
+      userAccessToken: "demo-user-token",
+      businessTimezone: "Asia/Ho_Chi_Minh",
+      processingMode: "etl_only",
+      initialConversationLimit: 25,
+      activeTagMappingJson: [],
+      activeOpeningRulesJson: []
+    });
+
+    expect(result.sample).toMatchObject({
+      pageId: "1406535699642677",
+      pageName: "O2 SKIN - Tri Mun Chuan Y Khoa",
+      businessTimezone: "Asia/Ho_Chi_Minh",
+      initialConversationLimit: 25,
+      metrics: {
+        conversations_scanned: 5
+      },
+      tagCandidates: [
+        {
+          text: "KH mới",
+          count: 1
+        }
+      ]
     });
   });
 

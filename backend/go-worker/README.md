@@ -17,7 +17,6 @@ Current worker path follows the production extract shape from [pancake-chat-extr
   - `tag_rules`
   - `opening_rules`
   - `customer_directory`
-  - `bot_signatures`
 - loads chat-extractor rows directly into Postgres via `etl_run`, `conversation_day`, `message`, and `thread_customer_mapping`
 - persists `etl_run` lifecycle as `running -> loaded/published` or `running -> failed`
 
@@ -62,8 +61,7 @@ Job payload sample:
   "max_message_pages_per_conversation": 0,
   "tag_rules": [],
   "opening_rules": [],
-  "customer_directory": [],
-  "bot_signatures": []
+  "customer_directory": []
 }
 ```
 

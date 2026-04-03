@@ -81,7 +81,7 @@ Endpoint chính:
 
 ## Frontend
 
-Frontend hiện là shell vận hành tối giản, không dùng framework và không có login. Luồng chính là HTTP tự nhiên: nhập token, list pages, register page vào DB, rồi chọn `connected_page` đã lưu để onboarding/fine-tune/prompt/manual run trực tiếp qua backend.
+Frontend hiện là shell vận hành tối giản, không dùng framework và không có login. Luồng chính là: nhập token, list page, lấy runtime sample để chỉnh config, rồi mới persist page vào DB; sau đó chọn `connected_page` đã lưu để chỉnh cấu hình active và chạy custom run trực tiếp qua backend.
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\frontend
@@ -102,13 +102,18 @@ UI cho phép:
 
 - nhập base URL của backend
 - dán `Pancake user access token` để list pages
-- register page với `business timezone`, cờ `Auto Scraper`, `Auto AI Analysis`
-- chọn page đã lưu trong DB rồi fine-tune `tag/opening/bot` JSON config
-- preview và execute onboarding sample cho một page đã lưu
-- tạo, clone và activate prompt version theo page
-- preview và execute job `manual`, `scheduler` bằng `connected_page_id` thay vì gửi full runtime page bundle
-- tra cứu `etl_run` và health summary
-- xem response JSON thô ngay trên màn hình để audit
+- chọn page nguồn, `business timezone`, `initial_conversation_limit`, `processing_mode`, rồi lấy `runtime sample` của ngày hiện tại
+- chỉnh `tag mapping`, `opening rule`, `bot signature`, `prompt` ngay trên sample runtime mà chưa ghi DB
+- bấm `Thêm trang` để mới persist `connected_page` và `page_prompt_version`
+- chọn page đã chạy để chỉnh config đang active
+- chạy `extract-only` hoặc `full-analysis` ngay bằng custom range hoặc trọn ngày, không cần nhập tên job
+- chọn `etl_run` từ dropdown để audit nhanh
+
+Ghi chú:
+
+- desktop UI được giữ ở một viewport, không dùng scroll để lộ thêm nội dung
+- frontend standalone không surface `scheduler preview/execute`; flow vận hành chính là `custom run`
+- backend vẫn giữ các endpoint scheduler để phục vụ orchestration nội bộ nếu cần
 
 ## Lệnh thường dùng
 

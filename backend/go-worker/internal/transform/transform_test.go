@@ -146,6 +146,63 @@ func TestBuildConversationDayAppliesTagSignalsAndOpeningSignatures(t *testing.T)
 	}
 }
 
+func TestBuildConversationDayTreatsBotFlowAndOptionClicksAsOpeningBlock(t *testing.T) {
+	location := time.FixedZone("ICT", 7*60*60)
+	window := DayWindow{
+		Start:        time.Date(2026, 3, 31, 0, 0, 0, 0, location),
+		EndExclusive: time.Date(2026, 4, 1, 0, 0, 0, 0, location),
+	}
+
+	conversation := pancake.Conversation{
+		ID:         "conv-opening",
+		PageID:     "1406535699642677",
+		From:       pancake.Actor{ID: "customer-1", Name: "Thoa Kim"},
+		InsertedAt: "2026-03-31T13:58:00",
+		UpdatedAt:  "2026-03-31T14:00:00",
+	}
+	botText := mustMessage(
+		t,
+		"m-6",
+		"2026-03-31T13:58:47",
+		"1406535699642677",
+		"Thoa Kim vui lòng báo ngày giờ và chi nhánh để đặt hẹn",
+		nil,
+	)
+	botText.From.AdminName = "Botcake"
+	botText.From.AppID = int64Ptr(556376998159104)
+	botText.From.FlowID = int64Ptr(44058712)
+
+	messages := []pancake.Message{
+		mustMessage(t, "m-1", "2026-03-31T13:58:27", "customer-1", "Bắt đầu", nil),
+		mustTemplateMessage(t, "m-2", "2026-03-31T13:58:30", "1406535699642677", "Botcake", []string{"Khách hàng lần đầu", "Khách hàng tái khám"}),
+		mustMessage(t, "m-3", "2026-03-31T13:58:36", "customer-1", "Khách hàng lần đầu", nil),
+		mustTemplateMessage(t, "m-4", "2026-03-31T13:58:39", "1406535699642677", "Botcake", []string{"Tôi muốn chat tư vấn", "Đặt lịch hẹn"}),
+		mustMessage(t, "m-5", "2026-03-31T13:58:44", "customer-1", "Đặt lịch hẹn", nil),
+		botText,
+		mustMessage(t, "m-7", "2026-03-31T13:59:41", "customer-1", "13A Thống Nhất - P.Bình Thọ-Quận Thủ Đức", nil),
+	}
+
+	day, err := BuildConversationDay(window, conversation, pancake.MessageContext{}, messages, len(messages), nil, controlplane.RuntimeConfig{})
+	if err != nil {
+		t.Fatalf("BuildConversationDay returned error: %v", err)
+	}
+	if day.FirstMeaningfulHumanMessageID != "m-7" {
+		t.Fatalf("expected first meaningful message m-7, got %q", day.FirstMeaningfulHumanMessageID)
+	}
+
+	var opening struct {
+		OpeningCandidateWindow []struct {
+			MessageID string `json:"message_id"`
+		} `json:"opening_candidate_window"`
+	}
+	if err := json.Unmarshal(day.OpeningBlocksJSON, &opening); err != nil {
+		t.Fatalf("unmarshal opening blocks: %v", err)
+	}
+	if len(opening.OpeningCandidateWindow) != 6 {
+		t.Fatalf("expected 6 opening-block messages before first meaningful message, got %d", len(opening.OpeningCandidateWindow))
+	}
+}
+
 func TestBuildThreadCustomerMappingsUsesSingleDeterministicPhone(t *testing.T) {
 	mappings, err := BuildThreadCustomerMappings("page-1", []ConversationDaySource{
 		{

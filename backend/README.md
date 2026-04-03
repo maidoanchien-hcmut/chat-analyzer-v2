@@ -13,6 +13,16 @@ bun run dev
 
 `chat-extractor` hiện chạy bằng HTTP request trực tiếp từ frontend hoặc client bất kỳ. Backend không còn giữ control-plane JSON runtime cho page/job input.
 
+Frontend standalone hiện dùng backend theo flow gọn sau:
+
+- `POST /chat-extractor/pages/list-from-token` để list page từ user token
+- `POST /chat-extractor/control-center/setup/sample` để lấy runtime sample cho ngày hiện tại mà chưa persist DB
+- `POST /chat-extractor/control-center/setup/commit` để persist page config và prompt sau khi đã chỉnh xong
+- `PATCH /chat-extractor/control-center/pages/:id` để lưu config page đang chạy
+- `POST /chat-extractor/jobs/execute` để chạy custom run ngay, không yêu cầu nhập tay tên job
+
+Frontend standalone không surface `scheduler preview/execute`; các endpoint đó vẫn tồn tại cho orchestration và test nội bộ.
+
 Unauthenticated local endpoints for `chat-extractor`:
 
 - `POST /chat-extractor/pages/list-from-token`

@@ -34,7 +34,6 @@ Owner:
 | `active_prompt_version_id`   | `uuid`        | Có    | FK                | Prompt version đang active của page                  |
 | `active_tag_mapping_json`    | `jsonb`       | Không |                   | Mapping tag hiện hành của page                       |
 | `active_opening_rules_json`  | `jsonb`       | Không |                   | Opening rules hiện hành của page                     |
-| `active_bot_signatures_json` | `jsonb`       | Không |                   | Bot signatures hiện hành của page                    |
 | `onboarding_state_json`      | `jsonb`       | Không |                   | Artifacts/candidates gần nhất sau onboarding sample  |
 | `is_active`                  | `boolean`     | Không | index             | Cho phép soft-disable page khỏi scheduler            |
 | `created_at`                 | `timestamptz` | Không | index             | Thời điểm tạo config page                            |
@@ -55,25 +54,17 @@ Owner:
 - button/postback/template match
 - normalized fields như `customer_type`, `need`, `entry_flow`
 
-`active_bot_signatures_json`
-
-- `admin_name_contains`
-- `app_id`
-- `flow_id`
-- note
-
 `onboarding_state_json`
 
 - `latest_onboarding_run_id`
 - `latest_onboarding_target_date`
 - `tag_candidates`
 - `opening_candidates`
-- `bot_candidates`
 - `status`
 
 ### Tại sao không tách thêm bảng mapper
 
-Chưa tách `page_tag_mapping_version`, `page_opening_flow_version`, `page_bot_signature_version` vì:
+Chưa tách `page_tag_mapping_version`, `page_opening_flow_version` vì:
 
 - phase này chưa cần versioning phức tạp
 - shape còn đang học từ data thật

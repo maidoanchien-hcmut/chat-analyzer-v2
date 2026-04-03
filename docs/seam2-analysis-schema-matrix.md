@@ -1,11 +1,11 @@
 # Seam 2 Analysis Schema Matrix
 
-Tài liệu này chốt schema Seam 2 theo hướng tối giản:
+Tài liệu này chốt schema của conversation-analysis path trong Seam 2 theo hướng tối giản:
 
 - chỉ có 2 bảng lưu trữ:
   - `analysis_run`
   - `analysis_result`
-- prompt editor theo page không nằm trong 2 bảng này
+- prompt editor theo page không nằm trong 2 bảng của analysis path này
 - các cột có thể join ngược về Seam 1 thì không duplicate nếu không cần
 
 Tài liệu này kế thừa:
@@ -19,7 +19,7 @@ Tài liệu này kế thừa:
 - scheduled official grain là `1 conversation_day = 1 analysis_result`
 - batch chỉ là execution grouping
 - `analysis_run` chỉ track run
-- `analysis_result` là output table duy nhất của Seam 2
+- `analysis_result` là output table duy nhất của conversation-analysis path
 - `manual_slice` và `pilot` là cùng một use case
 - `inbox mới / inbox cũ` là truth của Seam 1, không lưu lại ở Seam 2
 - mỗi chiều BI trên một unit phải là một scalar value
@@ -46,6 +46,7 @@ Tài liệu này kế thừa:
 | `prompt_version` | `text` | Có | index | Version prompt logic/page prompt | Nếu config domain có version |
 | `prompt_snapshot_json` | `jsonb` | Không |  | Snapshot effective prompt đã dùng | Bao gồm prompt text/rules tối thiểu để audit |
 | `output_schema_version` | `text` | Không | index | Version output contract |  |
+| `generation_config_json` | `jsonb` | Không |  | Snapshot config generate thực tế đã dùng | Ví dụ temperature, max tokens, safety knobs nếu có |
 | `attempt_count` | `integer` | Không |  | Số attempt đã dùng | Retry vẫn nằm trong cùng run |
 | `max_attempts` | `integer` | Không |  | Retry budget tổng |  |
 | `unit_count_planned` | `integer` | Không |  | Tổng unit cần xử lý |  |
@@ -60,7 +61,7 @@ Tài liệu này kế thừa:
 
 ## Matrix: `analysis_result`
 
-Đây là output table duy nhất của Seam 2.
+Đây là output table duy nhất của conversation-analysis path.
 
 | Cột | Kiểu gợi ý | Null | Ràng buộc / index | Ý nghĩa | Ghi chú |
 | --- | --- | --- | --- | --- | --- |
@@ -78,8 +79,10 @@ Tài liệu này kế thừa:
 | `content_customer_type` | `text` | Không | index | AI suy luận từ nội dung | Gợi ý: `kh_moi`, `tai_kham`, `unknown` |
 | `closing_outcome_as_of_day` | `text` | Không | index | Trạng thái chốt đơn/hẹn trong ngày | Giá trị business-facing |
 | `response_quality_label` | `text` | Không | index | Đánh giá chất lượng phản hồi phía nhân viên | Đây là dimension BI cấp unit |
+| `process_risk_level` | `text` | Không | index | Mức rủi ro quy trình nổi bật nhất | Scalar BI, không phải array evidence |
 | `response_quality_issue_text` | `text` | Có |  | Lỗi chính hoặc điểm cần cải thiện nhất | Supporting text, không phải dimension |
 | `response_quality_improvement_text` | `text` | Có |  | Gợi ý cải thiện chính | Supporting text, không phải dimension |
+| `process_risk_reason_text` | `text` | Có |  | Giải thích ngắn vì sao unit bị gắn mức rủi ro đó | Supporting text, không phải dimension |
 | `failure_info_json` | `jsonb` | Có |  | Lý do fail khi unit `unknown` | Có `unknown_reason`, error class, retry summary |
 | `created_at` | `timestamptz` | Không | index | Thời điểm ghi row |  |
 | `published_at` | `timestamptz` | Có | index | Thời điểm row thành published/diagnostic |  |
@@ -101,6 +104,7 @@ Tài liệu này kế thừa:
 | `analysis_result` | index (`content_customer_type`) | Query inference từ nội dung |
 | `analysis_result` | index (`closing_outcome_as_of_day`) | Query outcome |
 | `analysis_result` | index (`response_quality_label`) | Query phân phối chất lượng phản hồi |
+| `analysis_result` | index (`process_risk_level`) | Query phân phối rủi ro quy trình |
 
 ## Rule Diễn Giải Nhanh
 
@@ -119,14 +123,18 @@ Tài liệu này kế thừa:
 | Official revisit label | Resolve ở read model theo `Seam 1 > content_customer_type > Pancake tag > unknown` |
 | Pancake tag trust | Tag vận hành không được override nội dung chat thật hoặc label Seam 1 |
 | Manual slice | Mặc định tạo `diagnostic`, không tự vào official dashboard |
+| AI CRM mapping | Không nằm trong schema matrix này; đọc contract riêng ở `design.md` và không piggyback vào `analysis_result` |
 
 ## Rule Cho Feedback Nhân Viên
 
 - Feedback phải theo hướng coaching, không phải blame.
-- Ở scheduled v1, quality feedback được nén thành:
+- Ở conversation-analysis path, quality feedback được nén thành:
   - một dimension: `response_quality_label`
   - một text ngắn: `response_quality_issue_text`
   - một text ngắn: `response_quality_improvement_text`
+- Rủi ro quy trình được nén thành:
+  - một dimension: `process_risk_level`
+  - một text ngắn: `process_risk_reason_text`
 - Nếu một unit có nhiều nhân viên tham gia, label này phản ánh chất lượng phía nhân viên ở cấp unit, không phải scorecard tách riêng từng staff.
 - Không dùng output này để suy ra disciplinary action tự động.
 
@@ -140,12 +148,13 @@ Tài liệu này kế thừa:
 ## Prompt Config Boundary
 
 - Prompt editor theo page vẫn là requirement của hệ thống.
-- Nhưng storage của prompt config không nằm trong 2 bảng này.
+- Nhưng storage của prompt config không nằm trong 2 bảng của analysis path này.
 - Khi run bắt đầu, effective prompt phải được snapshot vào `analysis_run.prompt_snapshot_json`.
+- `generation_config_json` phải đi cùng `prompt_snapshot_json` để replay/backfill không lệch behavior.
 
 ## Chốt Cuối
 
-- Schema Seam 2 nên dừng ở 2 bảng.
+- Schema của conversation-analysis path nên dừng ở 2 bảng.
 - `analysis_run` chỉ track run, không duplicate dữ liệu Seam 1 nếu join được.
-- `analysis_result` chỉ giữ các scalar dimension AI mà BoD đang thật sự cần, cộng thêm 2 short text cho coaching.
+- `analysis_result` chỉ giữ các scalar dimension AI mà BoD đang thật sự cần, cộng thêm supporting text bounded cho coaching và process risk.
 - Final label `tái khám` phải luôn ưu tiên Seam 1 và nội dung chat hơn Pancake tag vận hành.
