@@ -156,6 +156,7 @@ Mỗi card phải có:
 - giá trị hiện tại
 - delta so với kỳ trước tương đương
 - tooltip giải thích cách tính
+- nếu đang đọc snapshot `tạm thời`, phải hiện badge coverage window ngay trên header view
 
 #### Khu 2: Opening overview
 
@@ -436,6 +437,7 @@ Một timeline theo `thread_day`:
 Phải xem được:
 
 - model
+- prompt version
 - prompt hash
 - taxonomy version
 - evidence used
@@ -560,7 +562,28 @@ UI phải preview trước:
 
 - run sẽ split thành những `target_date` nào
 - child nào là full-day
-- child nào chỉ là partial-day diagnostic
+- child nào là partial-day của ngày hiện tại
+- child nào là partial-day của ngày cũ
+- child nào có quyền `Publish chính thức`
+- child nào có quyền `Publish tạm thời`
+
+Sau khi run xong, action phải phụ thuộc vào loại child run:
+
+- partial-day của ngày hiện tại:
+  - `Xem kết quả run`
+  - `Publish tạm thời`
+- partial-day của ngày cũ:
+  - chỉ có `Xem kết quả run`
+  - không có action publish dashboard
+- full-day:
+  - `Xem kết quả run`
+  - `Publish chính thức`
+
+Khi bấm `Publish chính thức` cho full-day của ngày cũ, modal xác nhận phải ghi rõ:
+
+- ngày nào sẽ bị ghi đè snapshot official
+- prompt/config version cũ và mới
+- export `.xlsx` của ngày đó sẽ bị regenerate theo snapshot mới
 
 #### Khu 5: Mapping queue
 
@@ -605,6 +628,9 @@ UI nên có:
 - cột `loại signal`
 - cột `giá trị canonical`
 - cột `trạng thái`
+- badge cho biết tag đang ở chế độ:
+  - `mặc định`
+  - `đã cấu hình`
 
 Ví dụ loại signal:
 
@@ -620,21 +646,37 @@ Validation:
 - một tag chỉ map vào một role chính
 - role và canonical value phải thuộc taxonomy chuẩn
 - tag deactivated phải hiện rõ
-- tag mới chưa map phải hiện badge cảnh báo
+- tag mới chưa được cấu hình phải mặc định là `noise`
+- UI phải phân biệt:
+  - `noise` do mặc định hệ thống gán
+  - `noise` do operator chủ động xác nhận
 
 ### Tab `Opening rules`
 
 Mục tiêu:
 
-- dạy ETL hiểu opening flow của page
+- cho ETL trích explicit signal từ opening flow nếu có
+
+Rule quan trọng:
+
+- opening rules là optional
+- nếu không có rule phù hợp, pipeline vẫn chạy bằng fallback `first_meaningful_message`
+- opening rules không phải wizard bắt buộc để onboarding thành công
 
 UI nên cho cấu hình:
 
-- bot markers
-- flow markers
 - button title mapping
 - explicit revisit/need selections
-- preview opening block từ sample runtime
+- preview sample opening selections mà hệ thống tự phát hiện
+- nút `Bỏ qua, dùng mặc định`
+
+UX đúng nên là:
+
+- hệ thống tự sample vài thread
+- tự cắt bằng fallback
+- tự gợi ý các lựa chọn opening lặp lại nếu phát hiện được
+- operator chỉ cần map nhanh các lựa chọn có ý nghĩa như `Khách hàng tái khám`, `Đặt lịch hẹn`
+- nếu operator không làm gì, page vẫn activate được
 
 ### Tab `Prompt profile`
 
@@ -646,6 +688,7 @@ UI phải tách rõ:
 
 - taxonomy output chuẩn của hệ thống là cố định
 - page prompt chỉ sửa business rubric
+- prompt UI là một `textarea` lớn, không bắt operator nhập JSON
 
 Các phần nên chỉnh được:
 
@@ -662,6 +705,33 @@ Phải có:
 - xem structured output
 - so sánh output giữa 2 prompt version
 
+Rule hiển thị version:
+
+- UI nên hiện `prompt version` dễ đọc trước
+- `prompt hash` chỉ là thông tin audit kỹ thuật
+- nếu prompt text quay lại đúng một nội dung đã từng dùng thì phải reuse lại `prompt version` cũ thay vì tạo version label mới
+
+Preview workspace trong tab này phải cho phép:
+
+- sửa prompt text
+- bấm `Chạy thử`
+- xem ngay output AI trên sample thread mà không cần publish dashboard
+- xem evidence bundle đã dùng
+- xem field explanations
+- so sánh `before/after` giữa prompt đang sửa và prompt đang active
+
+Semantics của `Chạy thử`:
+
+- tạo preview run hoặc preview inference ở phạm vi sample
+- chỉ phục vụ tinh chỉnh config
+- không tự động tác động tới publish pointer của page
+- nếu người dùng muốn dùng kết quả đó cho dashboard thì phải đi qua flow manual run/publish riêng
+
+Không nên có:
+
+- form bắt operator nhập từng field prompt nhỏ lẻ
+- editor JSON để operator tự cấu hình prompt schema
+
 ### Tab `Scheduler và thông báo`
 
 - giờ chạy official daily
@@ -669,6 +739,7 @@ Phải có:
 - retry policy
 - telegram/email notify
 - recipients
+- nút `Dùng mặc định hệ thống`
 
 ## Flow thêm trang
 
@@ -684,34 +755,51 @@ Flow cũ đúng tinh thần nhưng cần owner boundary rõ hơn.
 
 1. Hiển thị danh sách page.
 2. Chọn page.
-3. Chọn `initial_conversation_limit`.
+3. Có thể activate ngay với default system config.
+4. Nếu muốn, mở rộng `Thiết lập nâng cao`.
 
 ### Bước 3: Lấy sample onboarding
 
 1. Chạy sample extract cho ngày hiện tại trong khoảng `[0:00 - now)`.
 2. Chỉ lấy tối đa `N` conversation.
 3. Không persist vào official mart.
-4. Runtime sample chỉ phục vụ cấu hình.
+4. Runtime sample chỉ phục vụ preview và tinh chỉnh, không phải bước bắt buộc để activate.
 
 ### Bước 4: Cấu hình page
 
-Operator/dev phải cấu hình tối thiểu:
+Theo tinh thần `lazy operator`, page phải chạy được ngay cả khi không cấu hình gì thêm.
+
+Các cấu hình nâng cao có thể chỉnh sau:
 
 - tag taxonomy
 - opening rules
-- prompt profile
+- prompt text
 - scheduler
 - notification target
+
+Default khi operator bỏ qua:
+
+- tag mới chưa map -> `noise`
+- opening rules -> rỗng
+- prompt -> dùng global prompt + page prompt text rỗng
+- scheduler -> default toàn hệ thống
+- notification target -> default toàn hệ thống hoặc để trống
 
 ### Bước 5: Test với sample
 
 UI phải cho:
 
-- preview opening parse
+- preview opening signals nếu detect được
 - preview normalized tag signals
 - chạy AI test trên sample
 - xem structured output
 - xem evidence và explanation
+
+Nhưng:
+
+- không được chặn activate nếu operator không test sample
+- test sample là công cụ nâng cao, không phải bước bắt buộc
+- preview để tinh chỉnh config là flow riêng, không đồng nghĩa với publish dashboard
 
 ### Bước 6: Activate page
 
@@ -719,6 +807,12 @@ UI phải cho:
 2. Tạo `page_config_version`
 3. Bật scheduler
 4. Hiển thị trạng thái `sẵn sàng vận hành`
+
+Flow tối thiểu đúng phải là:
+
+1. nhập access token
+2. chọn page
+3. activate
 
 ## Export flow
 
@@ -734,20 +828,33 @@ Hệ thống phải có export `.xlsx` business-facing.
 ### Nguyên tắc export
 
 - đọc từ semantic mart
-- sheet title phải là tiếng Việt business-facing
+- chỉ export từ `published_official`
+- nếu ngày hiện tại mới có `published_provisional` thì không cho export
+- file chỉ có đúng `1` sheet thống kê
+- sheet title và tên cột phải là tiếng Việt business-facing, đơn giản, dễ đọc, chuyên nghiệp
 - code nội bộ phải được render thành nhãn hiển thị
-- có metadata sheet:
+- metadata không nằm ở sheet riêng; metadata nên nằm ở phần header/meta của sheet hoặc phần đầu file export
+- metadata tối thiểu:
   - page
-  - slice
-  - publish snapshot
+  - khoảng ngày người dùng chọn
   - generated_at
+  - prompt version
+  - config version
+  - taxonomy version
 
-### Loại export
+### Nội dung sheet export
 
-- `Tóm tắt điều hành`
-- `Chi tiết thread`
-- `Chi tiết nhân viên`
-- `Nguồn khách`
+- file chỉ có một sheet thống kê các chỉ số cần thiết theo grain ngày
+- mỗi row tương ứng một ngày đã có `published_official` trong khoảng người dùng chọn
+- không sinh row rỗng cho các ngày chưa có dữ liệu
+- nếu user chọn khoảng `01/01/2026 - 30/01/2026` nhưng mới có official đến `24/01/2026` thì file chỉ có row cho các ngày thực sự có snapshot official
+- không thêm cột đánh số ngày giả cho những ngày không có row
+
+### Hành vi export
+
+- user được phép chọn khoảng ngày rộng hơn phạm vi currently available
+- builder tự lọc lại theo các ngày có dữ liệu official
+- nếu khoảng chọn không có ngày nào có `published_official` thì phải chặn export và báo rõ lý do
 
 ## Trạng thái rỗng và lỗi
 
@@ -756,7 +863,7 @@ Hệ thống phải có export `.xlsx` business-facing.
 - chưa có page kết nối
 - page chưa có publish official
 - filter không có dữ liệu
-- chưa map xong tag taxonomy
+- có tag mới đang chạy ở mặc định `noise`
 
 ### Error states
 
@@ -813,11 +920,11 @@ UI phải chỉ rõ:
 1. Vào `Cấu hình`
 2. Chọn `Thêm page`
 3. Chạy onboarding sample
-4. Map tag
-5. Dạy opening rules
-6. Chỉnh prompt profile
-7. Test sample
-8. Activate
+4. Activate ngay với default nếu muốn
+5. Nếu cần thì map tag
+6. Nếu cần thì thêm opening rules
+7. Nếu cần thì chỉnh prompt text
+8. Test sample
 
 ## Kết luận
 

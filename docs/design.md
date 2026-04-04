@@ -48,6 +48,7 @@ Kết luận:
 - source đã cho khá nhiều signal explicit
 - AI không nên tái suy luận những gì source đã nói rõ
 - nhưng AI là bắt buộc để gom nhóm ý nghĩa hội thoại và đánh giá chất lượng xử lý
+- hệ thống phải hỗ trợ `lazy operator`: nhập access token, chọn page, activate là chạy được với default an toàn
 
 ## Design Gate
 
@@ -64,6 +65,8 @@ Kết luận:
 - Dashboard official chỉ đọc từ dữ liệu đã publish đồng bộ end-to-end.
 - Với extract ngày `D`, canonical chỉ persist message có timestamp thuộc ngày `D`.
 - Page-specific prompt không được tự ý đổi taxonomy output chuẩn của toàn hệ thống.
+- tag mới chưa được operator cấu hình phải mặc định đi vào `noise`, không làm nghẽn onboarding hay daily run.
+- opening rules là optional signal extractor; nếu không có rule phù hợp thì hệ thống vẫn phải chạy bằng fallback `first_meaningful_message`.
 
 ### 3 hướng khả thi
 
@@ -203,16 +206,18 @@ Nếu không có grain này, toàn bộ phần coaching staff sẽ luôn bị tr
   - `page_system_auto_message`
   - `unknown_page_actor`
 - redact số điện thoại trong tin nhắn
-- normalize phone từ `conversations[].recent_phone_numbers` vào structured field
+- lấy `conversations[].recent_phone_numbers[].phone_number` vào structured field theo raw source value và chỉ dedupe, không normalize hay sửa giá trị làm thay đổi dữ liệu gốc
 - parse `post_id`, `ad_id`, `activities`, `ad_click`
 - map tag thô sang signal chuẩn theo config page
+- với tag chưa có mapping rõ ràng, mặc định gán `role = noise`
 - xác định `thread_first_seen_at`
 - xác định `is_new_inbox`
 - xác định `first_meaningful_message`
-- parse `opening_block`
-- parse explicit opening selections như:
+- parse `opening_block` theo heuristic/fallback
+- nếu `opening_rules` có match thì parse explicit opening selections như:
   - `khách hàng tái khám`
   - `đặt lịch hẹn`
+- `opening_rules` chỉ có nhiệm vụ extract signal giá trị từ opening flow; không phải điều kiện để parser chạy thành công
 - tính metric deterministic:
   - `message_count`
   - `first_staff_response_seconds`
@@ -334,6 +339,14 @@ Rule taxonomy bắt buộc:
 
 ## Mô hình dữ liệu đích
 
+Nguyên tắc model:
+
+- ưu tiên chuẩn hoá theo khoá ngoại nếu dữ liệu đã có owner table rõ ràng
+- không duplicate dữ liệu chỉ để tiện query trong canonical/control-plane tables
+- chỉ được phép duplicate ở:
+  - semantic mart/read model phục vụ BI
+  - snapshot/audit fields bắt buộc phải freeze theo run
+
 ## A. Control plane
 
 ### 1. `connected_page`
@@ -355,9 +368,31 @@ Chứa:
 
 - `tag_mapping_json`
 - `opening_rules_json`
-- `prompt_profile_json`
+- `prompt_text`
 - `notification_targets_json`
+- `scheduler_json`
 - tham chiếu tới `analysis_taxonomy_version`
+
+Rule config:
+
+- `tag_mapping_json` phải support default `noise` cho tag chưa được operator cấu hình.
+- `role` của tag mapping là enum cố định, không dùng `null`.
+- tag mới từ source phải được normalize reliably về một `canonical_role`; nếu chưa có cấu hình tay thì mặc định là `noise`.
+- tag mapping nên lưu thêm nguồn gốc quyết định như `system_default` hoặc `operator_override` để audit được vì sao tag đang là `noise`.
+- `opening_rules_json` là best-effort, có thể để trống.
+- `prompt_text` là một khối text mà operator nhập trực tiếp; không bắt operator nhập JSON.
+- `scheduler_json` và `notification_targets_json` có thể kế thừa default toàn hệ thống nếu operator không chỉnh.
+- scheduler default toàn hệ thống phải là:
+  - `official_daily_time = 00:00`
+  - `lookback_hours = 2`
+- `lookback_hours` chỉ là overlap vận hành cho source discovery/recovery, không làm thay đổi canonical window của ngày.
+
+Impact class của config phải được hiểu rõ:
+
+- `scheduler_json` và `notification_targets_json` là operational config, không làm invalid ODS hay AI result đã có.
+- `tag_mapping_json` và `opening_rules_json` là ETL-transform config; đổi các config này có thể làm thay đổi canonical derived fields trong `thread_day`.
+- `prompt_text` là AI-analysis config; đổi config này không đổi raw source fact, nhưng có thể làm invalid kết quả AI đã có.
+- `analysis_taxonomy_version` là semantic contract config; đổi taxonomy có thể làm invalid cả output AI lẫn semantic mart rows dù raw source fact không đổi.
 
 ### 3. `analysis_taxonomy_version`
 
@@ -386,8 +421,15 @@ Chứa:
 - `is_full_day`
 - `status`
 - `publish_state`
+- `publish_eligibility`
 - `metrics_json`
+- `reuse_summary_json`
 - `error_text`
+
+Rule:
+
+- `pipeline_run` phải nối về `pipeline_run_group` bằng khoá ngoại để lấy `page`, `frozen_config_version`, `frozen_taxonomy_version`
+- không duplicate `connected_page_id` hay config pointer xuống `pipeline_run` nếu đã lấy được qua `run_group`
 
 ### 5. `thread`
 
@@ -408,7 +450,6 @@ Chứa canonical fact theo ngày:
 
 - `pipeline_run_id`
 - `thread_id`
-- `target_date`
 - `is_new_inbox`
 - `entry_source_type`
 - `entry_post_id`
@@ -428,6 +469,11 @@ Chứa canonical fact theo ngày:
 - `explicit_need_signal`
 - `explicit_outcome_signal`
 - `source_thread_json_redacted`
+
+Rule:
+
+- `thread_day` lấy `target_date` và page context qua `pipeline_run_id`, không duplicate xuống row này
+- `connected_page_id` không nên nằm trong `thread_day` nếu đã lấy được từ `thread` hoặc `pipeline_run`
 
 ### 7. `message`
 
@@ -458,6 +504,15 @@ Fast-path deterministic:
 Nếu nhập nhằng:
 
 - defer sang AI/manual mapping flow
+
+Rule quan trọng:
+
+- `thread_customer_link` nên tham chiếu trực tiếp bằng `thread_id` của bảng `thread`, không duplicate `connected_page_id`
+- bảng này chỉ lưu `current resolved link`, không phải nơi chuẩn hóa hay lưu master phone của CRM
+- không được giả định phone của CRM luôn theo chuẩn `E.164`
+- evidence phone trong link nên là một giá trị trung tính như `mapped_phone_match_key`, vì CRM có thể chứa số rất bẩn hoặc không đồng nhất độ dài
+- nếu link không đến từ phone match mà đến từ AI/manual review thì evidence phone có thể `null`
+- extractor không được tự ý tạo `match_key` từ `recent_phone_numbers`; nếu cần matching key cho CRM thì đó là lớp dẫn xuất riêng của flow mapping, không phải raw canonical extract
 
 ## C. AI inference store
 
@@ -637,8 +692,12 @@ Nếu không có semantic mart:
 - mỗi page chỉ có tối đa 1 `official_daily` active
 - `manual` có thể chạy song song nhưng không được phá publish pointer của official
 - custom range phải split theo `target_date`
-- child run nào phủ full-day thì có thể publish
-- child run partial-day chỉ là diagnostic
+- child run nào phủ full-day thì có thể publish `official`
+- child run partial-day của ngày hiện tại có thể publish `provisional`
+- child run partial-day của ngày cũ chỉ được dùng để xem kết quả run, không được publish dashboard
+- mặc định `official_daily` cho ngày `D` bắt đầu lúc `00:00` của ngày `D + 1`
+- canonical window của official run ngày `D` luôn là `[00:00 ngày D, 00:00 ngày D + 1)`
+- `lookback_hours` chỉ mở rộng phạm vi source discovery/recovery quanh biên cuối ngày để tránh miss các cập nhật phút cuối; nó không làm nở canonical window
 
 ### Chuỗi publish chính thức
 
@@ -650,6 +709,92 @@ Nếu không có semantic mart:
 
 Dashboard chỉ đọc fact rows đã publish.
 
+### Run output và publish không phải là một
+
+Mọi run, kể cả `manual` partial-day, đều phải materialize semantic mart rows ở phạm vi run đó.
+
+Điều này nhằm đảm bảo:
+
+- chạy thủ công luôn xem được kết quả
+- operator có thể review trước khi publish
+- manual run không trở thành thao tác "chạy xong nhưng không nhìn thấy gì"
+- việc tinh chỉnh config/prompt có một `preview workspace` riêng, không bắt buộc phải publish ra dashboard mới xem được kết quả
+
+Vì vậy hệ thống phải có 3 trạng thái hiển thị/publish:
+
+1. `draft`
+   - run đã xong và xem được trong `run result view` hoặc `config preview workspace`
+   - chưa tác động đến dashboard publish của page
+2. `published_provisional`
+   - run đã được người dùng promote lên dashboard
+   - chỉ được phép với same-day early snapshot của ngày hiện tại
+   - phải hiện rõ coverage window và badge `tạm thời`
+3. `published_official`
+   - chỉ áp dụng cho full-day snapshot
+   - là snapshot mặc định cho dashboard lịch sử và export chính thức
+
+### Luật publish sửa lại
+
+- `manual` run phải cho phép:
+  - xem kết quả ở phạm vi run
+  - publish ngay
+  - hoặc xem trước rồi mới publish
+- child run partial-day của ngày hiện tại được phép promote thành `published_provisional`
+- child run partial-day của ngày cũ tuyệt đối không được publish dashboard
+- child run full-day được phép promote thành `published_official`
+- child run full-day của ngày cũ khi publish phải đi qua xác nhận mạnh vì đây là historical overwrite
+- `official_daily` full-day cuối ngày sẽ supersede snapshot `published_provisional` của cùng `page + target_date`
+- manual full-day republish cho ngày cũ được phép supersede `published_official` cũ nếu user xác nhận publish
+- snapshot config có hiệu lực ngay cho run mới được tạo sau thời điểm đổi config
+- `official_daily` dùng snapshot config đang active tại thời điểm run đó bắt đầu
+- run cũ đã publish không tự động đổi theo config mới
+
+### Luật dashboard
+
+- dashboard lịch sử mặc định đọc `published_official`
+- dashboard cho ngày hiện tại hoặc snapshot đang chạy tay có thể đọc `published_provisional`
+- khi một ngày đang hiển thị từ `published_provisional`, UI phải hiện:
+  - badge `Tạm thời`
+  - coverage window, ví dụ `00:00-10:00`
+  - config/prompt snapshot đang dùng
+- partial-day của ngày cũ chỉ được xem trong `run result view`, không được hiện trên dashboard
+- export `.xlsx` chính thức chỉ được build từ `published_official`
+- nếu ngày hiện tại mới có `published_provisional` thì không cho export official
+
+### Luật reuse để tiết kiệm chi phí
+
+- reuse phải xét theo từng tầng, không được coi `config` là một khối duy nhất
+- raw/source reuse:
+  - nếu manual run đã lấy `00:00-10:00` của ngày `D`, official full-day cuối ngày phải tận dụng phần raw/source coverage đã có và chỉ fetch phần thiếu hoặc phần source đã đổi
+  - với official full-day cho ngày `D`, source discovery mặc định có overlap `lookback_hours = 2` trước mốc `00:00 ngày D + 1` để giảm nguy cơ miss thread cập nhật ở phút cuối
+  - dù source discovery có overlap, canonical persistence vẫn chỉ nhận message có timestamp thuộc `[00:00 ngày D, 00:00 ngày D + 1)`
+- ODS reuse:
+  - ODS chỉ được reuse nguyên trạng nếu ETL-transform config hash không đổi
+  - nếu `tag_mapping_json` hoặc `opening_rules_json` đổi, hệ thống được phép reuse raw/source nhưng phải recompute canonical derived fields của `thread_day`
+- AI reuse:
+  - AI result chỉ được reuse nếu:
+    - evidence hash không đổi
+    - AI-analysis config hash không đổi
+    - taxonomy version không đổi
+  - nếu `prompt_text` đổi thì raw/ODS có thể reuse nhưng AI phải rerun cho các unit bị ảnh hưởng
+  - nếu ETL-transform config đổi thì evidence bundle có thể đổi, khi đó AI result cũ không còn mặc định hợp lệ
+- với các `thread_day` đã được phân tích trước đó, chỉ các unit bị ảnh hưởng bởi:
+  - message/source fact mới
+  - ETL-transform config mới
+  - AI-analysis config mới
+  - taxonomy version mới
+  mới cần rebuild/rerun
+
+### UI/UX warnings bắt buộc
+
+- nếu view đang đọc `published_provisional`, phải hiện cảnh báo đây là snapshot tạm thời
+- nếu slice nhiều ngày đang trộn nhiều prompt/config/taxonomy versions, phải hiện warning rõ ràng
+- warning này phải nói rõ:
+  - factual metrics vẫn đọc được bình thường
+  - các AI-derived dimensions có thể không so sánh tuyệt đối 1:1 giữa các đoạn version khác nhau
+- user phải xem được version boundary theo từng ngày
+- nếu một ngày đã qua chỉ có partial run thì dashboard lịch sử phải coi như ngày đó chưa có snapshot publish được
+
 ## Hợp đồng với AI
 
 AI unit ở grain `thread_day` phải nhận:
@@ -660,8 +805,10 @@ AI unit ở grain `thread_day` phải nhận:
 - `first_meaningful_message_text_redacted`
 - observed tag signals
 - response metrics
-- page prompt profile
+- page prompt text
 - taxonomy canonical đã pin
+
+Bundle này là hậu quả của snapshot ETL-transform đã freeze cho run đó, không chỉ là hậu quả của prompt.
 
 AI phải:
 
@@ -681,6 +828,26 @@ Vai trò chính của AI là:
 
 - phân tích và đánh giá hội thoại
 
+Operator chỉ cần nhập một khối `prompt_text` cho từng page.
+
+Runtime sẽ tự compile:
+
+- global system prompt cố định
+- taxonomy/output contract cố định
+- page `prompt_text`
+
+Hệ thống phải quản lý 2 khái niệm khác nhau:
+
+- `prompt_hash`: định danh kỹ thuật của compiled prompt
+- `prompt_version`: nhãn dễ đọc cho con người
+
+Rule của `prompt_version`:
+
+- version được gắn theo nội dung prompt đã compile, không gắn theo số lần bấm lưu
+- nếu ngày 1 dùng prompt A, ngày 2 sửa thành prompt B, ngày 3 sửa lại đúng nội dung A thì `prompt_version` của ngày 3 phải quay về `A`
+- `prompt_hash` có thể dùng để nhận diện prompt content identity, nhưng UI/export nên hiển thị `prompt_version` trước vì dễ đọc hơn
+- `analysis_run` và export metadata phải lưu được cả `prompt_version` lẫn `prompt_hash`
+
 Prompt theo page chỉ được dùng để:
 
 - mô tả quy trình của page
@@ -692,6 +859,12 @@ Prompt theo page không được dùng để:
 - đổi taxonomy output toàn hệ thống
 - thay thế parser rule cho source
 - định nghĩa lại logic snapshot
+
+Điều này có nghĩa là:
+
+- UX của prompt là plain text
+- audit runtime lưu `compiled_prompt_text` và `prompt_hash`
+- operator không phải nhập JSON để cấu hình prompt
 
 ## Không black box
 
