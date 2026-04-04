@@ -94,6 +94,7 @@ func BuildConversationDay(
 	firstStaffResponseSeconds, avgStaffResponseSeconds := buildResponseMetrics(transformed)
 	staffParticipantsJSON, staffMessageStatsJSON := buildStaffMetrics(transformed)
 	phoneCandidatesJSON := buildPhoneCandidatesJSON(conversation, messageContext, dedupedMessages, insertedByID)
+	entrySourceType, entryPostID, entryAdID := resolveEntrySource(conversation, messageContext, loc)
 	firstMessageText := ""
 	firstMessageSenderRole := ""
 	firstMessageID := ""
@@ -109,6 +110,9 @@ func BuildConversationDay(
 		ThreadLastSeenAt:           threadLastSeenAt,
 		CustomerDisplayName:        customerDisplayName(conversation, messageContext),
 		CurrentPhoneCandidatesJSON: phoneCandidatesJSON,
+		EntrySourceType:            entrySourceType,
+		EntryPostID:                entryPostID,
+		EntryAdID:                  entryAdID,
 		ObservedTagsJSON:           marshalJSON(observedTags, "[]"),
 		NormalizedTagSignalsJSON:   normalizedSignals,
 		OpeningBlockJSON: marshalJSON(openingBlockPayload{
@@ -120,7 +124,7 @@ func BuildConversationDay(
 		FirstMeaningfulMessageID:         firstMessageID,
 		FirstMeaningfulMessageText:       firstMessageText,
 		FirstMeaningfulMessageSenderRole: firstMessageSenderRole,
-		MessageCount:                     messagesSeen,
+		MessageCount:                     len(dedupedMessages),
 		FirstStaffResponseSeconds:        firstStaffResponseSeconds,
 		AvgStaffResponseSeconds:          avgStaffResponseSeconds,
 		StaffParticipantsJSON:            staffParticipantsJSON,
@@ -233,7 +237,7 @@ func selectSenderName(actor pancake.Actor) string {
 
 func classifySenderRole(message pancake.Message) string {
 	if message.From.ID == "" || message.PageID == "" {
-		return "unclassified_page_actor"
+		return "unknown_page_actor"
 	}
 	if message.From.ID != message.PageID {
 		return "customer"
@@ -247,7 +251,7 @@ func classifySenderRole(message pancake.Message) string {
 	if looksLikeSystemMessage(message) {
 		return "page_system_auto_message"
 	}
-	return "unclassified_page_actor"
+	return "unknown_page_actor"
 }
 
 func looksLikeBotActor(adminName string, appID, flowID *int64, aiGenerated bool) bool {
@@ -460,6 +464,95 @@ func buildPhoneCandidatesJSON(
 	return marshalJSON(candidates, "[]")
 }
 
+type entrySourceCandidate struct {
+	priority   int
+	order      int
+	insertedAt *time.Time
+	sourceType string
+	postID     string
+	adID       string
+}
+
+func resolveEntrySource(conversation pancake.Conversation, messageContext pancake.MessageContext, loc *time.Location) (string, string, string) {
+	candidates := make([]entrySourceCandidate, 0)
+	order := 0
+	appendCandidate := func(priority int, insertedAtText, postID, adID string) {
+		postID = strings.TrimSpace(postID)
+		adID = strings.TrimSpace(adID)
+
+		sourceType := ""
+		if adID != "" {
+			sourceType = "ad"
+		} else if postID != "" {
+			sourceType = "post"
+		} else {
+			return
+		}
+
+		var insertedAt *time.Time
+		if parsed, err := parseOptionalSourceTime(insertedAtText, loc); err == nil {
+			insertedAt = parsed
+		}
+
+		candidates = append(candidates, entrySourceCandidate{
+			priority:   priority,
+			order:      order,
+			insertedAt: insertedAt,
+			sourceType: sourceType,
+			postID:     postID,
+			adID:       adID,
+		})
+		order++
+	}
+
+	for _, activity := range messageContext.Activities {
+		postID := strings.TrimSpace(activity.PostID)
+		if postID == "" {
+			postID = strings.TrimSpace(activity.AdsContextData.PostID)
+		}
+		appendCandidate(0, activity.InsertedAt, postID, activity.AdID)
+	}
+	for _, adClick := range messageContext.AdClicks {
+		appendCandidate(1, adClick.InsertedAt, adClick.PostID, adClick.AdID)
+	}
+	for _, customer := range messageContext.Customers {
+		for _, adClick := range customer.AdClicks {
+			appendCandidate(1, adClick.InsertedAt, adClick.PostID, adClick.AdID)
+		}
+	}
+	appendCandidate(2, conversation.InsertedAt, conversation.PostID, conversation.AdID)
+	for _, adID := range conversation.AdIDs {
+		appendCandidate(3, adID.InsertedAt, adID.PostID, adID.AdID)
+	}
+
+	if len(candidates) == 0 {
+		return "", "", ""
+	}
+
+	slices.SortFunc(candidates, func(left, right entrySourceCandidate) int {
+		if left.priority != right.priority {
+			return left.priority - right.priority
+		}
+		switch {
+		case left.insertedAt != nil && right.insertedAt != nil:
+			if left.insertedAt.Before(*right.insertedAt) {
+				return -1
+			}
+			if left.insertedAt.After(*right.insertedAt) {
+				return 1
+			}
+		case left.insertedAt != nil:
+			return -1
+		case right.insertedAt != nil:
+			return 1
+		}
+		return left.order - right.order
+	})
+
+	selected := candidates[0]
+	return selected.sourceType, selected.postID, selected.adID
+}
+
 func resolveObservedTags(rawCurrentTags []json.RawMessage, rawEvents []json.RawMessage, tagDictionary map[int64]pancake.Tag, _ DayWindow) []map[string]any {
 	seen := map[string]struct{}{}
 	resolved := make([]map[string]any, 0)
@@ -670,24 +763,37 @@ func findOpeningSignal(items []openingExplicitSignal, signalRole string) string 
 }
 
 func buildResponseMetrics(messages []MessageSource) (*int, *int) {
-	customerMessages := make([]time.Time, 0)
-	staffMessages := make([]time.Time, 0)
+	responseDurations := make([]int, 0)
+	var pendingCustomerAt *time.Time
 	for _, message := range messages {
 		switch message.SenderRole {
 		case "customer":
-			customerMessages = append(customerMessages, message.InsertedAt)
+			if pendingCustomerAt == nil {
+				customerAt := message.InsertedAt
+				pendingCustomerAt = &customerAt
+			}
 		case "staff_via_pancake":
-			staffMessages = append(staffMessages, message.InsertedAt)
+			if pendingCustomerAt == nil {
+				continue
+			}
+			responseSeconds := int(message.InsertedAt.Sub(*pendingCustomerAt).Seconds())
+			if responseSeconds < 0 {
+				responseSeconds = 0
+			}
+			responseDurations = append(responseDurations, responseSeconds)
+			pendingCustomerAt = nil
 		}
 	}
-	if len(customerMessages) == 0 || len(staffMessages) == 0 {
+	if len(responseDurations) == 0 {
 		return nil, nil
 	}
-	first := int(staffMessages[0].Sub(customerMessages[0]).Seconds())
-	if first < 0 {
-		first = 0
+
+	first := responseDurations[0]
+	total := 0
+	for _, value := range responseDurations {
+		total += value
 	}
-	avg := first
+	avg := total / len(responseDurations)
 	return &first, &avg
 }
 

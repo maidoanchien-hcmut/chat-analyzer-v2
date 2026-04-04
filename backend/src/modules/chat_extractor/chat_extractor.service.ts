@@ -31,7 +31,6 @@ import {
 } from "./chat_extractor.repository.ts";
 import type {
   ExecuteJobBody,
-  ManualJobBody,
   PreviewJobBody,
   PublishAs,
   PublishEligibility,
@@ -195,30 +194,31 @@ export class ChatExtractorService {
   async previewJobRequest(body: PreviewJobBody) {
     const page = await this.requireConnectedPage(body.connectedPageId);
     const snapshot = await this.resolveRuntimeSnapshot(page);
-    const plannedRuns = this.planManualJob(body.job, page.page.businessTimezone);
+    const runMode = inferRunMode(body.kind, body.job);
+    const plannedRuns = this.planJob(body.kind, body.job, page.page.businessTimezone);
 
     return {
       run_group: {
-        run_mode: inferRunMode(body.job),
+        run_mode: runMode,
         connected_page_id: page.page.id,
         page_name: page.page.pageName,
-        requested_window_start_at: body.job.requestedWindowStartAt,
-        requested_window_end_exclusive_at: body.job.requestedWindowEndExclusiveAt,
+        requested_window_start_at: body.kind === "manual" ? body.job.requestedWindowStartAt : null,
+        requested_window_end_exclusive_at: body.kind === "manual" ? body.job.requestedWindowEndExclusiveAt : null,
         requested_target_date: body.job.targetDate,
         will_use_config_version: snapshot.configVersion.versionNo,
         will_use_prompt_version: snapshot.promptIdentity.promptVersion,
         will_use_compiled_prompt_hash: snapshot.compiledPromptHash
       },
-      child_runs: plannedRuns.map((run) => serializePreviewChildRun(run))
+      child_runs: plannedRuns.map((run) => serializePreviewChildRun(run, snapshot))
     };
   }
 
   async executeJobRequest(body: ExecuteJobBody) {
     const page = await this.requireConnectedPage(body.connectedPageId);
     const snapshot = await this.resolveRuntimeSnapshot(page, true);
-    const plannedRuns = this.planManualJob(body.job, page.page.businessTimezone);
+    const plannedRuns = this.planJob(body.kind, body.job, page.page.businessTimezone);
     const runGroupId = randomUUID();
-    const runMode = inferRunMode(body.job);
+    const runMode = inferRunMode(body.kind, body.job);
 
     const runRows = plannedRuns.map((run) => ({
       id: randomUUID(),
@@ -246,8 +246,8 @@ export class ChatExtractorService {
     await chatExtractorRepository.createRunGroupWithRuns({
       runGroupId,
       runMode,
-      requestedWindowStartAt: body.job.requestedWindowStartAt ? new Date(body.job.requestedWindowStartAt) : null,
-      requestedWindowEndExclusiveAt: body.job.requestedWindowEndExclusiveAt ? new Date(body.job.requestedWindowEndExclusiveAt) : null,
+      requestedWindowStartAt: body.kind === "manual" && body.job.requestedWindowStartAt ? new Date(body.job.requestedWindowStartAt) : null,
+      requestedWindowEndExclusiveAt: body.kind === "manual" && body.job.requestedWindowEndExclusiveAt ? new Date(body.job.requestedWindowEndExclusiveAt) : null,
       requestedTargetDate: body.job.targetDate ? new Date(`${body.job.targetDate}T00:00:00.000Z`) : null,
       frozenConfigVersionId: snapshot.configVersion.id,
       frozenTaxonomyVersionId: snapshot.configVersion.analysisTaxonomyVersionId,
@@ -271,6 +271,7 @@ export class ChatExtractorService {
         page: page.page,
         configVersion: snapshot.configVersion,
         plannedRun,
+        runMode,
         processingMode: body.job.processingMode,
         etlConfigHash: snapshot.etlConfigHash
       });
@@ -405,7 +406,15 @@ export class ChatExtractorService {
     };
   }
 
-  private planManualJob(job: ManualJobBody, businessTimezone: string): PlannedChildRun[] {
+  private planJob(
+    kind: PreviewJobBody["kind"] | ExecuteJobBody["kind"],
+    job: PreviewJobBody["job"] | ExecuteJobBody["job"],
+    businessTimezone: string
+  ): PlannedChildRun[] {
+    if (kind === "official_daily") {
+      return [buildFullDayRun(job.targetDate, businessTimezone)];
+    }
+
     return job.targetDate
       ? [buildFullDayRun(job.targetDate, businessTimezone)]
       : splitRequestedWindowByTargetDate(
@@ -491,7 +500,8 @@ function buildWorkerManifest(input: {
   page: ConnectedPageRecord;
   configVersion: PageConfigVersionRecord;
   plannedRun: PlannedChildRun;
-  processingMode: ManualJobBody["processingMode"];
+  runMode: WorkerManifest["run_mode"];
+  processingMode: WorkerManifest["processing_mode"];
   etlConfigHash: string;
 }): WorkerManifest {
   return {
@@ -503,12 +513,7 @@ function buildWorkerManifest(input: {
     user_access_token: input.page.pancakeUserAccessToken,
     business_timezone: input.page.businessTimezone,
     target_date: input.plannedRun.targetDate,
-    run_mode: inferRunMode({
-      processingMode: input.processingMode,
-      targetDate: input.plannedRun.isFullDay ? input.plannedRun.targetDate : null,
-      requestedWindowStartAt: input.plannedRun.requestedWindowStartAt,
-      requestedWindowEndExclusiveAt: input.plannedRun.requestedWindowEndExclusiveAt
-    }),
+    run_mode: input.runMode,
     processing_mode: input.processingMode,
     publish_eligibility: input.plannedRun.publishEligibility,
     requested_window_start_at: input.plannedRun.requestedWindowStartAt,
@@ -563,14 +568,17 @@ function serializeConfigVersion(record: PageConfigVersionRecord) {
   };
 }
 
-function serializePreviewChildRun(run: PlannedChildRun) {
+function serializePreviewChildRun(run: PlannedChildRun, snapshot: RuntimeSnapshot) {
   return {
     target_date: run.targetDate,
     window_start_at: run.windowStartAt,
     window_end_exclusive_at: run.windowEndExclusiveAt,
     is_full_day: run.isFullDay,
     publish_eligibility: run.publishEligibility,
-    historical_overwrite_required: run.historicalOverwriteRequired
+    historical_overwrite_required: run.historicalOverwriteRequired,
+    will_use_config_version: snapshot.configVersion.versionNo,
+    will_use_prompt_version: snapshot.promptIdentity.promptVersion,
+    will_use_compiled_prompt_hash: snapshot.compiledPromptHash
   };
 }
 
@@ -628,7 +636,13 @@ function serializeRunGroup(runs: PipelineRunRecord[]) {
   };
 }
 
-function inferRunMode(job: ManualJobBody): "manual_range" | "backfill_day" {
+function inferRunMode(
+  kind: PreviewJobBody["kind"] | ExecuteJobBody["kind"],
+  job: PreviewJobBody["job"] | ExecuteJobBody["job"]
+): WorkerManifest["run_mode"] {
+  if (kind === "official_daily") {
+    return "official_daily";
+  }
   return job.targetDate ? "backfill_day" : "manual_range";
 }
 
@@ -642,14 +656,17 @@ function derivePublishIntent(runs: PlannedChildRun[]) {
   return "none";
 }
 
-function buildRequestJson(job: ManualJobBody, runMode: "manual_range" | "backfill_day") {
+function buildRequestJson(
+  job: PreviewJobBody["job"] | ExecuteJobBody["job"],
+  runMode: WorkerManifest["run_mode"]
+) {
   return {
-    request_kind: runMode === "manual_range" ? "manual_range" : "backfill_day",
+    request_kind: runMode,
     requested_by: "operator",
     processing_mode: job.processingMode,
     requested_target_date: job.targetDate,
-    requested_window_start_at: job.requestedWindowStartAt,
-    requested_window_end_exclusive_at: job.requestedWindowEndExclusiveAt,
+    requested_window_start_at: "requestedWindowStartAt" in job ? job.requestedWindowStartAt : null,
+    requested_window_end_exclusive_at: "requestedWindowEndExclusiveAt" in job ? job.requestedWindowEndExclusiveAt : null,
     write_artifacts: false,
     publish_requested: false
   };

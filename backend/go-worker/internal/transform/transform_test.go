@@ -220,6 +220,174 @@ func TestBuildConversationDayTreatsBotFlowAndOptionClicksAsOpeningBlock(t *testi
 	}
 }
 
+func TestBuildConversationDayUsesCanonicalMessageCountAndUnknownPageActor(t *testing.T) {
+	pageID := "1406535699642677"
+	location := time.FixedZone("ICT", 7*60*60)
+	window := DayWindow{
+		Start:        time.Date(2026, 4, 1, 0, 0, 0, 0, location),
+		EndExclusive: time.Date(2026, 4, 2, 0, 0, 0, 0, location),
+	}
+
+	conversation := pancake.Conversation{
+		ID:         "conv-count",
+		PageID:     pageID,
+		From:       pancake.Actor{ID: "customer-1", Name: "Khach"},
+		InsertedAt: "2026-04-01T09:00:00",
+		UpdatedAt:  "2026-04-01T09:05:00",
+	}
+	messages := []pancake.Message{
+		mustMessage(t, "m-2", "2026-04-01T09:02:00", "customer-1", "xin chao", nil),
+		mustUnknownPageActorMessage(t, "m-1", "2026-04-01T09:01:00", pageID, "tin nhan page chua ro actor"),
+		mustMessage(t, "m-2", "2026-04-01T09:03:00", "customer-1", "xin chao ban muon bi trung", nil),
+	}
+
+	day, err := BuildConversationDay(window, conversation, pancake.MessageContext{}, messages, 8, nil, controlplane.RuntimeConfig{})
+	if err != nil {
+		t.Fatalf("BuildConversationDay returned error: %v", err)
+	}
+
+	if day.MessageCount != 2 {
+		t.Fatalf("expected canonical message count 2 after dedupe, got %d", day.MessageCount)
+	}
+	if got := day.Messages[0].SenderRole; got != "unknown_page_actor" {
+		t.Fatalf("expected unknown_page_actor for unclassified page sender, got %q", got)
+	}
+}
+
+func TestBuildConversationDayComputesResponseMetricsFromConversationTurns(t *testing.T) {
+	pageID := "1406535699642677"
+	location := time.FixedZone("ICT", 7*60*60)
+	window := DayWindow{
+		Start:        time.Date(2026, 4, 1, 0, 0, 0, 0, location),
+		EndExclusive: time.Date(2026, 4, 2, 0, 0, 0, 0, location),
+	}
+
+	conversation := pancake.Conversation{
+		ID:         "conv-response",
+		PageID:     pageID,
+		From:       pancake.Actor{ID: "customer-1", Name: "Khach"},
+		InsertedAt: "2026-04-01T09:00:00",
+		UpdatedAt:  "2026-04-01T09:20:00",
+	}
+	messages := []pancake.Message{
+		mustMessage(t, "m-1", "2026-04-01T09:00:00", "customer-1", "em can tu van", nil),
+		mustMessage(t, "m-2", "2026-04-01T09:02:00", "customer-1", "cho em hoi them", nil),
+		mustStaffMessage(t, "m-3", "2026-04-01T09:05:00", pageID, "da nhan tin", "Lan"),
+		mustStaffMessage(t, "m-4", "2026-04-01T09:06:00", pageID, "em can ho tro gi", "Lan"),
+		mustMessage(t, "m-5", "2026-04-01T09:10:00", "customer-1", "chi phi bao nhieu", nil),
+		mustStaffMessage(t, "m-6", "2026-04-01T09:15:00", pageID, "chi phi tu 199k", "Lan"),
+	}
+
+	day, err := BuildConversationDay(window, conversation, pancake.MessageContext{}, messages, len(messages), nil, controlplane.RuntimeConfig{})
+	if err != nil {
+		t.Fatalf("BuildConversationDay returned error: %v", err)
+	}
+
+	if day.FirstStaffResponseSeconds == nil || *day.FirstStaffResponseSeconds != 300 {
+		t.Fatalf("expected first_staff_response_seconds=300, got %v", day.FirstStaffResponseSeconds)
+	}
+	if day.AvgStaffResponseSeconds == nil || *day.AvgStaffResponseSeconds != 300 {
+		t.Fatalf("expected avg_staff_response_seconds=300, got %v", day.AvgStaffResponseSeconds)
+	}
+}
+
+func TestBuildConversationDayAveragesResponseMetricsAcrossCustomerTurns(t *testing.T) {
+	pageID := "1406535699642677"
+	location := time.FixedZone("ICT", 7*60*60)
+	window := DayWindow{
+		Start:        time.Date(2026, 4, 1, 0, 0, 0, 0, location),
+		EndExclusive: time.Date(2026, 4, 2, 0, 0, 0, 0, location),
+	}
+
+	conversation := pancake.Conversation{
+		ID:         "conv-response-avg",
+		PageID:     pageID,
+		From:       pancake.Actor{ID: "customer-1", Name: "Khach"},
+		InsertedAt: "2026-04-01T09:00:00",
+		UpdatedAt:  "2026-04-01T09:20:00",
+	}
+	messages := []pancake.Message{
+		mustMessage(t, "m-1", "2026-04-01T09:00:00", "customer-1", "em can tu van", nil),
+		mustStaffMessage(t, "m-2", "2026-04-01T09:05:00", pageID, "da nhan tin", "Lan"),
+		mustMessage(t, "m-3", "2026-04-01T09:10:00", "customer-1", "chi phi bao nhieu", nil),
+		mustStaffMessage(t, "m-4", "2026-04-01T09:13:00", pageID, "chi phi tu 199k", "Lan"),
+	}
+
+	day, err := BuildConversationDay(window, conversation, pancake.MessageContext{}, messages, len(messages), nil, controlplane.RuntimeConfig{})
+	if err != nil {
+		t.Fatalf("BuildConversationDay returned error: %v", err)
+	}
+
+	if day.FirstStaffResponseSeconds == nil || *day.FirstStaffResponseSeconds != 300 {
+		t.Fatalf("expected first_staff_response_seconds=300, got %v", day.FirstStaffResponseSeconds)
+	}
+	if day.AvgStaffResponseSeconds == nil || *day.AvgStaffResponseSeconds != 240 {
+		t.Fatalf("expected avg_staff_response_seconds=240, got %v", day.AvgStaffResponseSeconds)
+	}
+}
+
+func TestBuildConversationDayExtractsEntrySourceFromMessageContextBeforeConversationFallback(t *testing.T) {
+	pageID := "1406535699642677"
+	location := time.FixedZone("ICT", 7*60*60)
+	window := DayWindow{
+		Start:        time.Date(2026, 4, 1, 0, 0, 0, 0, location),
+		EndExclusive: time.Date(2026, 4, 2, 0, 0, 0, 0, location),
+	}
+
+	conversation := pancake.Conversation{
+		ID:         "conv-source",
+		PageID:     pageID,
+		From:       pancake.Actor{ID: "customer-1", Name: "Khach"},
+		InsertedAt: "2026-04-01T09:00:00",
+		UpdatedAt:  "2026-04-01T09:20:00",
+		PostID:     "fallback-post",
+		AdIDs: []pancake.SourceRef{
+			{
+				AdID:       "fallback-ad",
+				PostID:     "fallback-post",
+				InsertedAt: "2026-04-01T09:00:00",
+			},
+		},
+	}
+	messageContext := pancake.MessageContext{
+		Activities: []pancake.Activity{
+			{
+				Type:       "ad_click",
+				AdID:       "activity-ad",
+				InsertedAt: "2026-04-01T08:59:00",
+				AdsContextData: pancake.ActivityAdsContextData{
+					PostID: "activity-post",
+				},
+			},
+		},
+		AdClicks: []pancake.SourceRef{
+			{
+				AdID:       "clicked-ad",
+				PostID:     "clicked-post",
+				InsertedAt: "2026-04-01T09:01:00",
+			},
+		},
+	}
+	messages := []pancake.Message{
+		mustMessage(t, "m-1", "2026-04-01T09:00:00", "customer-1", "em can tu van", nil),
+	}
+
+	day, err := BuildConversationDay(window, conversation, messageContext, messages, len(messages), nil, controlplane.RuntimeConfig{})
+	if err != nil {
+		t.Fatalf("BuildConversationDay returned error: %v", err)
+	}
+
+	if day.EntrySourceType != "ad" {
+		t.Fatalf("expected entry_source_type=ad, got %q", day.EntrySourceType)
+	}
+	if day.EntryPostID != "activity-post" {
+		t.Fatalf("expected entry_post_id from message context activity, got %q", day.EntryPostID)
+	}
+	if day.EntryAdID != "activity-ad" {
+		t.Fatalf("expected entry_ad_id from message context activity, got %q", day.EntryAdID)
+	}
+}
+
 func mustMessage(t *testing.T, id, insertedAt, fromID, originalMessage string, phoneInfo []pancake.RecentPhoneNumber) pancake.Message {
 	t.Helper()
 
@@ -323,6 +491,22 @@ func mustTemplateMessage(t *testing.T, id, insertedAt, fromID, adminName string,
 		},
 		Raw: raw,
 	}
+}
+
+func mustStaffMessage(t *testing.T, id, insertedAt, fromID, originalMessage, adminName string) pancake.Message {
+	t.Helper()
+
+	message := mustMessage(t, id, insertedAt, fromID, originalMessage, nil)
+	message.From.AdminName = adminName
+	return message
+}
+
+func mustUnknownPageActorMessage(t *testing.T, id, insertedAt, fromID, originalMessage string) pancake.Message {
+	t.Helper()
+
+	message := mustMessage(t, id, insertedAt, fromID, originalMessage, nil)
+	message.From.AdminName = ""
+	return message
 }
 
 func int64Ptr(value int64) *int64 {

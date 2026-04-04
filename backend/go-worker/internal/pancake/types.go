@@ -53,6 +53,25 @@ type RecentPhoneNumber struct {
 	Status      int    `json:"status"`
 }
 
+type SourceRef struct {
+	AdID       string `json:"ad_id"`
+	PostID     string `json:"post_id"`
+	InsertedAt string `json:"inserted_at"`
+}
+
+type ActivityAdsContextData struct {
+	PostID string `json:"post_id"`
+}
+
+type Activity struct {
+	Type           string                 `json:"type"`
+	Source         string                 `json:"source"`
+	InsertedAt     string                 `json:"inserted_at"`
+	AdID           string                 `json:"ad_id"`
+	PostID         string                 `json:"post_id"`
+	AdsContextData ActivityAdsContextData `json:"ads_context_data"`
+}
+
 type Conversation struct {
 	ID                 string                 `json:"id"`
 	PageID             string                 `json:"page_id"`
@@ -60,6 +79,9 @@ type Conversation struct {
 	InsertedAt         string                 `json:"inserted_at"`
 	UpdatedAt          string                 `json:"updated_at"`
 	MessageCount       int                    `json:"message_count"`
+	PostID             string                 `json:"post_id"`
+	AdID               string                 `json:"ad_id"`
+	AdIDs              []SourceRef            `json:"ad_ids"`
 	From               Actor                  `json:"from"`
 	Customers          []ConversationCustomer `json:"customers"`
 	PageCustomer       PageCustomer           `json:"page_customer"`
@@ -101,20 +123,25 @@ type CustomerProfile struct {
 	CustomerID         string                `json:"customer_id"`
 	FBID               string                `json:"fb_id"`
 	Name               string                `json:"name"`
+	AdClicks           []SourceRef           `json:"ad_clicks"`
 	RecentPhoneNumbers []CustomerRecentPhone `json:"recent_phone_numbers"`
 }
 
 type MessagesPage struct {
-	ConversationID                 string              `json:"conversation_id"`
-	ConvPhoneNumbers               []string            `json:"conv_phone_numbers"`
-	ConvRecentPhoneNumbers         []RecentPhoneNumber `json:"conv_recent_phone_numbers"`
-	AvailableForReportPhoneNumbers []string            `json:"available_for_report_phone_numbers"`
-	Customers                      []CustomerProfile   `json:"customers"`
-	Messages                       []Message           `json:"messages"`
-	Raw                            json.RawMessage     `json:"-"`
+	ConversationID                 string                 `json:"conversation_id"`
+	Activities                     []Activity             `json:"activities"`
+	AdClicks                       map[string][]SourceRef `json:"ad_clicks"`
+	ConvPhoneNumbers               []string               `json:"conv_phone_numbers"`
+	ConvRecentPhoneNumbers         []RecentPhoneNumber    `json:"conv_recent_phone_numbers"`
+	AvailableForReportPhoneNumbers []string               `json:"available_for_report_phone_numbers"`
+	Customers                      []CustomerProfile      `json:"customers"`
+	Messages                       []Message              `json:"messages"`
+	Raw                            json.RawMessage        `json:"-"`
 }
 
 type MessageContext struct {
+	Activities                     []Activity
+	AdClicks                       []SourceRef
 	ConvPhoneNumbers               []string
 	ConvRecentPhoneNumbers         []RecentPhoneNumber
 	AvailableForReportPhoneNumbers []string
@@ -137,12 +164,14 @@ type listTagsEnvelope struct {
 }
 
 type listMessagesEnvelope struct {
-	ConversationID                 string              `json:"conversation_id"`
-	ConvPhoneNumbers               []string            `json:"conv_phone_numbers"`
-	ConvRecentPhoneNumbers         []RecentPhoneNumber `json:"conv_recent_phone_numbers"`
-	AvailableForReportPhoneNumbers []string            `json:"available_for_report_phone_numbers"`
-	Customers                      []CustomerProfile   `json:"customers"`
-	Messages                       []json.RawMessage   `json:"messages"`
+	ConversationID                 string                 `json:"conversation_id"`
+	Activities                     []Activity             `json:"activities"`
+	AdClicks                       map[string][]SourceRef `json:"ad_clicks"`
+	ConvPhoneNumbers               []string               `json:"conv_phone_numbers"`
+	ConvRecentPhoneNumbers         []RecentPhoneNumber    `json:"conv_recent_phone_numbers"`
+	AvailableForReportPhoneNumbers []string               `json:"available_for_report_phone_numbers"`
+	Customers                      []CustomerProfile      `json:"customers"`
+	Messages                       []json.RawMessage      `json:"messages"`
 }
 
 type ConversationsRequest struct {

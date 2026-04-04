@@ -165,7 +165,17 @@ export const manualJobBodySchema = z
     requestedWindowEndExclusiveAt: raw.requested_window_end_exclusive_at ?? null
   }));
 
-export const previewJobBodySchema = z
+export const officialDailyJobBodySchema = z
+  .object({
+    processing_mode: processingModeSchema.default("etl_only"),
+    target_date: dateOnlySchema
+  })
+  .transform((raw) => ({
+    processingMode: raw.processing_mode,
+    targetDate: raw.target_date
+  }));
+
+const previewManualJobBodySchema = z
   .object({
     kind: z.literal("manual"),
     connected_page_id: z.string().uuid(),
@@ -177,7 +187,24 @@ export const previewJobBodySchema = z
     job: raw.job
   }));
 
-export const executeJobBodySchema = z
+const previewOfficialDailyJobBodySchema = z
+  .object({
+    kind: z.literal("official_daily"),
+    connected_page_id: z.string().uuid(),
+    job: officialDailyJobBodySchema
+  })
+  .transform((raw) => ({
+    kind: "official_daily" as const,
+    connectedPageId: raw.connected_page_id,
+    job: raw.job
+  }));
+
+export const previewJobBodySchema = z.discriminatedUnion("kind", [
+  previewManualJobBodySchema,
+  previewOfficialDailyJobBodySchema
+]);
+
+const executeManualJobBodySchema = z
   .object({
     kind: z.literal("manual"),
     connected_page_id: z.string().uuid(),
@@ -188,6 +215,23 @@ export const executeJobBodySchema = z
     connectedPageId: raw.connected_page_id,
     job: raw.job
   }));
+
+const executeOfficialDailyJobBodySchema = z
+  .object({
+    kind: z.literal("official_daily"),
+    connected_page_id: z.string().uuid(),
+    job: officialDailyJobBodySchema
+  })
+  .transform((raw) => ({
+    kind: "official_daily" as const,
+    connectedPageId: raw.connected_page_id,
+    job: raw.job
+  }));
+
+export const executeJobBodySchema = z.discriminatedUnion("kind", [
+  executeManualJobBodySchema,
+  executeOfficialDailyJobBodySchema
+]);
 
 export const publishRunBodySchema = z
   .object({
@@ -214,6 +258,7 @@ export type NotificationTargetsConfig = ReturnType<typeof normalizeNotificationT
 export type RegisterPageBody = z.infer<typeof registerPageBodySchema>;
 export type CreateConfigVersionBody = z.infer<typeof createConfigVersionBodySchema>;
 export type ManualJobBody = z.infer<typeof manualJobBodySchema>;
+export type OfficialDailyJobBody = z.infer<typeof officialDailyJobBodySchema>;
 export type PreviewJobBody = z.infer<typeof previewJobBodySchema>;
 export type ExecuteJobBody = z.infer<typeof executeJobBodySchema>;
 export type PublishRunBody = z.infer<typeof publishRunBodySchema>;

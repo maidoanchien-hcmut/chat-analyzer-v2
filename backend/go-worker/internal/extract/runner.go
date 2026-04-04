@@ -235,6 +235,8 @@ func mergeMessageContext(target *pancake.MessageContext, page pancake.MessagesPa
 		return
 	}
 
+	target.Activities = appendUniqueActivities(target.Activities, page.Activities...)
+	target.AdClicks = appendUniqueSourceRefs(target.AdClicks, flattenAdClicks(page.AdClicks)...)
 	target.ConvPhoneNumbers = appendUniqueStrings(target.ConvPhoneNumbers, page.ConvPhoneNumbers...)
 	target.AvailableForReportPhoneNumbers = appendUniqueStrings(
 		target.AvailableForReportPhoneNumbers,
@@ -296,4 +298,66 @@ func appendUniqueCustomers(existing []pancake.CustomerProfile, values ...pancake
 		existing = append(existing, value)
 	}
 	return existing
+}
+
+func appendUniqueActivities(existing []pancake.Activity, values ...pancake.Activity) []pancake.Activity {
+	seen := make(map[string]struct{}, len(existing))
+	for _, value := range existing {
+		seen[sourceActivityKey(value)] = struct{}{}
+	}
+	for _, value := range values {
+		key := sourceActivityKey(value)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		existing = append(existing, value)
+	}
+	return existing
+}
+
+func appendUniqueSourceRefs(existing []pancake.SourceRef, values ...pancake.SourceRef) []pancake.SourceRef {
+	seen := make(map[string]struct{}, len(existing))
+	for _, value := range existing {
+		seen[sourceRefKey(value)] = struct{}{}
+	}
+	for _, value := range values {
+		key := sourceRefKey(value)
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		existing = append(existing, value)
+	}
+	return existing
+}
+
+func flattenAdClicks(values map[string][]pancake.SourceRef) []pancake.SourceRef {
+	if len(values) == 0 {
+		return nil
+	}
+
+	flattened := make([]pancake.SourceRef, 0)
+	for _, items := range values {
+		flattened = append(flattened, items...)
+	}
+	return flattened
+}
+
+func sourceActivityKey(value pancake.Activity) string {
+	postID := value.PostID
+	if postID == "" {
+		postID = value.AdsContextData.PostID
+	}
+	return value.Type + "|" + value.AdID + "|" + postID + "|" + value.InsertedAt
+}
+
+func sourceRefKey(value pancake.SourceRef) string {
+	return value.AdID + "|" + value.PostID + "|" + value.InsertedAt
 }

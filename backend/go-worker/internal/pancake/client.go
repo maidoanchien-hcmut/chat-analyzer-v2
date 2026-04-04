@@ -130,6 +130,8 @@ func (c *Client) ListMessages(ctx context.Context, req MessagesRequest) (Message
 
 	response := MessagesPage{
 		ConversationID:                 envelope.ConversationID,
+		Activities:                     envelope.Activities,
+		AdClicks:                       envelope.AdClicks,
 		ConvPhoneNumbers:               envelope.ConvPhoneNumbers,
 		ConvRecentPhoneNumbers:         envelope.ConvRecentPhoneNumbers,
 		AvailableForReportPhoneNumbers: envelope.AvailableForReportPhoneNumbers,
