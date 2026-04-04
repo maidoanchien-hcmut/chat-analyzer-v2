@@ -60,6 +60,7 @@ describe("chat_extractor service", () => {
     patchRepository(repositoryModule.chatExtractorRepository, "createRunGroupWithRuns", async (input: unknown) => {
       capturedCreateRunGroupInput = input;
     });
+    patchRepository(repositoryModule.chatExtractorRepository, "markRunExecutionStarted", async () => {});
     patchRepository(repositoryModule.chatExtractorRepository, "refreshRunGroupStatus", async () => {});
     patchRepository(repositoryModule.chatExtractorRepository, "listRunGroupRuns", async (runGroupId: string) => {
       return buildRunGroupRuns(runGroupId, capturedCreateRunGroupInput, pageDetail);
@@ -94,6 +95,101 @@ describe("chat_extractor service", () => {
     expect(capturedManifest.run_mode).toBe("official_daily");
     expect(result.run_group.run_mode).toBe("official_daily");
   });
+
+  it("registering an existing page without explicit flags does not force schema defaults", async () => {
+    const { registerPageBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    const existingPage = createConnectedPageDetail({
+      etlEnabled: false,
+      analysisEnabled: true
+    });
+    let capturedUpsertInput: any;
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageByPancakePageId", async () => existingPage);
+    patchRepository(repositoryModule.chatExtractorRepository, "upsertConnectedPage", async (input: unknown) => {
+      capturedUpsertInput = input;
+      return existingPage.page;
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "ensureDefaultTaxonomy", async () => {
+      return existingPage.activeConfigVersion.analysisTaxonomyVersion;
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "getActiveConfigVersion", async () => existingPage.activeConfigVersion);
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => existingPage);
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      listPagesFromToken: async () => [
+        {
+          pageId: existingPage.page.pancakePageId,
+          pageName: existingPage.page.pageName
+        }
+      ]
+    });
+    const parsed = registerPageBodySchema.parse({
+      pancake_page_id: existingPage.page.pancakePageId,
+      user_access_token: "user-token",
+      business_timezone: "Asia/Ho_Chi_Minh"
+    });
+
+    await service.registerPageConfig(parsed as never);
+
+    expect(capturedUpsertInput.etlEnabled).toBe(false);
+    expect(capturedUpsertInput.analysisEnabled).toBe(true);
+  });
+
+  it("marks the run group execution as aborted when worker startup throws before worker-side status refresh", async () => {
+    const { executeJobBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    const pageDetail = createConnectedPageDetail();
+    const promptIdentity = createPromptIdentity();
+    let capturedCreateRunGroupInput: any;
+    const startedRunIds: string[] = [];
+    const abortedExecutions: Array<{ runGroupId: string; failedRunId: string; errorText: string }> = [];
+    const refreshedRunGroupIds: string[] = [];
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => pageDetail);
+    patchRepository(repositoryModule.chatExtractorRepository, "getPromptIdentityByHash", async () => promptIdentity);
+    patchRepository(repositoryModule.chatExtractorRepository, "createRunGroupWithRuns", async (input: unknown) => {
+      capturedCreateRunGroupInput = input;
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "markRunExecutionStarted", async (runId: string) => {
+      startedRunIds.push(runId);
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "abortRunGroupExecution", async (
+      runGroupId: string,
+      failedRunId: string,
+      errorText: string
+    ) => {
+      abortedExecutions.push({ runGroupId, failedRunId, errorText });
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "refreshRunGroupStatus", async (runGroupId: string) => {
+      refreshedRunGroupIds.push(runGroupId);
+    });
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      runWorker: async () => {
+        throw new Error("spawn worker failed");
+      }
+    });
+    const parsed = executeJobBodySchema.parse({
+      kind: "official_daily",
+      connected_page_id: CONNECTED_PAGE_ID,
+      job: {
+        processing_mode: "etl_only",
+        target_date: "2026-04-03"
+      }
+    });
+
+    await expect(service.executeJobRequest(parsed as never)).rejects.toThrow("spawn worker failed");
+
+    expect(startedRunIds).toEqual([capturedCreateRunGroupInput.childRuns[0].id]);
+    expect(abortedExecutions).toHaveLength(1);
+    expect(abortedExecutions[0]?.runGroupId).toBe(capturedCreateRunGroupInput.runGroupId);
+    expect(abortedExecutions[0]?.failedRunId).toBe(capturedCreateRunGroupInput.childRuns[0].id);
+    expect(abortedExecutions[0]?.errorText).toContain("spawn worker failed");
+    expect(refreshedRunGroupIds).toEqual([capturedCreateRunGroupInput.runGroupId]);
+  });
 });
 
 async function loadChatExtractorTypes() {
@@ -114,7 +210,10 @@ function patchRepository<T extends object, K extends keyof T>(module: T, key: K,
   });
 }
 
-function createConnectedPageDetail() {
+function createConnectedPageDetail(overrides?: {
+  etlEnabled?: boolean;
+  analysisEnabled?: boolean;
+}) {
   return {
     page: {
       id: CONNECTED_PAGE_ID,
@@ -122,8 +221,8 @@ function createConnectedPageDetail() {
       pageName: "O2 SKIN",
       pancakeUserAccessToken: "user-token",
       businessTimezone: "Asia/Ho_Chi_Minh",
-      etlEnabled: true,
-      analysisEnabled: false,
+      etlEnabled: overrides?.etlEnabled ?? true,
+      analysisEnabled: overrides?.analysisEnabled ?? false,
       activeConfigVersionId: CONFIG_VERSION_ID,
       createdAt: new Date("2026-04-03T00:00:00.000Z"),
       updatedAt: new Date("2026-04-03T00:00:00.000Z")

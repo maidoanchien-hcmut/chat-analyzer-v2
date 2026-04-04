@@ -546,6 +546,15 @@ func resolveEntrySource(conversation pancake.Conversation, messageContext pancak
 		case right.insertedAt != nil:
 			return 1
 		}
+		if left.sourceType != right.sourceType {
+			return strings.Compare(left.sourceType, right.sourceType)
+		}
+		if left.postID != right.postID {
+			return strings.Compare(left.postID, right.postID)
+		}
+		if left.adID != right.adID {
+			return strings.Compare(left.adID, right.adID)
+		}
 		return left.order - right.order
 	})
 

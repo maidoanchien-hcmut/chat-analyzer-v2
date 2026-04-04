@@ -104,13 +104,14 @@ export class ChatExtractorService {
 
   async registerPageConfig(input: RegisterPageBody) {
     const selectedPage = await this.resolveListedPage(input.userAccessToken, input.pancakePageId);
+    const existingPage = await chatExtractorRepository.getConnectedPageByPancakePageId(input.pancakePageId);
     const page = await chatExtractorRepository.upsertConnectedPage({
       pancakePageId: input.pancakePageId,
       pageName: selectedPage.pageName,
       pancakeUserAccessToken: input.userAccessToken,
       businessTimezone: input.businessTimezone,
-      etlEnabled: input.etlEnabled,
-      analysisEnabled: input.analysisEnabled
+      etlEnabled: input.etlEnabled ?? existingPage?.page.etlEnabled ?? true,
+      analysisEnabled: input.analysisEnabled ?? existingPage?.page.analysisEnabled ?? false
     });
 
     const defaultTaxonomy = await chatExtractorRepository.ensureDefaultTaxonomy();
@@ -260,27 +261,46 @@ export class ChatExtractorService {
     });
 
     const executions: WorkerExecution[] = [];
-    for (const run of runRows) {
-      const plannedRun = plannedRuns.find((item) => item.targetDate === run.targetDate && item.windowStartAt === run.windowStartAt.toISOString());
-      if (!plannedRun) {
-        continue;
+    let executionError: unknown = null;
+    try {
+      for (const run of runRows) {
+        const plannedRun = plannedRuns.find((item) => item.targetDate === run.targetDate && item.windowStartAt === run.windowStartAt.toISOString());
+        if (!plannedRun) {
+          continue;
+        }
+        await chatExtractorRepository.markRunExecutionStarted(run.id);
+        const manifest = buildWorkerManifest({
+          pipelineRunId: run.id,
+          runGroupId,
+          page: page.page,
+          configVersion: snapshot.configVersion,
+          plannedRun,
+          runMode,
+          processingMode: body.job.processingMode,
+          etlConfigHash: snapshot.etlConfigHash
+        });
+        try {
+          executions.push(await this.runWorkerImpl(manifest));
+        } catch (error) {
+          await chatExtractorRepository.abortRunGroupExecution(
+            runGroupId,
+            run.id,
+            compactErrorText(error)
+          );
+          throw error;
+        }
       }
-      const manifest = buildWorkerManifest({
-        pipelineRunId: run.id,
-        runGroupId,
-        page: page.page,
-        configVersion: snapshot.configVersion,
-        plannedRun,
-        runMode,
-        processingMode: body.job.processingMode,
-        etlConfigHash: snapshot.etlConfigHash
-      });
-      executions.push(await this.runWorkerImpl(manifest));
+    } catch (error) {
+      executionError = error;
+    } finally {
+      await chatExtractorRepository.refreshRunGroupStatus(runGroupId);
     }
 
-    await chatExtractorRepository.refreshRunGroupStatus(runGroupId);
-    const runs = await chatExtractorRepository.listRunGroupRuns(runGroupId);
+    if (executionError) {
+      throw executionError;
+    }
 
+    const runs = await chatExtractorRepository.listRunGroupRuns(runGroupId);
     return {
       run_group: serializeRunGroup(runs),
       child_runs: runs.map((run) => serializeRunSummary(run)),
@@ -716,4 +736,13 @@ function compactPayload(value: string) {
     return trimmed;
   }
   return `${trimmed.slice(0, 2000)}...`;
+}
+
+function compactErrorText(error: unknown) {
+  const text = error instanceof Error ? error.message : String(error);
+  const trimmed = text.trim();
+  if (trimmed.length <= 4000) {
+    return trimmed;
+  }
+  return trimmed.slice(0, 4000);
 }

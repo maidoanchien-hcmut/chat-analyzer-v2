@@ -87,8 +87,8 @@ export const registerPageBodySchema = z
     pancake_page_id: z.string().min(1),
     user_access_token: z.string().min(1),
     business_timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
-    etl_enabled: z.boolean().default(true),
-    analysis_enabled: z.boolean().default(false)
+    etl_enabled: z.boolean().optional(),
+    analysis_enabled: z.boolean().optional()
   })
   .transform((raw) => ({
     pancakePageId: raw.pancake_page_id,

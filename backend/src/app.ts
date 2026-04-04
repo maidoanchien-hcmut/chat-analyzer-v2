@@ -17,13 +17,19 @@ export const app = new Elysia()
     })
   )
   .get("/health", async () => {
-    const databaseOk = await prisma.$queryRaw`SELECT 1`;
+    let databaseStatus: "ok" | "degraded" = "ok";
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+    } catch {
+      databaseStatus = "degraded";
+    }
     const redisResult = await redisManager.ping();
+    const redisStatus = redisResult === "PONG" ? "ok" : "degraded";
 
     return {
-      status: databaseOk ? "ok" : "degraded",
-      database: "ok",
-      redis: redisResult === "PONG" ? "ok" : "degraded",
+      status: databaseStatus === "ok" && redisStatus === "ok" ? "ok" : "degraded",
+      database: databaseStatus,
+      redis: redisStatus,
       timestamp: new Date().toISOString()
     };
   })

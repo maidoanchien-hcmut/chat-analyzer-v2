@@ -220,6 +220,14 @@ class ChatExtractorRepository {
     return row ? mapConnectedPageDetail(row) : null;
   }
 
+  async getConnectedPageByPancakePageId(pancakePageId: string): Promise<ConnectedPageDetailRecord | null> {
+    const row = await prisma.connectedPage.findUnique({
+      where: { pancakePageId },
+      include: connectedPageDetailInclude()
+    });
+    return row ? mapConnectedPageDetail(row) : null;
+  }
+
   async upsertConnectedPage(input: UpsertConnectedPageInput): Promise<ConnectedPageRecord> {
     const row = await prisma.connectedPage.upsert({
       where: {
@@ -348,15 +356,35 @@ class ChatExtractorRepository {
   }
 
   async createPromptIdentity(input: CreatePagePromptIdentityInput) {
-    const row = await prisma.pagePromptIdentity.create({
-      data: {
-        connectedPageId: input.connectedPageId,
-        compiledPromptHash: input.compiledPromptHash,
-        promptVersion: input.promptVersion,
-        compiledPromptText: input.compiledPromptText
+    try {
+      const row = await prisma.pagePromptIdentity.create({
+        data: {
+          connectedPageId: input.connectedPageId,
+          compiledPromptHash: input.compiledPromptHash,
+          promptVersion: input.promptVersion,
+          compiledPromptText: input.compiledPromptText
+        }
+      });
+      return mapPagePromptIdentity(row);
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError
+        && error.code === "P2002"
+      ) {
+        const existing = await prisma.pagePromptIdentity.findUnique({
+          where: {
+            connectedPageId_compiledPromptHash: {
+              connectedPageId: input.connectedPageId,
+              compiledPromptHash: input.compiledPromptHash
+            }
+          }
+        });
+        if (existing) {
+          return mapPagePromptIdentity(existing);
+        }
       }
-    });
-    return mapPagePromptIdentity(row);
+      throw error;
+    }
   }
 
   async createRunGroupWithRuns(input: CreateRunGroupWithRunsInput) {
@@ -431,6 +459,37 @@ class ChatExtractorRepository {
         startedAt: runs.find((run) => run.startedAt)?.startedAt ?? null,
         finishedAt: [...runs].reverse().find((run) => run.finishedAt)?.finishedAt ?? null
       }
+    });
+  }
+
+  async markRunExecutionStarted(runId: string, startedAt = new Date()) {
+    await prisma.pipelineRun.update({
+      where: { id: runId },
+      data: {
+        status: "running",
+        errorText: null,
+        startedAt,
+        finishedAt: null
+      }
+    });
+  }
+
+  async abortRunGroupExecution(runGroupId: string, failedRunId: string, errorText: string, finishedAt = new Date()) {
+    await prisma.$transaction(async (tx) => {
+      await tx.pipelineRun.updateMany({
+        where: {
+          runGroupId,
+          OR: [
+            { id: failedRunId },
+            { status: "queued" }
+          ]
+        },
+        data: {
+          status: "failed",
+          errorText,
+          finishedAt
+        }
+      });
     });
   }
 

@@ -388,6 +388,55 @@ func TestBuildConversationDayExtractsEntrySourceFromMessageContextBeforeConversa
 	}
 }
 
+func TestBuildConversationDayUsesDeterministicEntrySourceTieBreakForAdClicks(t *testing.T) {
+	pageID := "1406535699642677"
+	location := time.FixedZone("ICT", 7*60*60)
+	window := DayWindow{
+		Start:        time.Date(2026, 4, 1, 0, 0, 0, 0, location),
+		EndExclusive: time.Date(2026, 4, 2, 0, 0, 0, 0, location),
+	}
+
+	conversation := pancake.Conversation{
+		ID:         "conv-source-tie",
+		PageID:     pageID,
+		From:       pancake.Actor{ID: "customer-1", Name: "Khach"},
+		InsertedAt: "2026-04-01T09:00:00",
+		UpdatedAt:  "2026-04-01T09:20:00",
+	}
+	messageContext := pancake.MessageContext{
+		AdClicks: []pancake.SourceRef{
+			{
+				AdID:       "z-ad",
+				PostID:     "z-post",
+				InsertedAt: "2026-04-01T09:01:00",
+			},
+			{
+				AdID:       "a-ad",
+				PostID:     "a-post",
+				InsertedAt: "2026-04-01T09:01:00",
+			},
+		},
+	}
+	messages := []pancake.Message{
+		mustMessage(t, "m-1", "2026-04-01T09:00:00", "customer-1", "em can tu van", nil),
+	}
+
+	day, err := BuildConversationDay(window, conversation, messageContext, messages, len(messages), nil, controlplane.RuntimeConfig{})
+	if err != nil {
+		t.Fatalf("BuildConversationDay returned error: %v", err)
+	}
+
+	if day.EntrySourceType != "ad" {
+		t.Fatalf("expected entry_source_type=ad, got %q", day.EntrySourceType)
+	}
+	if day.EntryPostID != "a-post" {
+		t.Fatalf("expected deterministic entry_post_id=a-post, got %q", day.EntryPostID)
+	}
+	if day.EntryAdID != "a-ad" {
+		t.Fatalf("expected deterministic entry_ad_id=a-ad, got %q", day.EntryAdID)
+	}
+}
+
 func mustMessage(t *testing.T, id, insertedAt, fromID, originalMessage string, phoneInfo []pancake.RecentPhoneNumber) pancake.Message {
 	t.Helper()
 

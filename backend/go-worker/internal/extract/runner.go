@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"time"
 
 	"chat-analyzer-v2/backend/go-worker/internal/config"
@@ -347,6 +348,27 @@ func flattenAdClicks(values map[string][]pancake.SourceRef) []pancake.SourceRef 
 	for _, items := range values {
 		flattened = append(flattened, items...)
 	}
+	slices.SortFunc(flattened, func(left, right pancake.SourceRef) int {
+		if left.InsertedAt != right.InsertedAt {
+			if left.InsertedAt < right.InsertedAt {
+				return -1
+			}
+			return 1
+		}
+		if left.PostID != right.PostID {
+			if left.PostID < right.PostID {
+				return -1
+			}
+			return 1
+		}
+		if left.AdID != right.AdID {
+			if left.AdID < right.AdID {
+				return -1
+			}
+			return 1
+		}
+		return 0
+	})
 	return flattened
 }
 
