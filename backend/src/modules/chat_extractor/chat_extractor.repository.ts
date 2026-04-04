@@ -1,6 +1,9 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../infra/prisma.ts";
-import { DEFAULT_ANALYSIS_TAXONOMY } from "./chat_extractor.artifacts.ts";
+import {
+  DEFAULT_ANALYSIS_TAXONOMY,
+  nextPromptVersion
+} from "./chat_extractor.artifacts.ts";
 import type {
   NotificationTargetsConfig,
   OpeningRulesConfig,
@@ -130,7 +133,6 @@ type CreatePageConfigVersionInput = {
 type CreatePagePromptIdentityInput = {
   connectedPageId: string;
   compiledPromptHash: string;
-  promptVersion: string;
   compiledPromptText: string;
 };
 
@@ -356,35 +358,67 @@ class ChatExtractorRepository {
   }
 
   async createPromptIdentity(input: CreatePagePromptIdentityInput) {
-    try {
-      const row = await prisma.pagePromptIdentity.create({
-        data: {
-          connectedPageId: input.connectedPageId,
-          compiledPromptHash: input.compiledPromptHash,
-          promptVersion: input.promptVersion,
-          compiledPromptText: input.compiledPromptText
+    return prisma.$transaction(async (tx) => {
+      await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT "id"
+        FROM "connected_page"
+        WHERE "id" = CAST(${input.connectedPageId} AS uuid)
+        FOR UPDATE
+      `;
+
+      const existing = await tx.pagePromptIdentity.findUnique({
+        where: {
+          connectedPageId_compiledPromptHash: {
+            connectedPageId: input.connectedPageId,
+            compiledPromptHash: input.compiledPromptHash
+          }
         }
       });
-      return mapPagePromptIdentity(row);
-    } catch (error) {
-      if (
-        error instanceof Prisma.PrismaClientKnownRequestError
-        && error.code === "P2002"
-      ) {
-        const existing = await prisma.pagePromptIdentity.findUnique({
-          where: {
-            connectedPageId_compiledPromptHash: {
-              connectedPageId: input.connectedPageId,
-              compiledPromptHash: input.compiledPromptHash
-            }
+      if (existing) {
+        return mapPagePromptIdentity(existing);
+      }
+
+      const versions = await tx.pagePromptIdentity.findMany({
+        where: {
+          connectedPageId: input.connectedPageId
+        },
+        select: {
+          promptVersion: true
+        },
+        orderBy: [{ createdAt: "asc" }]
+      });
+      const promptVersion = nextPromptVersion(versions.map((item) => item.promptVersion));
+
+      try {
+        const row = await tx.pagePromptIdentity.create({
+          data: {
+            connectedPageId: input.connectedPageId,
+            compiledPromptHash: input.compiledPromptHash,
+            promptVersion,
+            compiledPromptText: input.compiledPromptText
           }
         });
-        if (existing) {
-          return mapPagePromptIdentity(existing);
+        return mapPagePromptIdentity(row);
+      } catch (error) {
+        if (
+          error instanceof Prisma.PrismaClientKnownRequestError
+          && error.code === "P2002"
+        ) {
+          const concurrent = await tx.pagePromptIdentity.findUnique({
+            where: {
+              connectedPageId_compiledPromptHash: {
+                connectedPageId: input.connectedPageId,
+                compiledPromptHash: input.compiledPromptHash
+              }
+            }
+          });
+          if (concurrent) {
+            return mapPagePromptIdentity(concurrent);
+          }
         }
+        throw error;
       }
-      throw error;
-    }
+    });
   }
 
   async createRunGroupWithRuns(input: CreateRunGroupWithRunsInput) {
@@ -456,8 +490,8 @@ class ChatExtractorRepository {
       where: { id: runGroupId },
       data: {
         status,
-        startedAt: runs.find((run) => run.startedAt)?.startedAt ?? null,
-        finishedAt: [...runs].reverse().find((run) => run.finishedAt)?.finishedAt ?? null
+        startedAt: minDefinedDate(runs.map((run) => run.startedAt)),
+        finishedAt: maxDefinedDate(runs.map((run) => run.finishedAt))
       }
     });
   }
@@ -751,6 +785,32 @@ function mapPipelineRun(row: any): PipelineRunRecord {
 
 function parseDateOnlyUtc(value: string) {
   return new Date(`${value}T00:00:00.000Z`);
+}
+
+function minDefinedDate(values: Array<Date | null>) {
+  let result: Date | null = null;
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+    if (result === null || value < result) {
+      result = value;
+    }
+  }
+  return result;
+}
+
+function maxDefinedDate(values: Array<Date | null>) {
+  let result: Date | null = null;
+  for (const value of values) {
+    if (!value) {
+      continue;
+    }
+    if (result === null || value > result) {
+      result = value;
+    }
+  }
+  return result;
 }
 
 export const chatExtractorRepository = new ChatExtractorRepository();

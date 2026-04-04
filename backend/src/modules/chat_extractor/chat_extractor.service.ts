@@ -280,7 +280,9 @@ export class ChatExtractorService {
           etlConfigHash: snapshot.etlConfigHash
         });
         try {
-          executions.push(await this.runWorkerImpl(manifest));
+          const execution = await this.runWorkerImpl(manifest);
+          assertWorkerExecutionSucceeded(execution);
+          executions.push(execution);
         } catch (error) {
           await chatExtractorRepository.abortRunGroupExecution(
             runGroupId,
@@ -397,7 +399,6 @@ export class ChatExtractorService {
       const created = await chatExtractorRepository.createPromptIdentity({
         connectedPageId: page.page.id,
         compiledPromptHash,
-        promptVersion: promptIdentity.promptVersion,
         compiledPromptText
       });
       return {
@@ -745,4 +746,33 @@ function compactErrorText(error: unknown) {
     return trimmed;
   }
   return trimmed.slice(0, 4000);
+}
+
+function assertWorkerExecutionSucceeded(execution: WorkerExecution) {
+  if (execution.ok) {
+    return;
+  }
+
+  throw new AppError(
+    502,
+    "CHAT_EXTRACTOR_WORKER_EXECUTION_FAILED",
+    formatWorkerExecutionFailure(execution),
+    {
+      pipelineRunId: execution.pipelineRunId,
+      exitCode: execution.exitCode,
+      stdout: execution.stdout,
+      stderr: execution.stderr
+    }
+  );
+}
+
+function formatWorkerExecutionFailure(execution: WorkerExecution) {
+  const parts = [`worker exited with code ${execution.exitCode}`];
+  if (execution.stderr) {
+    parts.push(`stderr: ${compactPayload(execution.stderr)}`);
+  }
+  if (execution.stdout) {
+    parts.push(`stdout: ${compactPayload(execution.stdout)}`);
+  }
+  return parts.join("; ");
 }

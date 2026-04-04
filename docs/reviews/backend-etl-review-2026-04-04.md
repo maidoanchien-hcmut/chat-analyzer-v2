@@ -4,6 +4,8 @@ Ngày review: `2026-04-04`
 
 Cập nhật lần 2: đã review lại backend sau các thay đổi mới trong `chat_extractor` và `go-worker`.
 
+Cập nhật lần 3: review tiếp sau khi các fix ở lần 2 đã được áp dụng và có thêm test.
+
 Scope:
 
 - Chỉ review `backend/` và `backend/go-worker/`
@@ -13,9 +15,68 @@ Scope:
 
 ## Open Findings
 
-Không còn finding mở trong scope review này sau lượt sửa ngày `2026-04-04`.
+- Không còn finding mở trong scope review này.
 
 ## Resolved Findings
+
+### [RESOLVED] Worker exit code khác `0` không còn bị control-plane coi như execute thành công
+
+Trạng thái cũ:
+
+- `runWorkerManifest()` chỉ trả `ok: false` khi process exit non-zero, không throw.
+- `executeJobRequest()` chỉ abort execution khi `runWorkerImpl()` throw.
+- Vì vậy worker exit `1` có thể vẫn bị collect vào `executions[]` và request backend vẫn trả thành công.
+
+Trạng thái hiện tại:
+
+- `executeJobRequest()` validate kết quả từ worker sau mỗi lần spawn.
+- Nếu worker trả `ok: false`, service throw fail-closed với exit code/stdout/stderr compact.
+- Path này đi qua cùng abort logic như worker throw, nên current run và queued sibling được mark `failed` nhất quán.
+
+Code refs:
+
+- `backend/src/modules/chat_extractor/chat_extractor.service.ts`
+- `backend/src/modules/chat_extractor/chat_extractor.service.test.ts`
+
+### [RESOLVED] Race theo `promptVersion` không còn khi hai compiled prompt hash mới được tạo đồng thời trên cùng page
+
+Trạng thái cũ:
+
+- Fix cũ chỉ absorb unique-conflict theo `(connected_page_id, compiled_prompt_hash)`.
+- `promptVersion` vẫn được chọn ở caller bằng `nextPromptVersion(listPromptIdentities(...))` trước khi insert.
+- Hai request concurrent tạo hai hash khác nhau trên cùng page vẫn có thể cùng chọn một `promptVersion` mới và một request fail ở unique `(connected_page_id, prompt_version)`.
+
+Trạng thái hiện tại:
+
+- Repository serialize path create prompt identity theo page trong transaction có lock trên `connected_page`.
+- Việc resolve existing hash, đọc các version đã có, chọn `nextPromptVersion(...)` và insert mới giờ chạy trong cùng critical section.
+- Service không còn tự cấp `promptVersion` trước khi persist; repository là owner của version allocation.
+
+Code refs:
+
+- `backend/src/modules/chat_extractor/chat_extractor.repository.ts`
+- `backend/src/modules/chat_extractor/chat_extractor.repository.test.ts`
+- `backend/src/modules/chat_extractor/chat_extractor.service.ts`
+
+### [RESOLVED] `pipeline_run_group.started_at` và `finished_at` không còn phụ thuộc order query DB
+
+Trạng thái cũ:
+
+- `refreshRunGroupStatus()` fetch child runs theo `runGroupId` nhưng không sort.
+- `startedAt` lấy `runs.find(...)`
+- `finishedAt` lấy `reverse().find(...)`
+- Hai giá trị này phụ thuộc vào order trả về của DB.
+
+Trạng thái hiện tại:
+
+- `refreshRunGroupStatus()` derive `startedAt` theo minimum non-null `started_at`.
+- `finishedAt` derive theo maximum non-null `finished_at`.
+- Metadata ở `pipeline_run_group` giờ ổn định kể cả khi DB trả child runs theo thứ tự bất kỳ.
+
+Code refs:
+
+- `backend/src/modules/chat_extractor/chat_extractor.repository.ts`
+- `backend/src/modules/chat_extractor/chat_extractor.repository.test.ts`
 
 ### [RESOLVED] `executeJobRequest()` không còn để run/group mới tạo bị kẹt ở `queued` khi worker throw trước lúc worker kịp update state
 
@@ -214,8 +275,10 @@ Kết quả:
 - `official_daily` path và preview child snapshot fields đã có test ở:
   - `backend/src/modules/chat_extractor/chat_extractor.service.test.ts`
 - Các finding vừa resolve hiện đã có test cover trực tiếp cho:
+  - worker non-zero exit làm abort/fail state thay vì trả execute thành công
   - worker spawn failure làm abort/fail state thay vì stale `queued`
   - register idempotency với page flags
   - concurrent prompt identity creation
+  - run-group timestamp derive theo min/max thay vì order query
   - deterministic tie-break của entry source
   - health degradation khi Postgres lỗi

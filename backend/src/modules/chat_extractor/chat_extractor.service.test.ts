@@ -190,6 +190,61 @@ describe("chat_extractor service", () => {
     expect(abortedExecutions[0]?.errorText).toContain("spawn worker failed");
     expect(refreshedRunGroupIds).toEqual([capturedCreateRunGroupInput.runGroupId]);
   });
+
+  it("treats non-zero worker exit as a failed execution and aborts the run group", async () => {
+    const { executeJobBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    const pageDetail = createConnectedPageDetail();
+    const promptIdentity = createPromptIdentity();
+    let capturedCreateRunGroupInput: any;
+    const abortedExecutions: Array<{ runGroupId: string; failedRunId: string; errorText: string }> = [];
+    const refreshedRunGroupIds: string[] = [];
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => pageDetail);
+    patchRepository(repositoryModule.chatExtractorRepository, "getPromptIdentityByHash", async () => promptIdentity);
+    patchRepository(repositoryModule.chatExtractorRepository, "createRunGroupWithRuns", async (input: unknown) => {
+      capturedCreateRunGroupInput = input;
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "markRunExecutionStarted", async () => {});
+    patchRepository(repositoryModule.chatExtractorRepository, "abortRunGroupExecution", async (
+      runGroupId: string,
+      failedRunId: string,
+      errorText: string
+    ) => {
+      abortedExecutions.push({ runGroupId, failedRunId, errorText });
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "refreshRunGroupStatus", async (runGroupId: string) => {
+      refreshedRunGroupIds.push(runGroupId);
+    });
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      runWorker: async (manifest) => ({
+        pipelineRunId: manifest.pipeline_run_id,
+        exitCode: 1,
+        ok: false,
+        stdout: "worker stdout",
+        stderr: "worker stderr"
+      })
+    });
+    const parsed = executeJobBodySchema.parse({
+      kind: "official_daily",
+      connected_page_id: CONNECTED_PAGE_ID,
+      job: {
+        processing_mode: "etl_only",
+        target_date: "2026-04-03"
+      }
+    });
+
+    await expect(service.executeJobRequest(parsed as never)).rejects.toThrow("worker exited with code 1");
+
+    expect(abortedExecutions).toHaveLength(1);
+    expect(abortedExecutions[0]?.runGroupId).toBe(capturedCreateRunGroupInput.runGroupId);
+    expect(abortedExecutions[0]?.failedRunId).toBe(capturedCreateRunGroupInput.childRuns[0].id);
+    expect(abortedExecutions[0]?.errorText).toContain("worker exited with code 1");
+    expect(abortedExecutions[0]?.errorText).toContain("worker stderr");
+    expect(refreshedRunGroupIds).toEqual([capturedCreateRunGroupInput.runGroupId]);
+  });
 });
 
 async function loadChatExtractorTypes() {
