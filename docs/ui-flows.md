@@ -81,9 +81,8 @@ Mặc định sẽ hiển thị các thông số trạng thái và config của 
 5. Chọn số N conversation initial.
 6. Bấm lấy thông tin.
 7. Hệ thống chạy fetch conversation + message và lấy về các giá trị cần chỉnh phục vụ cho tự động hoá sau này. Khoảng dữ liệu lấy là từ 0h ngày bấm chạy đến thời điểm chạy. Lấy N conversation và tất cả message của ngày đó, khoảng `[0:00 - now)`. Những dữ liệu này là runtime để config, không lưu vào db.
-8. Dev chỉnh các thông số và prompt:
-   8.1. Tag classification phải có giao diện dễ dùng, cho phép thêm phân loại tag (staff_name, customer_type, location, etc.), cho phép map giá trị tag vào mỗi kiểu, một tag chỉ được thuộc 1 kiểu. Giao diện phải cho phép map nhanh chóng, dễ dàng.
+8. Dev chỉnh các thông số và prompt, tối thiểu có 2 thứ:
+   8.1. Tag classification phải có giao diện dễ dùng, cho phép thêm phân loại tag (staff_name, customer_type, location, etc.), cho phép map giá trị tag vào mỗi kiểu, một tag chỉ được thuộc 1 kiểu. Giao diện phải cho phép map nhanh chóng, dễ dàng. Phải có cách chuẩn hoá hoặc validate. Ví dụ: không thể để phân loại tag vô nghĩa như là 'abcd' được.
    8.2. Prompt phải có sẵn placeholder dùng như thật. Có tính năng clone lại prompt cũ, prompt của các trang khác để chỉnh sửa nhanh. Có tính năng test prompt với dữ liệu runtime đã lấy ở bước 7, xem kết quả structured output theo schema đã pin ngay trên giao diện để chỉnh sửa thêm.
-   8.3. Chỉnh opening block là cho phép chỉnh sửa từ đâu đến đâu được xác định là opening block. Opening block khởi tạo ban đầu bằng cách cắt block tới first_meaningful_human_message, và dev có thể chỉnh sửa lại nếu thấy không hợp lý.
 9. Chạy analysis trên mẫu dữ liệu nhỏ này để xem kết quả của AI và tinh chỉnh thêm thông số. Hoặc bấm thêm trang, hệ thống sẽ thêm trang vào db, lưu tất cả những thứ cần thiết và đưa trang vào vận hành.
 10. Hiện đã thêm thành công.

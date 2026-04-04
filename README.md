@@ -152,4 +152,4 @@ bun run dev
 
 - Repo standalone hiện không có đăng nhập, refresh session, role hay permission.
 - Các bảng auth cũ đã bị loại khỏi Prisma schema; dữ liệu `chat-extractor` là trọng tâm runtime hiện tại.
-- `service/` đã là seam-owner cho phần prompt system của AI; backend giữ profile/prompt template và freeze runtime snapshot theo run.
+- `service/` đã là owner cho phần prompt system của AI; backend giữ profile/prompt template và freeze runtime snapshot theo run.
