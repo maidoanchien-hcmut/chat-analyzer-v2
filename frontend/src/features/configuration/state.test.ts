@@ -62,14 +62,116 @@ describe("configuration workflow", () => {
     expect(html).not.toContain("schedulerJson");
     expect(html).not.toContain("notificationTargetsJson");
   });
+
+  it("renders prompt compare audit metadata instead of only showing prompt text", () => {
+    const configuration = createConfigurationState();
+    const onboarding = createOnboardingState();
+
+    const html = renderConfiguration(configuration, onboarding);
+
+    expect(html).toContain("Prompt A12");
+    expect(html).toContain("sha256:prompt-a12");
+    expect(html).toContain("Evidence bundle");
+    expect(html).toContain("Opening block = Khách hàng tái khám");
+    expect(html).toContain("Field explanations");
+    expect(html).toContain("risk_level");
+  });
 });
 
 function createConfigurationState(): ConfigurationState {
   return {
     activeTab: "prompt-profile",
-    connectedPages: [],
+    connectedPages: [
+      {
+        id: "cp-101",
+        pageName: "Page Da Lieu Quan 1",
+        pancakePageId: "pk_101",
+        businessTimezone: "Asia/Ho_Chi_Minh",
+        etlEnabled: true,
+        analysisEnabled: false,
+        activeConfigVersionId: "cfg-18",
+        updatedAt: "2026-04-04T09:00:00.000Z"
+      }
+    ],
     selectedPageId: "",
-    pageDetail: null,
+    pageDetail: {
+      id: "cp-101",
+      pageName: "Page Da Lieu Quan 1",
+      pancakePageId: "pk_101",
+      businessTimezone: "Asia/Ho_Chi_Minh",
+      etlEnabled: true,
+      analysisEnabled: false,
+      activeConfigVersionId: "cfg-18",
+      updatedAt: "2026-04-04T09:00:00.000Z",
+      configVersions: [
+        {
+          id: "cfg-18",
+          versionNo: 18,
+          promptText: "Prompt active có rubric risk cho khách tái khám.",
+          tagMappingJson: { version: 1, entries: [] },
+          openingRulesJson: { version: 1, selectors: [] },
+          schedulerJson: null,
+          notificationTargetsJson: null,
+          notes: null,
+          analysisTaxonomyVersionId: "tax-2026-04",
+          analysisTaxonomyVersionCode: "tax-2026-04",
+          createdAt: "2026-04-04T09:00:00.000Z",
+          promptVersionLabel: "Prompt A12",
+          promptHash: "sha256:prompt-a12",
+          evidenceBundle: [
+            "Opening block = Khách hàng tái khám",
+            "Khách yêu cầu dời lịch sang chiều mai"
+          ],
+          fieldExplanations: [
+            { field: "risk_level", explanation: "Khách có nhu cầu rõ nhưng staff phản hồi chậm." }
+          ]
+        },
+        {
+          id: "cfg-17",
+          versionNo: 17,
+          promptText: "Prompt cũ ưu tiên outcome booked.",
+          tagMappingJson: { version: 1, entries: [] },
+          openingRulesJson: { version: 1, selectors: [] },
+          schedulerJson: null,
+          notificationTargetsJson: null,
+          notes: null,
+          analysisTaxonomyVersionId: "tax-2026-03",
+          analysisTaxonomyVersionCode: "tax-2026-03",
+          createdAt: "2026-04-03T09:00:00.000Z",
+          promptVersionLabel: "Prompt A10",
+          promptHash: "sha256:prompt-a10",
+          evidenceBundle: [
+            "Khách hỏi giá dịch vụ",
+            "Staff báo giá nhưng chưa chốt lịch"
+          ],
+          fieldExplanations: [
+            { field: "outcome", explanation: "Prompt cũ nghiêng về booked khi khách hỏi slot rõ ràng." }
+          ]
+        }
+      ],
+      activeConfigVersion: {
+        id: "cfg-18",
+        versionNo: 18,
+        promptText: "Prompt active có rubric risk cho khách tái khám.",
+        tagMappingJson: { version: 1, entries: [] },
+        openingRulesJson: { version: 1, selectors: [] },
+        schedulerJson: null,
+        notificationTargetsJson: null,
+        notes: null,
+        analysisTaxonomyVersionId: "tax-2026-04",
+        analysisTaxonomyVersionCode: "tax-2026-04",
+        createdAt: "2026-04-04T09:00:00.000Z",
+        promptVersionLabel: "Prompt A12",
+        promptHash: "sha256:prompt-a12",
+        evidenceBundle: [
+          "Opening block = Khách hàng tái khám",
+          "Khách yêu cầu dời lịch sang chiều mai"
+        ],
+        fieldExplanations: [
+          { field: "risk_level", explanation: "Khách có nhu cầu rõ nhưng staff phản hồi chậm." }
+        ]
+      }
+    },
     selectedConfigVersionId: "",
     promptText: "Prompt sample",
     tagMappings: [],
@@ -83,8 +185,8 @@ function createConfigurationState(): ConfigurationState {
     promptPreview: null,
     promptCloneSourceVersionId: "",
     promptCloneSourcePageId: "",
-    promptCompareLeftVersionId: "",
-    promptCompareRightVersionId: ""
+    promptCompareLeftVersionId: "cfg-18",
+    promptCompareRightVersionId: "cfg-17"
   };
 }
 

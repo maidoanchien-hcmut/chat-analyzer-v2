@@ -76,6 +76,9 @@ describe("frontend smoke", () => {
 
     const runDetail = await adapter.getRun("run-201");
     expect(runDetail.threadDayCount).toBe(42);
+    expect(runDetail.run.historicalOverwrite?.replacedSnapshotLabel).toBe("Snapshot official 2026-04-03");
+    expect(runDetail.run.historicalOverwrite?.previousPromptVersion).toBe("Prompt A10");
+    expect(runDetail.run.historicalOverwrite?.nextPromptVersion).toBe("Prompt A12");
 
     const published = await adapter.publishRun("run-201", {
       publishAs: "official",
@@ -127,6 +130,18 @@ describe("frontend smoke", () => {
     const history = await adapter.getThreadHistory(filters, null, "analysis-history");
     expect(history.threads.every((thread) => !thread.id.includes("thread_day"))).toBe(true);
     expect(history.analysisHistory.length).toBeGreaterThan(0);
+
+    const filteredHistory = await adapter.getThreadHistory(
+      {
+        ...filters,
+        pageId: "page-b",
+        revisit: "revisit",
+        staff: "linh"
+      },
+      null,
+      "conversation"
+    );
+    expect(filteredHistory.threads.map((thread) => thread.id)).toEqual(["t-1004"]);
   });
 });
 
@@ -259,7 +274,15 @@ function buildConfig(id: string) {
     notes: null,
     analysisTaxonomyVersionId: "tax-2026-04",
     analysisTaxonomyVersion: { versionCode: "tax-2026-04" },
-    createdAt: "2026-04-04T09:00:00.000Z"
+    createdAt: "2026-04-04T09:00:00.000Z",
+    promptVersionLabel: id === "cfg-18" ? "Prompt A12" : "Prompt A10",
+    promptHash: id === "cfg-18" ? "sha256:prompt-a12" : "sha256:prompt-a10",
+    evidenceBundle: id === "cfg-18"
+      ? ["Opening block = Khách hàng tái khám", "Khách yêu cầu dời lịch sang chiều mai"]
+      : ["Khách hỏi giá dịch vụ", "Staff báo giá nhưng chưa chốt lịch"],
+    fieldExplanations: id === "cfg-18"
+      ? [{ field: "risk_level", explanation: "Khách có nhu cầu rõ nhưng staff phản hồi chậm." }]
+      : [{ field: "outcome", explanation: "Prompt cũ nghiêng về booked khi khách hỏi slot rõ ràng." }]
   };
 }
 
@@ -273,6 +296,15 @@ function buildRun(publishState: string) {
     window_start_at: "2026-04-03T00:00:00.000Z",
     window_end_exclusive_at: "2026-04-04T00:00:00.000Z",
     supersedes_run_id: "run-155",
+    historical_overwrite: {
+      replaced_run_id: "run-155",
+      replaced_snapshot_label: "Snapshot official 2026-04-03",
+      previous_prompt_version: "Prompt A10",
+      previous_config_version: "v17",
+      next_prompt_version: "Prompt A12",
+      next_config_version: "v18",
+      export_impact: "Export .xlsx của ngày này sẽ regenerate theo snapshot mới."
+    },
     published_at: publishState === "draft" ? null : "2026-04-04T10:05:00.000Z"
   };
 }

@@ -255,6 +255,23 @@ export class FrontendApp {
         await this.listFromToken(form);
       } else if (form.dataset.form === "onboarding-register") {
         await this.registerPage(form);
+      } else if (form.dataset.form === "page-comparison-filters") {
+        if (!this.catalog) {
+          throw new Error("Catalog chưa sẵn sàng để chọn page compare.");
+        }
+        const data = new FormData(form);
+        const slicePreset = String(data.get("slicePreset") ?? this.route.filters.slicePreset) as BusinessFilters["slicePreset"];
+        this.route = applyBusinessFilters({
+          ...this.route,
+          comparePageIds: normalizeComparePageIds(data.getAll("comparePageIds").map(String), this.catalog.pages)
+        }, {
+          slicePreset,
+          startDate: String(data.get("startDate") ?? this.route.filters.startDate),
+          endDate: String(data.get("endDate") ?? this.route.filters.endDate),
+          publishSnapshot: String(data.get("publishSnapshot") ?? this.route.filters.publishSnapshot) as BusinessFilters["publishSnapshot"]
+        });
+        window.history.replaceState({}, "", `?${serializeRouteState(this.route)}`);
+        await this.loadCurrentView();
       } else if (form.dataset.form === "configuration-load-page") {
         await this.loadConnectedPage(form);
       } else if (form.dataset.form === "configuration-create") {
@@ -291,6 +308,23 @@ export class FrontendApp {
           outcome: String(data.get("outcome") ?? this.route.filters.outcome),
           risk: String(data.get("risk") ?? this.route.filters.risk),
           staff: String(data.get("staff") ?? this.route.filters.staff)
+        });
+        window.history.replaceState({}, "", `?${serializeRouteState(this.route)}`);
+        await this.loadCurrentView();
+      } else if (form.dataset.form === "page-comparison-filters") {
+        if (!this.catalog) {
+          return;
+        }
+        const data = new FormData(form);
+        const slicePreset = String(data.get("slicePreset") ?? this.route.filters.slicePreset) as BusinessFilters["slicePreset"];
+        this.route = applyBusinessFilters({
+          ...this.route,
+          comparePageIds: normalizeComparePageIds(data.getAll("comparePageIds").map(String), this.catalog.pages)
+        }, {
+          slicePreset,
+          startDate: String(data.get("startDate") ?? this.route.filters.startDate),
+          endDate: String(data.get("endDate") ?? this.route.filters.endDate),
+          publishSnapshot: String(data.get("publishSnapshot") ?? this.route.filters.publishSnapshot) as BusinessFilters["publishSnapshot"]
         });
         window.history.replaceState({}, "", `?${serializeRouteState(this.route)}`);
         await this.loadCurrentView();
@@ -337,7 +371,18 @@ export class FrontendApp {
       return;
     }
     if (this.route.view === "page-comparison") {
-      this.currentViewHtml = renderPageComparison(await this.businessAdapter.getPageComparison(this.route.filters, this.route.comparePageIds));
+      const comparePageIds = normalizeComparePageIds(this.route.comparePageIds, this.catalog.pages);
+      this.currentViewHtml = renderPageComparison(
+        await this.businessAdapter.getPageComparison(this.route.filters, comparePageIds),
+        {
+          pages: this.catalog.pages,
+          comparePageIds,
+          slicePreset: this.route.filters.slicePreset,
+          startDate: this.route.filters.startDate,
+          endDate: this.route.filters.endDate,
+          publishSnapshot: this.route.filters.publishSnapshot
+        }
+      );
       return;
     }
     this.configuration.activeTab = this.route.configurationTab;
@@ -539,6 +584,9 @@ export class FrontendApp {
     if (run.supersedesRunId && !this.operations.confirmHistoricalOverwrite) {
       throw new Error("Historical overwrite yêu cầu xác nhận rõ trước khi publish.");
     }
+    if (run.supersedesRunId && !run.historicalOverwrite) {
+      throw new Error("Thiếu metadata snapshot cũ/mới cho historical overwrite. Tải lại run detail hoặc run group từ backend trước khi publish.");
+    }
     await this.withPending("publish-run", async () => {
       this.operations.publishAs = publishAs;
       this.operations.runDetail = await this.controlPlaneAdapter.publishRun(runId, {
@@ -613,7 +661,9 @@ export class FrontendApp {
       this.root.innerHTML = "<div class='app-loading'>Đang khởi tạo frontend...</div>";
       return;
     }
-    const filterBar = this.route.view === "operations" || this.route.view === "configuration" ? "" : renderFilterBar(this.catalog, this.route);
+    const filterBar = this.route.view === "operations" || this.route.view === "configuration" || this.route.view === "page-comparison"
+      ? ""
+      : renderFilterBar(this.catalog, this.route);
     const exportUtility = this.route.utilityPanel === "export"
       ? renderExportWorkflow(this.exportWorkflow, this.catalog.pages, `?view=${this.route.view}&utility=none`)
       : "";
@@ -800,4 +850,18 @@ function zipNotificationTargets(channels: FormDataEntryValue[], values: FormData
     channel: String(channels[index] ?? "telegram"),
     value: String(values[index] ?? "")
   }));
+}
+
+function normalizeComparePageIds(comparePageIds: string[], pages: Array<{ id: string }>) {
+  const availablePageIds = pages.map((page) => page.id);
+  const uniqueSelected = [...new Set(comparePageIds.filter((pageId) => availablePageIds.includes(pageId)))];
+
+  if (uniqueSelected.length >= 2 || availablePageIds.length < 2) {
+    return uniqueSelected;
+  }
+  if (uniqueSelected.length === 1) {
+    const fallbackPageId = availablePageIds.find((pageId) => pageId !== uniqueSelected[0]);
+    return fallbackPageId ? [uniqueSelected[0], fallbackPageId] : uniqueSelected;
+  }
+  return availablePageIds.slice(0, 2);
 }

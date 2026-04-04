@@ -125,7 +125,23 @@ export function renderOperations(state: OperationsState) {
               </div>
               <p class="muted-copy">${escapeHtml(publishAction.helperText)}</p>
             ` : "<p class='muted-copy'>Tải run group hoặc run detail trước khi publish để UI xác định eligibility.</p>"}
-            ${selectedRun?.supersedesRunId ? `<div class="banner banner-warning"><strong>Historical overwrite</strong><p>Snapshot official của ngày ${escapeHtml(selectedRun.targetDate)} sẽ ghi đè run ${escapeHtml(selectedRun.supersedesRunId)}. Export .xlsx của ngày này sẽ được regenerate theo snapshot mới.</p></div>` : ""}
+            ${selectedRun?.historicalOverwrite
+              ? `
+                <div class="banner banner-warning">
+                  <strong>Historical overwrite</strong>
+                  <p>${escapeHtml(selectedRun.historicalOverwrite.replacedSnapshotLabel)} sẽ ghi đè run ${escapeHtml(selectedRun.historicalOverwrite.replacedRunId)}.</p>
+                  <div class="meta-list">
+                    <span>Prompt cũ: ${escapeHtml(selectedRun.historicalOverwrite.previousPromptVersion)}</span>
+                    <span>Prompt mới: ${escapeHtml(selectedRun.historicalOverwrite.nextPromptVersion)}</span>
+                    <span>Config cũ: ${escapeHtml(selectedRun.historicalOverwrite.previousConfigVersion)}</span>
+                    <span>Config mới: ${escapeHtml(selectedRun.historicalOverwrite.nextConfigVersion)}</span>
+                  </div>
+                  <p>${escapeHtml(selectedRun.historicalOverwrite.exportImpact)}</p>
+                </div>
+              `
+              : selectedRun?.supersedesRunId
+                ? `<div class="banner banner-warning"><strong>Historical overwrite</strong><p>Snapshot official của ngày ${escapeHtml(selectedRun.targetDate)} sẽ ghi đè run ${escapeHtml(selectedRun.supersedesRunId)}. Cần tải metadata overwrite đầy đủ trước khi operator confirm publish lịch sử.</p></div>`
+                : ""}
             <button type="button" data-action="publish-run" ${publishAction?.canPublish ? "" : "disabled"}>${escapeHtml(publishAction?.label ?? "Publish")}</button>
           </form>
         </article>

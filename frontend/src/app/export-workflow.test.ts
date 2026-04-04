@@ -41,7 +41,20 @@ describe("export workflow", () => {
     expect(renderOverview(await adapter.getOverview(filters))).not.toContain("Xuất .xlsx");
     expect(renderExploration(await adapter.getExploration(filters))).not.toContain("Xuất .xlsx");
     expect(renderStaffPerformance(await adapter.getStaffPerformance(filters))).not.toContain("Xuất .xlsx");
-    expect(renderPageComparison(await adapter.getPageComparison(filters, ["page-a", "page-b"]))).not.toContain("Xuất .xlsx");
+    expect(renderPageComparison(
+      await adapter.getPageComparison(filters, ["page-a", "page-b"]),
+      {
+        pages: [
+          { id: "page-a", label: "Page Da Liễu Quận 1", pancakePageId: "pk_101", timezone: "Asia/Ho_Chi_Minh" },
+          { id: "page-b", label: "Page Nha Khoa Thủ Đức", pancakePageId: "pk_202", timezone: "Asia/Ho_Chi_Minh" }
+        ],
+        comparePageIds: ["page-a", "page-b"],
+        slicePreset: filters.slicePreset,
+        startDate: filters.startDate,
+        endDate: filters.endDate,
+        publishSnapshot: filters.publishSnapshot
+      }
+    )).not.toContain("Xuất .xlsx");
   });
 
   it("builds export data from explicit page and date input and skips missing official dates", async () => {

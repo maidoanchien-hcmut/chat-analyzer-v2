@@ -220,54 +220,41 @@ function buildStaff(filters: BusinessFilters): StaffPerformanceViewModel {
 }
 
 function buildThreadHistory(
-  _filters: BusinessFilters,
+  filters: BusinessFilters,
   threadId: string | null,
   tab: ThreadHistoryViewModel["activeTab"]
 ): ThreadHistoryViewModel {
-  const activeThreadId = threadId ?? "t-1001";
+  const scopedThreads = threadFixtures.filter((thread) => matchesThreadFilters(thread, filters));
+  const activeThread = scopedThreads.find((thread) => thread.id === threadId) ?? scopedThreads[0] ?? threadFixtures[0];
+  const activeThreadId = activeThread?.id ?? "";
+
   return {
     warning: null,
-    threads: [
-      { id: "t-1001", customer: "Lan Anh", snippet: "Em muốn đặt lịch treatment mụn tuần này", updatedAt: "2026-04-03T10:20:00+07:00", badges: ["Inbox mới", "Risk thấp"] },
-      { id: "t-1002", customer: "Phương Thảo", snippet: "Cho em hỏi giá liệu trình 6 buổi", updatedAt: "2026-04-03T09:40:00+07:00", badges: ["Inbox mới", "Risk cao"] },
-      { id: "t-1004", customer: "Bảo Trâm", snippet: "Em tái khám và cần dời lịch", updatedAt: "2026-04-03T08:10:00+07:00", badges: ["Tái khám", "Risk trung bình"] }
-    ],
+    threads: scopedThreads.map((thread) => ({
+      id: thread.id,
+      customer: thread.customer,
+      snippet: thread.snippet,
+      updatedAt: thread.updatedAt,
+      badges: thread.badges
+    })),
     activeThreadId,
     activeTab: tab,
-    transcript: [
-      { at: "08:02", author: "Bot", role: "system", text: "Khách chọn nút Khách hàng tái khám", emphasized: true },
-      { at: "08:03", author: "Bảo Trâm", role: "customer", text: "Em muốn dời lịch tái khám sang chiều mai", emphasized: true },
-      { at: "08:17", author: "Linh", role: "staff", text: "Chị giúp em kiểm tra slot chiều mai, em chờ chị chút nhé", emphasized: true },
-      { at: "08:32", author: "Linh", role: "staff", text: "Chiều mai còn 15:00 và 16:30, em chọn giúp chị nhé" }
-    ],
-    analysisHistory: [
-      { date: "2026-04-03", openingTheme: "Dời lịch tái khám", need: "Đặt lịch", outcome: "Đang theo dõi", mood: "Trung tính", risk: "Trung bình", quality: "Cần cải thiện", aiCost: "6.400 đ" },
-      { date: "2026-04-01", openingTheme: "Báo tiến độ điều trị", need: "Tư vấn chuyên sâu", outcome: "Đang theo dõi", mood: "Tích cực", risk: "Thấp", quality: "Tốt", aiCost: "5.800 đ" }
-    ],
-    audit: {
+    transcript: activeThread?.transcript ?? [],
+    analysisHistory: activeThread?.analysisHistory ?? [],
+    audit: activeThread?.audit ?? {
       model: "gpt-5.4-mini",
       promptVersion: "Prompt A12",
       promptHash: "sha256:prompt-a12",
       taxonomyVersion: "tax-2026-04",
-      evidence: [
-        "Opening selection = Khách hàng tái khám",
-        "Khách yêu cầu dời lịch sang chiều mai",
-        "Staff phản hồi sau 14 phút"
-      ],
-      explanations: [
-        { field: "journey", explanation: "Explicit opening selection xác nhận đây là tái khám." },
-        { field: "response_quality", explanation: "Staff có xử lý nhưng chậm xác nhận slot cụ thể." }
-      ],
-      supportingMessageIds: ["m-100", "m-101", "m-102"]
+      evidence: [],
+      explanations: [],
+      supportingMessageIds: []
     },
-    crmLink: {
-      customer: "CRM #KH-8821 / Bảo Trâm",
+    crmLink: activeThread?.crmLink ?? {
+      customer: "Chưa có thread trong scope filter",
       method: "deterministic",
-      confidence: "0.98",
-      history: [
-        "Matched qua recent_phone_numbers 09xx",
-        "Không có quyết định manual override"
-      ]
+      confidence: "0.00",
+      history: ["Điều chỉnh filter để xem thread phù hợp."]
     }
   };
 }
@@ -414,4 +401,232 @@ function summarizeVersions(values: string[]) {
     return values[0] ?? "";
   }
   return values.join(", ");
+}
+
+type ThreadFixture = {
+  id: string;
+  pageId: string;
+  customer: string;
+  snippet: string;
+  updatedAt: string;
+  inboxBucket: "new" | "old";
+  revisit: boolean;
+  need: string;
+  outcome: string;
+  risk: string;
+  staff: string;
+  badges: string[];
+  transcript: ThreadHistoryViewModel["transcript"];
+  analysisHistory: ThreadHistoryViewModel["analysisHistory"];
+  audit: ThreadHistoryViewModel["audit"];
+  crmLink: ThreadHistoryViewModel["crmLink"];
+};
+
+const threadFixtures: ThreadFixture[] = [
+  {
+    id: "t-1001",
+    pageId: "page-a",
+    customer: "Lan Anh",
+    snippet: "Em muốn đặt lịch treatment mụn tuần này",
+    updatedAt: "2026-04-03T10:20:00+07:00",
+    inboxBucket: "new",
+    revisit: false,
+    need: "dat_lich",
+    outcome: "booked",
+    risk: "low",
+    staff: "mai",
+    badges: ["Inbox mới", "Risk thấp"],
+    transcript: [
+      { at: "10:03", author: "Lan Anh", role: "customer", text: "Em muốn đặt lịch treatment mụn tuần này", emphasized: true },
+      { at: "10:08", author: "Mai", role: "staff", text: "Chiều thứ 5 còn 16:00, em xác nhận giúp chị nhé." }
+    ],
+    analysisHistory: [
+      { date: "2026-04-03", openingTheme: "Đặt lịch treatment", need: "Đặt lịch", outcome: "Đã chốt hẹn", mood: "Tích cực", risk: "Thấp", quality: "Tốt", aiCost: "4.100 đ" }
+    ],
+    audit: {
+      model: "gpt-5.4-mini",
+      promptVersion: "Prompt A12",
+      promptHash: "sha256:prompt-a12",
+      taxonomyVersion: "tax-2026-04",
+      evidence: [
+        "Khách yêu cầu slot trong tuần",
+        "Staff đề xuất slot cụ thể"
+      ],
+      explanations: [
+        { field: "outcome", explanation: "Có xác nhận slot cụ thể trong cùng nhịp trao đổi." }
+      ],
+      supportingMessageIds: ["m-001", "m-002"]
+    },
+    crmLink: {
+      customer: "CRM #KH-7712 / Lan Anh",
+      method: "deterministic",
+      confidence: "0.97",
+      history: ["Matched qua số điện thoại gần nhất"]
+    }
+  },
+  {
+    id: "t-1002",
+    pageId: "page-a",
+    customer: "Phương Thảo",
+    snippet: "Cho em hỏi giá liệu trình 6 buổi",
+    updatedAt: "2026-04-03T09:40:00+07:00",
+    inboxBucket: "new",
+    revisit: false,
+    need: "hoi_gia",
+    outcome: "pending",
+    risk: "high",
+    staff: "mai",
+    badges: ["Inbox mới", "Risk cao"],
+    transcript: [
+      { at: "09:12", author: "Phương Thảo", role: "customer", text: "Cho em hỏi giá liệu trình 6 buổi", emphasized: true },
+      { at: "09:26", author: "Mai", role: "staff", text: "Combo hiện tại là 5.900.000 đ, chị gửi em chi tiết liệu trình nhé." }
+    ],
+    analysisHistory: [
+      { date: "2026-04-03", openingTheme: "Hỏi giá dịch vụ", need: "Hỏi giá", outcome: "Đang theo dõi", mood: "Trung tính", risk: "Cao", quality: "Cần cải thiện", aiCost: "5.900 đ" }
+    ],
+    audit: {
+      model: "gpt-5.4-mini",
+      promptVersion: "Prompt A12",
+      promptHash: "sha256:prompt-a12",
+      taxonomyVersion: "tax-2026-04",
+      evidence: [
+        "Khách hỏi giá gói 6 buổi",
+        "Staff chưa đưa CTA chốt lịch"
+      ],
+      explanations: [
+        { field: "risk_level", explanation: "Khách có ý định rõ nhưng chưa được chốt bước kế tiếp." }
+      ],
+      supportingMessageIds: ["m-010", "m-011"]
+    },
+    crmLink: {
+      customer: "CRM #KH-9910 / Phương Thảo",
+      method: "deterministic",
+      confidence: "0.92",
+      history: ["Matched qua lịch sử hỏi giá gần nhất"]
+    }
+  },
+  {
+    id: "t-1004",
+    pageId: "page-b",
+    customer: "Bảo Trâm",
+    snippet: "Em tái khám và cần dời lịch",
+    updatedAt: "2026-04-03T08:10:00+07:00",
+    inboxBucket: "old",
+    revisit: true,
+    need: "dat_lich",
+    outcome: "pending",
+    risk: "medium",
+    staff: "linh",
+    badges: ["Tái khám", "Risk trung bình"],
+    transcript: [
+      { at: "08:02", author: "Bot", role: "system", text: "Khách chọn nút Khách hàng tái khám", emphasized: true },
+      { at: "08:03", author: "Bảo Trâm", role: "customer", text: "Em muốn dời lịch tái khám sang chiều mai", emphasized: true },
+      { at: "08:17", author: "Linh", role: "staff", text: "Chị giúp em kiểm tra slot chiều mai, em chờ chị chút nhé", emphasized: true },
+      { at: "08:32", author: "Linh", role: "staff", text: "Chiều mai còn 15:00 và 16:30, em chọn giúp chị nhé" }
+    ],
+    analysisHistory: [
+      { date: "2026-04-03", openingTheme: "Dời lịch tái khám", need: "Đặt lịch", outcome: "Đang theo dõi", mood: "Trung tính", risk: "Trung bình", quality: "Cần cải thiện", aiCost: "6.400 đ" },
+      { date: "2026-04-01", openingTheme: "Báo tiến độ điều trị", need: "Tư vấn chuyên sâu", outcome: "Đang theo dõi", mood: "Tích cực", risk: "Thấp", quality: "Tốt", aiCost: "5.800 đ" }
+    ],
+    audit: {
+      model: "gpt-5.4-mini",
+      promptVersion: "Prompt A12",
+      promptHash: "sha256:prompt-a12",
+      taxonomyVersion: "tax-2026-04",
+      evidence: [
+        "Opening selection = Khách hàng tái khám",
+        "Khách yêu cầu dời lịch sang chiều mai",
+        "Staff phản hồi sau 14 phút"
+      ],
+      explanations: [
+        { field: "journey", explanation: "Explicit opening selection xác nhận đây là tái khám." },
+        { field: "response_quality", explanation: "Staff có xử lý nhưng chậm xác nhận slot cụ thể." }
+      ],
+      supportingMessageIds: ["m-100", "m-101", "m-102"]
+    },
+    crmLink: {
+      customer: "CRM #KH-8821 / Bảo Trâm",
+      method: "deterministic",
+      confidence: "0.98",
+      history: [
+        "Matched qua recent_phone_numbers 09xx",
+        "Không có quyết định manual override"
+      ]
+    }
+  },
+  {
+    id: "t-1005",
+    pageId: "page-b",
+    customer: "Minh Châu",
+    snippet: "Bác sĩ còn nhận tư vấn răng sứ cuối tuần không ạ",
+    updatedAt: "2026-04-02T16:45:00+07:00",
+    inboxBucket: "new",
+    revisit: false,
+    need: "tu_van",
+    outcome: "lost",
+    risk: "high",
+    staff: "khanh",
+    badges: ["Inbox mới", "Risk cao"],
+    transcript: [
+      { at: "16:12", author: "Minh Châu", role: "customer", text: "Bác sĩ còn nhận tư vấn răng sứ cuối tuần không ạ", emphasized: true },
+      { at: "16:41", author: "Khánh", role: "staff", text: "Dạ cuối tuần kín lịch rồi chị, em xin phép báo lại khi có slot trống." }
+    ],
+    analysisHistory: [
+      { date: "2026-04-02", openingTheme: "Tư vấn răng sứ", need: "Tư vấn chuyên sâu", outcome: "Mất cơ hội", mood: "Trung tính", risk: "Cao", quality: "Cần cải thiện", aiCost: "4.900 đ" }
+    ],
+    audit: {
+      model: "gpt-5.4-mini",
+      promptVersion: "Prompt B05",
+      promptHash: "sha256:prompt-b05",
+      taxonomyVersion: "tax-2026-04",
+      evidence: [
+        "Khách hỏi tư vấn cuối tuần",
+        "Staff chưa đề xuất slot thay thế"
+      ],
+      explanations: [
+        { field: "outcome", explanation: "Không có next step thay thế nên opportunity bị mất." }
+      ],
+      supportingMessageIds: ["m-201", "m-202"]
+    },
+    crmLink: {
+      customer: "CRM #KH-7718 / Minh Châu",
+      method: "deterministic",
+      confidence: "0.83",
+      history: ["Matched qua lịch sử tư vấn nha khoa"]
+    }
+  }
+];
+
+function matchesThreadFilters(thread: ThreadFixture, filters: BusinessFilters) {
+  const threadDate = thread.updatedAt.slice(0, 10);
+
+  if (thread.pageId !== filters.pageId) {
+    return false;
+  }
+  if (threadDate < filters.startDate || threadDate > filters.endDate) {
+    return false;
+  }
+  if (filters.inboxBucket !== "all" && thread.inboxBucket !== filters.inboxBucket) {
+    return false;
+  }
+  if (filters.revisit === "revisit" && !thread.revisit) {
+    return false;
+  }
+  if (filters.revisit === "not_revisit" && thread.revisit) {
+    return false;
+  }
+  if (filters.need !== "all" && thread.need !== filters.need) {
+    return false;
+  }
+  if (filters.outcome !== "all" && thread.outcome !== filters.outcome) {
+    return false;
+  }
+  if (filters.risk !== "all" && thread.risk !== filters.risk) {
+    return false;
+  }
+  if (filters.staff !== "all" && thread.staff !== filters.staff) {
+    return false;
+  }
+
+  return true;
 }

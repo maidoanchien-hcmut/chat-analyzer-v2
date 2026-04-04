@@ -21,91 +21,126 @@ Kết quả: đều pass.
 
 ## Findings
 
-### 1. [P1] Export vẫn bị gắn vào từng business view thay vì workflow riêng
+### 1. [resolved] [P1] Export vẫn bị gắn vào từng business view thay vì workflow riêng
 
-- File: `frontend/src/features/overview/render.ts:78`
-- File: `frontend/src/features/exploration/render.ts:25`
-- File: `frontend/src/features/staff-performance/render.ts:57`
-- File: `frontend/src/features/page-comparison/render.ts:13`
-- File: `frontend/src/app/frontend-app.ts:138`
-- Vấn đề:
-  - Bốn business view đều render trực tiếp nút `Xuất .xlsx`.
-  - App controller map action `export-current-view` sang `exportBusinessWorkbook(this.route.view, this.currentViewModel)`.
-  - Semantics này biến export thành capability của current view model thay vì một workflow riêng có input tường minh.
-- Tác động:
-  - Information architecture của frontend đang nói sai bản chất tính năng.
-  - Không có chỗ nào để export hoạt động độc lập với navigation state.
+- Trạng thái: đã xử lý trong code hiện tại.
 - Bằng chứng:
-  - Các renderer đang sở hữu CTA export.
-  - Controller chỉ biết export current view thay vì mở flow export riêng.
+  - Export được mở từ utility panel của app shell, không còn là CTA owned bởi từng business view.
+  - Luồng tải file đi qua `exportWorkflow.workbook` thay vì current view model.
+- File liên quan:
+  - `frontend/src/app/frontend-app.ts`
+  - `frontend/src/features/export/render.ts`
+  - `frontend/src/features/overview/render.ts`
+  - `frontend/src/features/exploration/render.ts`
+  - `frontend/src/features/staff-performance/render.ts`
+  - `frontend/src/features/page-comparison/render.ts`
 
-### 2. [P1] Export vẫn kế thừa filter/snapshot hiện tại, chưa có form chọn `page + khoảng ngày` tự do
+### 2. [resolved] [P1] Export vẫn kế thừa filter/snapshot hiện tại, chưa có form chọn `page + khoảng ngày` tự do
 
-- File: `frontend/src/shared/export.ts:10`
-- File: `frontend/src/adapters/contracts.ts:68`
-- File: `frontend/src/adapters/contracts.ts:78`
-- File: `frontend/src/adapters/contracts.ts:87`
-- File: `frontend/src/adapters/contracts.ts:127`
-- Vấn đề:
-  - `exportBusinessWorkbook()` build file trực tiếp từ payload của current view.
-  - `ExportState` được nhúng vào từng view model thay vì đi qua contract export riêng.
-  - Không có flow nào cho user chọn lại `page` và `khoảng ngày` tại thời điểm export.
-- Tác động:
-  - User không thể chọn khoảng ngày tự do như semantic mới yêu cầu.
-  - Export bị chi phối bởi current slice và current publish snapshot, thay vì là một utility độc lập.
+- Trạng thái: đã xử lý trong code hiện tại.
+- Bằng chứng:
+  - Workflow export có state riêng với input tường minh `page`, `startDate`, `endDate`.
+  - Export preview/download không đọc trực tiếp business filters hoặc current publish snapshot.
+- File liên quan:
+  - `frontend/src/app/export-workflow.ts`
+  - `frontend/src/features/export/render.ts`
+  - `frontend/src/adapters/contracts.ts`
+  - `frontend/src/shared/export.ts`
 
-### 3. [P1] UI publish chưa khóa theo `publish eligibility`
+### 3. [resolved] [P1] UI publish chưa khóa theo `publish eligibility`
 
-- File: `frontend/src/features/operations/render.ts:110`
-- Vấn đề:
-  - Form publish luôn cho chọn cả `provisional` lẫn `official`.
-  - Nút `Publish` luôn hiện, không phụ thuộc child run là `official_full_day`, `provisional_current_day_partial`, hay `not_publishable_old_partial`.
-- Tác động:
-  - `partial old day` vẫn có publish CTA dù plan yêu cầu không được có.
-  - `partial current day` vẫn có thể bị submit như `official`, dù UI semantics phải chặn từ trước.
-- Ghi chú:
-  - Hiện tại chỉ có banner mô tả rule, chưa có gating thật ở UI.
+- Trạng thái: đã xử lý trong code hiện tại.
+- Bằng chứng:
+  - UI derive CTA từ `publishEligibility`.
+  - `partial old day` không còn publish path hợp lệ, `partial current day` bị khóa vào `Publish tạm thời`, và button bị disable khi run không publish được.
+- File liên quan:
+  - `frontend/src/features/operations/state.ts`
+  - `frontend/src/features/operations/render.ts`
+  - `frontend/src/app/frontend-app.ts`
 
-### 4. [P2] `Mapping queue` vẫn là placeholder tĩnh
+### 4. [resolved] [P2] `Mapping queue` vẫn là placeholder tĩnh
 
-- File: `frontend/src/features/operations/render.ts:135`
-- Vấn đề:
-  - Hai dòng queue đang hard-code trực tiếp trong render.
-  - Các nút `Approve`, `Reject`, `Remap` không gắn state hoặc action UI nào.
-- Tác động:
-  - Chưa đạt proof của Unit 4: mapping queue phải actionability ở mức UI contract, không chỉ là bảng minh họa.
+- Trạng thái: đã xử lý ở mức UI contract hiện tại.
+- Bằng chứng:
+  - Queue được owner bởi `OperationsState`.
+  - Các action `approve`, `reject`, `remap` đã cập nhật state thay vì chỉ là nút trang trí.
+- File liên quan:
+  - `frontend/src/features/operations/state.ts`
+  - `frontend/src/features/operations/render.ts`
+  - `frontend/src/app/frontend-app.ts`
 
-### 5. [P2] `Cấu hình` vẫn lệch khỏi workflow owner-clean đã chốt
+### 5. [resolved] [P2] `Cấu hình` vẫn lệch khỏi workflow owner-clean đã chốt
 
-- File: `frontend/src/features/configuration/render.ts:87`
-- File: `frontend/src/app/frontend-app.ts:325`
-- Vấn đề:
-  - `tagMappingJson`, `openingRulesJson`, `schedulerJson`, `notificationTargetsJson` vẫn được expose bằng raw JSON textarea và parse trực tiếp khi submit.
-  - `Prompt profile` chưa có affordance rõ cho:
-    - clone từ version cũ
-    - clone từ page khác
-    - compare 2 prompt version
-- Tác động:
-  - Drift khỏi plan, vì plan đã cấm hướng “ép config đi qua textareas JSON như runtime chính”.
-  - Workflow `Prompt profile` mới chỉ dừng ở textarea + sample preview, chưa đủ semantics bắt buộc.
+- Trạng thái: finding gốc đã được xử lý, nhưng còn follow-up mới ở finding 9 bên dưới.
+- Bằng chứng:
+  - Raw JSON textarea đã được thay bằng editor structured cho taxonomy, opening rules, scheduler và notification targets.
+  - `Prompt profile` đã có affordance cho clone từ version cũ, clone từ page khác và compare hai version.
+- File liên quan:
+  - `frontend/src/features/configuration/render.ts`
+  - `frontend/src/features/configuration/state.ts`
+  - `frontend/src/app/frontend-app.ts`
 
-### 6. [P2] Metadata export thiếu `page` và `generated_at`
+### 6. [resolved] [P2] Metadata export thiếu `page` và `generated_at`
 
-- File: `frontend/src/adapters/demo/business-adapter.ts:305`
-- File: `frontend/src/shared/export.ts:20`
-- Vấn đề:
-  - Metadata export hiện chỉ có:
-    - `Khoảng ngày`
-    - `Prompt version`
-    - `Config version`
-    - `Taxonomy version`
-  - Plan yêu cầu metadata còn phải có:
-    - `page`
-    - `generated_at`
-- Tác động:
-  - Các file `.xlsx` hiện tại thiếu 2 trường audit/business metadata bắt buộc.
+- Trạng thái: đã xử lý trong code hiện tại.
+- Bằng chứng:
+  - Preview export và file `.xlsx` đều đã mang `page` và `generatedAt`.
+- File liên quan:
+  - `frontend/src/adapters/demo/business-adapter.ts`
+  - `frontend/src/features/export/render.ts`
+  - `frontend/src/shared/export.ts`
+
+### 7. [resolved] [P2] Filter persistence sang `Lịch sử hội thoại` đã đi xuống data-level
+
+- Trạng thái: đã xử lý trong code hiện tại.
+- Bằng chứng:
+  - `buildThreadHistory()` giờ lọc thread fixtures theo `pageId`, khoảng ngày, `inboxBucket`, `revisit`, `need`, `outcome`, `risk`, `staff`.
+  - Proof route-to-data đã được khóa bằng smoke test cho case đổi scope sang page khác và chỉ còn đúng thread trong filter.
+- File liên quan:
+  - `frontend/src/adapters/demo/business-adapter.ts`
+  - `frontend/src/smoke.test.ts`
+
+### 8. [resolved] [P1] `So sánh trang` đã có multi-page filter thực sự
+
+- Trạng thái: đã xử lý trong code hiện tại.
+- Bằng chứng:
+  - View compare không còn đi qua filter bar business một-page.
+  - `So sánh trang` render form riêng `page-comparison-filters` với control chọn nhiều `comparePageIds`, `slice`, `publish snapshot`.
+  - App shell nối form này vào route/runtime path thay vì lệ thuộc query string thủ công.
+- File liên quan:
+  - `frontend/src/app/frontend-app.ts`
+  - `frontend/src/features/page-comparison/render.ts`
+  - `frontend/src/features/page-comparison/render.test.ts`
+
+### 9. [resolved] [P1] Compare prompt version đã có metadata audit bắt buộc
+
+- Trạng thái: đã xử lý trong code hiện tại.
+- Bằng chứng:
+  - Contract `ConnectedPageConfigVersion` giờ mang `promptVersionLabel`, `promptHash`, `evidenceBundle`, `fieldExplanations`.
+  - UI compare render rõ version label business-facing, hash audit, evidence bundle và field explanations cho từng phía so sánh.
+  - Test render đã khóa rằng compare không còn chỉ hiển thị prompt text.
+- File liên quan:
+  - `frontend/src/adapters/contracts.ts`
+  - `frontend/src/adapters/http/control-plane-adapter.ts`
+  - `frontend/src/features/configuration/render.ts`
+  - `frontend/src/features/configuration/state.test.ts`
+
+### 10. [resolved] [P1] Run model đã đủ dữ liệu cho confirm overwrite lịch sử
+
+- Trạng thái: đã xử lý trong code hiện tại.
+- Bằng chứng:
+  - Run summary/detail giờ mang `historicalOverwrite` với snapshot bị ghi đè, prompt/config version cũ và mới, cùng impact tới export.
+  - UI publish render confirm state từ metadata này và fail-closed nếu historical overwrite chưa có metadata đầy đủ.
+  - Smoke/render tests đã khóa cả mapping từ HTTP adapter lẫn banner confirm trong `Vận hành`.
+- File liên quan:
+  - `frontend/src/adapters/contracts.ts`
+  - `frontend/src/adapters/http/control-plane-adapter.ts`
+  - `frontend/src/app/frontend-app.ts`
+  - `frontend/src/features/operations/render.ts`
+  - `frontend/src/features/operations/render.test.ts`
+  - `frontend/src/smoke.test.ts`
 
 ## Residual Risk
 
-- Test hiện tại chưa khóa các case trên, nên việc `typecheck/build/test` pass chưa chứng minh implementation đã khớp full semantics của plan và source-of-truth export mới.
-- Các drift còn lại tập trung ở behavior/UI contract, không phải ở toolchain hay entrypoint rewrite.
+- Frontend hiện đã có contract và proof cho 4 gap nêu trên; `bun run typecheck`, `bun run build`, `bun test` đều pass sau khi sửa.
+- Với seam HTTP thật, để UI luôn render đầy đủ audit/overwrite metadata ngoài môi trường test stub thì backend cần tiếp tục trả các field mới thay vì để adapter rơi về fallback rỗng.

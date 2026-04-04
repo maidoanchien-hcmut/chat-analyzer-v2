@@ -6,6 +6,11 @@ export type WarningState = {
   tone: "warning" | "info" | "danger";
 };
 
+export type FieldExplanation = {
+  field: string;
+  explanation: string;
+};
+
 export type BusinessCatalog = {
   pages: BusinessPage[];
   needs: SelectOption[];
@@ -98,7 +103,7 @@ export type ThreadHistoryViewModel = {
     promptHash: string;
     taxonomyVersion: string;
     evidence: string[];
-    explanations: Array<{ field: string; explanation: string }>;
+    explanations: FieldExplanation[];
     supportingMessageIds: string[];
   };
   crmLink: {
@@ -178,6 +183,10 @@ export type ConnectedPageConfigVersion = {
   analysisTaxonomyVersionId: string;
   analysisTaxonomyVersionCode: string;
   createdAt: string;
+  promptVersionLabel: string;
+  promptHash: string;
+  evidenceBundle: string[];
+  fieldExplanations: FieldExplanation[];
 };
 
 export type ConnectedPageDetailViewModel = ConnectedPageSummary & {
@@ -192,7 +201,17 @@ export type PromptPreviewViewModel = {
   afterSummary: string;
   structuredOutput: Array<{ field: string; value: string }>;
   evidence: string[];
-  explanations: Array<{ field: string; explanation: string }>;
+  explanations: FieldExplanation[];
+};
+
+export type HistoricalOverwriteViewModel = {
+  replacedRunId: string;
+  replacedSnapshotLabel: string;
+  previousPromptVersion: string;
+  previousConfigVersion: string;
+  nextPromptVersion: string;
+  nextConfigVersion: string;
+  exportImpact: string;
 };
 
 export type PublishEligibility =
@@ -226,6 +245,7 @@ export type RunSummaryViewModel = {
   windowStartAt: string;
   windowEndExclusiveAt: string;
   supersedesRunId: string | null;
+  historicalOverwrite: HistoricalOverwriteViewModel | null;
   publishedAt: string | null;
 };
 

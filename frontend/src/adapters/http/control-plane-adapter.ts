@@ -1,6 +1,7 @@
 import type {
   ConnectedPageDetailViewModel,
   ControlPlaneAdapter,
+  FieldExplanation,
   ManualRunInput,
   PublishEligibility,
   RunDetailViewModel,
@@ -28,6 +29,20 @@ type RawConfigVersion = {
     versionCode: string;
   };
   createdAt: string;
+  promptVersionLabel?: string;
+  promptHash?: string;
+  evidenceBundle?: string[];
+  fieldExplanations?: FieldExplanation[];
+};
+
+type RawHistoricalOverwrite = {
+  replaced_run_id: string;
+  replaced_snapshot_label: string;
+  previous_prompt_version: string;
+  previous_config_version: string;
+  next_prompt_version: string;
+  next_config_version: string;
+  export_impact: string;
 };
 
 type RawConnectedPageDetail = {
@@ -52,6 +67,7 @@ type RawRunSummary = {
   window_start_at: string;
   window_end_exclusive_at: string;
   supersedes_run_id: string | null;
+  historical_overwrite?: RawHistoricalOverwrite | null;
   published_at: string | null;
 };
 
@@ -244,7 +260,11 @@ function mapConnectedPage(input: RawConnectedPageDetail): ConnectedPageDetailVie
       notes: configVersion.notes,
       analysisTaxonomyVersionId: configVersion.analysisTaxonomyVersionId,
       analysisTaxonomyVersionCode: configVersion.analysisTaxonomyVersion.versionCode,
-      createdAt: configVersion.createdAt
+      createdAt: configVersion.createdAt,
+      promptVersionLabel: configVersion.promptVersionLabel ?? `Prompt v${String(configVersion.versionNo)}`,
+      promptHash: configVersion.promptHash ?? "sha256:pending",
+      evidenceBundle: Array.isArray(configVersion.evidenceBundle) ? configVersion.evidenceBundle : [],
+      fieldExplanations: Array.isArray(configVersion.fieldExplanations) ? configVersion.fieldExplanations : []
     })),
     activeConfigVersion: input.activeConfigVersion
       ? {
@@ -258,7 +278,11 @@ function mapConnectedPage(input: RawConnectedPageDetail): ConnectedPageDetailVie
         notes: input.activeConfigVersion.notes,
         analysisTaxonomyVersionId: input.activeConfigVersion.analysisTaxonomyVersionId,
         analysisTaxonomyVersionCode: input.activeConfigVersion.analysisTaxonomyVersion.versionCode,
-        createdAt: input.activeConfigVersion.createdAt
+        createdAt: input.activeConfigVersion.createdAt,
+        promptVersionLabel: input.activeConfigVersion.promptVersionLabel ?? `Prompt v${String(input.activeConfigVersion.versionNo)}`,
+        promptHash: input.activeConfigVersion.promptHash ?? "sha256:pending",
+        evidenceBundle: Array.isArray(input.activeConfigVersion.evidenceBundle) ? input.activeConfigVersion.evidenceBundle : [],
+        fieldExplanations: Array.isArray(input.activeConfigVersion.fieldExplanations) ? input.activeConfigVersion.fieldExplanations : []
       }
       : null
   };
@@ -306,6 +330,17 @@ function mapRunSummary(input: RawRunSummary) {
     windowStartAt: input.window_start_at,
     windowEndExclusiveAt: input.window_end_exclusive_at,
     supersedesRunId: input.supersedes_run_id,
+    historicalOverwrite: input.historical_overwrite
+      ? {
+        replacedRunId: input.historical_overwrite.replaced_run_id,
+        replacedSnapshotLabel: input.historical_overwrite.replaced_snapshot_label,
+        previousPromptVersion: input.historical_overwrite.previous_prompt_version,
+        previousConfigVersion: input.historical_overwrite.previous_config_version,
+        nextPromptVersion: input.historical_overwrite.next_prompt_version,
+        nextConfigVersion: input.historical_overwrite.next_config_version,
+        exportImpact: input.historical_overwrite.export_impact
+      }
+      : null,
     publishedAt: input.published_at
   };
 }

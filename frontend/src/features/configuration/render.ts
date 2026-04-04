@@ -1,6 +1,5 @@
 import type { ConfigurationState, OnboardingState } from "../../app/screen-state.ts";
 import { escapeHtml } from "../../shared/html.ts";
-import { prettyJson } from "../../shared/format.ts";
 
 export function renderConfiguration(configuration: ConfigurationState, onboarding: OnboardingState) {
   const compareLeft = configuration.pageDetail?.configVersions.find((item) => item.id === configuration.promptCompareLeftVersionId) ?? null;
@@ -74,7 +73,11 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
               <span>ETL: ${configuration.pageDetail.etlEnabled ? "bật" : "tắt"}</span>
               <span>AI: ${configuration.pageDetail.analysisEnabled ? "bật" : "tắt"}</span>
             </div>
-            <pre class="code-block">${escapeHtml(prettyJson(configuration.pageDetail))}</pre>
+            <div class="meta-list">
+              <span>Active config: ${escapeHtml(configuration.pageDetail.activeConfigVersionId ?? "Chưa activate")}</span>
+              <span>Số version: ${configuration.pageDetail.configVersions.length}</span>
+              <span>Version mới nhất: ${escapeHtml(configuration.pageDetail.configVersions[0]?.promptVersionLabel ?? "Chưa có")}</span>
+            </div>
           ` : "<p class='muted-copy'>Chi tiết page sẽ hiện sau khi chọn page.</p>"}
         </article>
       </section>
@@ -190,12 +193,10 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
               ${compareLeft || compareRight ? `
                 <div class="two-column-grid">
                   <article class="sub-panel">
-                    <h4>${compareLeft ? `v${compareLeft.versionNo}` : "Chưa chọn bản trái"}</h4>
-                    ${compareLeft ? `<p class="muted-copy">${escapeHtml(compareLeft.analysisTaxonomyVersionCode)} • ${escapeHtml(compareLeft.createdAt)}</p><pre class="code-block">${escapeHtml(compareLeft.promptText)}</pre>` : "<p class='muted-copy'>Chọn version bên trái để xem nội dung prompt.</p>"}
+                    ${compareLeft ? renderPromptAuditCard(compareLeft, `Config v${compareLeft.versionNo}`) : "<h4>Chưa chọn bản trái</h4><p class='muted-copy'>Chọn version bên trái để xem nội dung prompt.</p>"}
                   </article>
                   <article class="sub-panel">
-                    <h4>${compareRight ? `v${compareRight.versionNo}` : "Chưa chọn bản phải"}</h4>
-                    ${compareRight ? `<p class="muted-copy">${escapeHtml(compareRight.analysisTaxonomyVersionCode)} • ${escapeHtml(compareRight.createdAt)}</p><pre class="code-block">${escapeHtml(compareRight.promptText)}</pre>` : "<p class='muted-copy'>Chọn version bên phải để so sánh.</p>"}
+                    ${compareRight ? renderPromptAuditCard(compareRight, `Config v${compareRight.versionNo}`) : "<h4>Chưa chọn bản phải</h4><p class='muted-copy'>Chọn version bên phải để so sánh.</p>"}
                   </article>
                 </div>
               ` : "<p class='muted-copy'>So sánh 2 prompt version sẽ hiện ở đây.</p>"}
@@ -266,4 +267,34 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
 
 function renderOptions(values: string[], selectedValue: string) {
   return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
+}
+
+function renderPromptAuditCard(
+  configVersion: NonNullable<ConfigurationState["pageDetail"]>["configVersions"][number],
+  configLabel: string
+) {
+  return `
+    <h4>${escapeHtml(configVersion.promptVersionLabel)}</h4>
+    <div class="meta-list">
+      <span>${escapeHtml(configLabel)}</span>
+      <span>Prompt hash: ${escapeHtml(configVersion.promptHash)}</span>
+      <span>Taxonomy: ${escapeHtml(configVersion.analysisTaxonomyVersionCode)}</span>
+      <span>Tạo lúc: ${escapeHtml(configVersion.createdAt)}</span>
+    </div>
+    <pre class="code-block">${escapeHtml(configVersion.promptText)}</pre>
+    <div class="two-column-grid">
+      <article class="sub-panel">
+        <h5>Evidence bundle</h5>
+        ${configVersion.evidenceBundle.length > 0
+          ? `<ul>${configVersion.evidenceBundle.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+          : "<p class='muted-copy'>Version này chưa có evidence bundle từ adapter.</p>"}
+      </article>
+      <article class="sub-panel">
+        <h5>Field explanations</h5>
+        ${configVersion.fieldExplanations.length > 0
+          ? `<ul>${configVersion.fieldExplanations.map((item) => `<li><strong>${escapeHtml(item.field)}</strong>: ${escapeHtml(item.explanation)}</li>`).join("")}</ul>`
+          : "<p class='muted-copy'>Version này chưa có field explanations từ adapter.</p>"}
+      </article>
+    </div>
+  `;
 }
