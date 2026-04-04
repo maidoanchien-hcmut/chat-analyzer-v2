@@ -50,6 +50,9 @@ View chính:
 
 - `Tổng quan`
 - `So sánh trang`
+
+Utility chính:
+
 - export `.xlsx`
 
 ### 2. Quản lý vận hành
@@ -816,20 +819,24 @@ Flow tối thiểu đúng phải là:
 
 ## Export flow
 
-Hệ thống phải có export `.xlsx` business-facing.
+Hệ thống phải có export `.xlsx` business-facing như một workflow riêng.
 
-### Nơi export
+### Vị trí export
 
-- `Tổng quan`
-- `Khám phá dữ liệu`
-- `Hiệu quả nhân viên`
-- `So sánh trang`
+- có entry riêng trong app shell hoặc utility bar
+- không đặt export như capability gắn cứng vào `Tổng quan`, `Khám phá dữ liệu`, `Hiệu quả nhân viên`, `So sánh trang`
+- export không phụ thuộc view hoặc bộ lọc mà user đang xem
+
+### Input export
+
+- chọn tường minh `page`
+- chọn khoảng ngày tự do để export
 
 ### Nguyên tắc export
 
 - đọc từ semantic mart
-- chỉ export từ `published_official`
-- nếu ngày hiện tại mới có `published_provisional` thì không cho export
+- builder chỉ lấy các ngày trong khoảng chọn đã có `published_official`
+- ngày chỉ có `published_provisional` hoặc chưa có snapshot thì không sinh row
 - file chỉ có đúng `1` sheet thống kê
 - sheet title và tên cột phải là tiếng Việt business-facing, đơn giản, dễ đọc, chuyên nghiệp
 - code nội bộ phải được render thành nhãn hiển thị
@@ -847,13 +854,14 @@ Hệ thống phải có export `.xlsx` business-facing.
 - file chỉ có một sheet thống kê các chỉ số cần thiết theo grain ngày
 - mỗi row tương ứng một ngày đã có `published_official` trong khoảng người dùng chọn
 - không sinh row rỗng cho các ngày chưa có dữ liệu
-- nếu user chọn khoảng `01/01/2026 - 30/01/2026` nhưng mới có official đến `24/01/2026` thì file chỉ có row cho các ngày thực sự có snapshot official
+- nếu user chọn khoảng `01/01/2026 - 30/01/2026` nhưng hệ thống mới có official từ `03/01/2026 - 24/01/2026` thì file chỉ có row cho các ngày thực sự có snapshot official
 - không thêm cột đánh số ngày giả cho những ngày không có row
 
 ### Hành vi export
 
 - user được phép chọn khoảng ngày rộng hơn phạm vi currently available
 - builder tự lọc lại theo các ngày có dữ liệu official
+- nếu hệ thống hiện có dữ liệu `03/05/2026 - 20/05/2026` nhưng user chọn `01/05/2026 - 31/05/2026` thì file chỉ có row cho các ngày thực sự có snapshot official
 - nếu khoảng chọn không có ngày nào có `published_official` thì phải chặn export và báo rõ lý do
 
 ## Trạng thái rỗng và lỗi

@@ -731,7 +731,7 @@ Vì vậy hệ thống phải có 3 trạng thái hiển thị/publish:
    - phải hiện rõ coverage window và badge `tạm thời`
 3. `published_official`
    - chỉ áp dụng cho full-day snapshot
-   - là snapshot mặc định cho dashboard lịch sử và export chính thức
+   - là snapshot mặc định cho dashboard lịch sử
 
 ### Luật publish sửa lại
 
@@ -758,8 +758,15 @@ Vì vậy hệ thống phải có 3 trạng thái hiển thị/publish:
   - coverage window, ví dụ `00:00-10:00`
   - config/prompt snapshot đang dùng
 - partial-day của ngày cũ chỉ được xem trong `run result view`, không được hiện trên dashboard
-- export `.xlsx` chính thức chỉ được build từ `published_official`
-- nếu ngày hiện tại mới có `published_provisional` thì không cho export official
+
+### Luật export
+
+- export `.xlsx` là workflow riêng, không phải capability gắn vào từng dashboard view
+- request export phải chọn tường minh `page` và `khoảng ngày`; không được ngầm kế thừa view hoặc filter đang xem
+- builder export đọc semantic mart và chỉ lấy các ngày trong khoảng chọn đã có `published_official`
+- ngày chỉ có `published_provisional` hoặc chưa có snapshot thì không sinh row export
+- nếu khoảng chọn có cả ngày có dữ liệu lẫn ngày không có dữ liệu, file chỉ chứa row cho các ngày thực sự có snapshot `published_official`
+- nếu khoảng chọn không có ngày nào có `published_official` thì phải chặn export và báo rõ lý do
 
 ### Luật reuse để tiết kiệm chi phí
 

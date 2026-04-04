@@ -74,16 +74,19 @@ Schema extraction seam hiện dùng:
 
 ## Frontend
 
-Frontend hiện chỉ giữ shell vận hành cho contract mới:
+Frontend đã được rewrite thành app TypeScript thuần owner-clean theo `docs/ui-flows.md`:
 
-- list page từ token Pancake
-- register `connected_page`
-- xem chi tiết page/config versions
-- tạo config version mới và activate
-- preview manual run
-- execute manual run
-- inspect `run_group` / `run`
-- publish run
+- đúng 7 view: `Tổng quan`, `Khám phá dữ liệu`, `Hiệu quả nhân viên`, `Lịch sử hội thoại`, `So sánh trang`, `Vận hành`, `Cấu hình`
+- app shell + query-state + filter bar mới; business filters persist giữa các view business
+- export `.xlsx` theo source-of-truth mới đã được chốt là workflow riêng; code frontend hiện vẫn chưa đồng bộ và đang được theo dõi trong review/debt docs
+- adapter matrix rõ ràng:
+  - business views dùng `demo/hybrid`
+  - `Vận hành`, `Cấu hình`, onboarding dùng `http-first`
+- contract legacy `main.ts/render.ts/api.ts/types.ts/utils.ts` cũ không còn là runtime path
+- smoke tests khóa các flow pinned:
+  - `list-from-token -> register`
+  - `create config version -> activate`
+  - `preview -> execute -> get run detail -> publish`
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\frontend
@@ -97,6 +100,8 @@ Lệnh hữu ích:
 cd D:\Code\chat-analyzer-v2\frontend
 bun run typecheck
 bun run build
+bun run test
+bun run walkthrough:http
 ```
 
 ## Service

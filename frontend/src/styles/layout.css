@@ -1,0 +1,69 @@
+.app-shell {
+  min-height: 100dvh;
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: 18px;
+  padding: 18px;
+}
+
+.shell-sidebar,
+.shell-main {
+  min-height: 0;
+  display: grid;
+  gap: 16px;
+}
+
+.shell-main {
+  align-content: start;
+}
+
+.view-host,
+.feature-stack,
+.history-layout,
+.two-column-grid,
+.metric-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.history-layout {
+  grid-template-columns: 320px minmax(0, 1fr);
+}
+
+.two-column-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.metric-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metric-grid.compact {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.filter-bar {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.list-grid,
+.audit-grid {
+  display: grid;
+  gap: 16px;
+}
+
+.list-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+@media (max-width: 1180px) {
+  .app-shell,
+  .history-layout,
+  .two-column-grid,
+  .metric-grid,
+  .metric-grid.compact,
+  .filter-bar,
+  .list-grid {
+    grid-template-columns: 1fr;
+  }
+}

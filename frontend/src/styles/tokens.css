@@ -1,0 +1,47 @@
+:root {
+  color-scheme: light;
+  --bg: #f4f0e8;
+  --surface: #fffaf2;
+  --surface-strong: #f7efe2;
+  --line: #d8cbb7;
+  --text: #1f1a17;
+  --muted: #70645a;
+  --accent: #8b4f2e;
+  --accent-soft: #f0dfd3;
+  --success: #236b4d;
+  --warning: #9d6508;
+  --danger: #9c2f2f;
+  --shadow: 0 14px 40px rgba(58, 39, 23, 0.08);
+  --radius-lg: 22px;
+  --radius-md: 16px;
+  --radius-sm: 12px;
+  --font-ui: "Be Vietnam Pro", "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", "Consolas", monospace;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  margin: 0;
+  min-height: 100%;
+  width: 100%;
+}
+
+body {
+  font-family: var(--font-ui);
+  color: var(--text);
+  background:
+    radial-gradient(circle at top left, rgba(139, 79, 46, 0.12), transparent 28%),
+    linear-gradient(180deg, #f6efe5 0%, #efe7db 100%);
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}

@@ -1,0 +1,85 @@
+import type {
+  ConnectedPageDetailViewModel,
+  ConnectedPageSummary,
+  MappingQueueItem,
+  OnboardingPageCandidate,
+  PromptPreviewViewModel,
+  RunDetailViewModel,
+  RunGroupViewModel,
+  RunPreviewViewModel
+} from "../adapters/contracts.ts";
+
+export type TagMappingDraft = {
+  rawTag: string;
+  role: string;
+  canonicalValue: string;
+  source: "system_default" | "operator_override";
+};
+
+export type OpeningRuleDraft = {
+  buttonTitle: string;
+  signalType: string;
+  canonicalValue: string;
+};
+
+export type SchedulerDraft = {
+  useSystemDefaults: boolean;
+  officialDailyTime: string;
+  lookbackHours: number;
+};
+
+export type NotificationTargetDraft = {
+  channel: string;
+  value: string;
+};
+
+export type OnboardingState = {
+  token: string;
+  tokenPages: OnboardingPageCandidate[];
+  selectedPancakePageId: string;
+  timezone: string;
+  etlEnabled: boolean;
+  analysisEnabled: boolean;
+};
+
+export type ConfigurationState = {
+  activeTab: "page-info" | "taxonomy" | "opening-rules" | "prompt-profile" | "scheduler";
+  connectedPages: ConnectedPageSummary[];
+  selectedPageId: string;
+  pageDetail: ConnectedPageDetailViewModel | null;
+  selectedConfigVersionId: string;
+  promptText: string;
+  tagMappings: TagMappingDraft[];
+  openingRules: OpeningRuleDraft[];
+  scheduler: SchedulerDraft;
+  notificationTargets: NotificationTargetDraft[];
+  notes: string;
+  activateAfterCreate: boolean;
+  etlEnabled: boolean;
+  analysisEnabled: boolean;
+  promptPreview: PromptPreviewViewModel | null;
+  promptCloneSourceVersionId: string;
+  promptCloneSourcePageId: string;
+  promptCompareLeftVersionId: string;
+  promptCompareRightVersionId: string;
+};
+
+export type OperationsState = {
+  activePanel: "manual-run" | "run-monitor" | "run-detail";
+  connectedPages: ConnectedPageSummary[];
+  selectedPageId: string;
+  processingMode: "etl_only" | "etl_and_ai";
+  targetDate: string;
+  requestedWindowStartAt: string;
+  requestedWindowEndExclusiveAt: string;
+  previewResult: RunPreviewViewModel | null;
+  runGroup: RunGroupViewModel | null;
+  runDetail: RunDetailViewModel | null;
+  inspectRunGroupId: string;
+  inspectRunId: string;
+  publishRunId: string;
+  publishAs: "official" | "provisional";
+  confirmHistoricalOverwrite: boolean;
+  expectedReplacedRunId: string;
+  mappingQueue: MappingQueueItem[];
+};
