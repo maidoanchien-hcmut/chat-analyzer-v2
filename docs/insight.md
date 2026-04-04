@@ -26,7 +26,7 @@ Hệ thống phải xuất được file .xlsx báo cáo chuyên nghiệp, khôn
 
 ## Yêu cầu kỹ thuật
 
-- Hệ thống phải đảm bảo phục vụ được nhu cầu trong [ui-flows](./ui-flows.md) không được thiếu bất kỳ tính năng nào.
+- Hệ thống phải đảm bảo phục vụ được nhu cầu trong [ui-flows](./ui-flows.md).
 - Thiết kế datawarehouse vận dụng hết khả năng của postgres17, có thể sử dụng các tính năng mới nhất của postgres17 để tối ưu hiệu suất và khả năng mở rộng.
 - Tách biệt 2 luồng rõ ràng là lưu trữ dữ liệu đã được chuẩn hoá và phân tích dữ liệu bằng AI, để có thể tối ưu hiệu suất và khả năng mở rộng của từng phần, đồng thời đảm bảo tính linh hoạt trong việc thay đổi hoặc nâng cấp từng phần mà không ảnh hưởng đến phần còn lại.
 - Không nhúng AI vào pipeline lưu trữ dữ liệu.
