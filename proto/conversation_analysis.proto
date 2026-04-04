@@ -24,20 +24,20 @@ message Message {
 }
 
 message UnitBundle {
-  string conversation_day_id = 1;
-  string conversation_id = 2;
+  string thread_day_id = 1;
+  string thread_id = 2;
   string connected_page_id = 3;
-  string etl_run_id = 4;
+  string pipeline_run_id = 4;
   string run_group_id = 5;
   string target_date = 6;
   string business_timezone = 7;
   string customer_display_name = 8;
   string normalized_tag_signals_json = 9;
   string observed_tags_json = 10;
-  string opening_blocks_json = 11;
-  string first_meaningful_human_message_id = 12;
-  string first_meaningful_human_sender_role = 13;
-  string source_conversation_json_redacted = 14;
+  string opening_block_json = 11;
+  string first_meaningful_message_id = 12;
+  string first_meaningful_message_sender_role = 13;
+  string source_thread_json_redacted = 14;
   repeated Message messages = 15;
 }
 
@@ -51,23 +51,25 @@ message Usage {
 }
 
 message AnalysisResult {
-  string conversation_day_id = 1;
+  string thread_day_id = 1;
   string result_status = 2;
   string prompt_hash = 3;
-  string opening_theme = 4;
-  string customer_mood = 5;
-  string primary_need = 6;
-  string primary_topic = 7;
-  string content_customer_type = 8;
-  string closing_outcome_as_of_day = 9;
-  string response_quality_label = 10;
-  string process_risk_level = 11;
-  string response_quality_issue_text = 12;
-  string response_quality_improvement_text = 13;
-  string process_risk_reason_text = 14;
-  Usage usage = 15;
-  int64 cost_micros = 16;
-  string failure_info_json = 17;
+  string opening_theme_code = 4;
+  string opening_theme_reason = 5;
+  string customer_mood_code = 6;
+  string primary_need_code = 7;
+  string primary_topic_code = 8;
+  string journey_code = 9;
+  string closing_outcome_inference_code = 10;
+  string process_risk_level_code = 11;
+  string process_risk_reason_text = 12;
+  string staff_assessments_json = 13;
+  string evidence_used_json = 14;
+  string field_explanations_json = 15;
+  string supporting_message_ids_json = 16;
+  Usage usage = 17;
+  int64 cost_micros = 18;
+  string failure_info_json = 19;
 }
 
 message AnalyzeConversationResponse {

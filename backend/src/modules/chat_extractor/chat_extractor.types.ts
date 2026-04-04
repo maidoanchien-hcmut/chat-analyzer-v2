@@ -1,102 +1,81 @@
 import { z } from "zod";
 
 export const processingModeSchema = z.enum(["etl_only", "etl_and_ai"]);
-export const capabilityKeySchema = z.enum(["conversation_analysis", "thread_customer_mapping"]);
+export const runModeSchema = z.enum(["manual_range", "backfill_day", "official_daily", "onboarding_sample"]);
+export const publishEligibilitySchema = z.enum([
+  "official_full_day",
+  "provisional_current_day_partial",
+  "not_publishable_old_partial"
+]);
+export const publishAsSchema = z.enum(["official", "provisional"]);
+export const tagRoleSchema = z.enum(["journey", "need", "outcome", "branch", "staff", "noise"]);
+export const openingSignalRoleSchema = z.enum(["journey", "need", "outcome"]);
+export const openingMatchModeSchema = z.enum(["exact", "casefold_exact"]);
 export const businessTimezoneSchema = z.string().min(1).refine(isValidIanaTimezone, {
   message: "business_timezone phải là timezone IANA hợp lệ (vd: Asia/Ho_Chi_Minh)."
 });
 
-export const tagMappingEntrySchema = z.object({
-  pancake_tag_id: z.string().min(1),
-  raw_label: z.string().min(1),
-  signal: z.string().min(1)
+const rfc3339Schema = z.string().min(1);
+const dateOnlySchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, {
+  message: "target_date phải theo định dạng YYYY-MM-DD."
 });
 
-export const tagMappingSchema = z
-  .object({
-    version_no: z.number().int().positive().optional(),
-    updated_at: z.string().optional(),
-    default_signal: z.string().min(1).default("null"),
-    entries: z.array(tagMappingEntrySchema).default([])
-  })
-  .transform((raw) => ({
-    versionNo: raw.version_no ?? 1,
-    updatedAt: raw.updated_at ?? null,
-    defaultSignal: raw.default_signal,
-    entries: raw.entries.map((entry) => ({
-      pancakeTagId: entry.pancake_tag_id,
-      rawLabel: entry.raw_label,
-      signal: entry.signal
-    }))
-  }));
+const tagMappingEntryInputSchema = z.object({
+  source_tag_id: z.string().min(1),
+  source_tag_text: z.string().min(1),
+  role: tagRoleSchema,
+  canonical_code: z.string().trim().nullable().optional(),
+  mapping_source: z.enum(["auto_default", "operator"]).default("operator"),
+  status: z.enum(["active", "inactive"]).default("active")
+});
 
-export const openingOptionSchema = z.object({
+const tagMappingInputSchema = z.object({
+  version: z.literal(1).default(1),
+  default_role: z.literal("noise").default("noise"),
+  entries: z.array(tagMappingEntryInputSchema).default([])
+});
+
+const openingOptionInputSchema = z.object({
   raw_text: z.string().min(1),
-  decision: z.string().min(1)
+  match_mode: openingMatchModeSchema.default("exact")
 });
 
-export const openingSelectorSchema = z.object({
-  signal: z.string().min(1),
-  allowed_message_types: z.array(z.string().min(1)).default(["postback", "quick_reply_selection", "template", "text"]),
-  options: z.array(openingOptionSchema).min(1)
+const openingSelectorInputSchema = z.object({
+  selector_id: z.string().min(1),
+  signal_role: openingSignalRoleSchema,
+  signal_code: z.string().min(1),
+  allowed_message_types: z.array(z.string().min(1)).min(1).default(["postback", "quick_reply_selection", "text"]),
+  options: z.array(openingOptionInputSchema).default([])
 });
 
-export const openingRulesSchema = z
-  .object({
-    version_no: z.number().int().positive().optional(),
-    updated_at: z.string().optional(),
-    boundary: z
-      .object({
-        mode: z.literal("until_first_meaningful_human_message").default("until_first_meaningful_human_message"),
-        max_messages: z.number().int().positive().default(12)
-      })
-      .default({
-        mode: "until_first_meaningful_human_message",
-        max_messages: 12
-      }),
-    selectors: z.array(openingSelectorSchema).default([]),
-    fallback: z
-      .object({
-        store_candidate_if_unmatched: z.boolean().default(true)
-      })
-      .default({
-        store_candidate_if_unmatched: true
-      })
-  })
-  .transform((raw) => ({
-    versionNo: raw.version_no ?? 1,
-    updatedAt: raw.updated_at ?? null,
-    boundary: {
-      mode: raw.boundary.mode,
-      maxMessages: raw.boundary.max_messages
-    },
-    selectors: raw.selectors.map((selector) => ({
-      signal: selector.signal,
-      allowedMessageTypes: selector.allowed_message_types,
-      options: selector.options.map((option) => ({
-        rawText: option.raw_text,
-        decision: option.decision
-      }))
-    })),
-    fallback: {
-      storeCandidateIfUnmatched: raw.fallback.store_candidate_if_unmatched
-    }
-  }));
-
-export const notificationTargetsSchema = z.object({
-  telegram_chat_ids: z.array(z.string().min(1)).default([]),
-  email_recipients: z.array(z.string().email()).default([]),
-  notify_on_new_tag: z.boolean().default(true),
-  notify_on_pipeline_failure: z.boolean().default(true)
+const openingRulesInputSchema = z.object({
+  version: z.literal(1).default(1),
+  selectors: z.array(openingSelectorInputSchema).default([])
 });
 
-export const aiProfileJsonSchema = z.record(z.string(), z.any()).refine((value) => Object.keys(value).length > 0, {
-  message: "profile_json must not be empty"
+const schedulerInputSchema = z.object({
+  version: z.literal(1).default(1),
+  timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
+  official_daily_time: z.string().regex(/^\d{2}:\d{2}$/).default("00:00"),
+  lookback_hours: z.number().int().min(0).default(2),
+  max_conversations_per_run: z.number().int().min(0).default(0),
+  max_message_pages_per_thread: z.number().int().min(0).default(0)
 });
 
-export const customerDirectoryEntrySchema = z.object({
-  customer_id: z.string().min(1),
-  phone_e164: z.string().min(1)
+const notificationTelegramTargetSchema = z.object({
+  chat_id: z.string().min(1),
+  events: z.array(z.enum(["run_failed", "publish_failed", "new_unmapped_tag", "opening_rule_miss_spike", "token_expiring"])).default([])
+});
+
+const notificationEmailTargetSchema = z.object({
+  address: z.string().email(),
+  events: z.array(z.enum(["run_failed", "publish_failed", "new_unmapped_tag", "opening_rule_miss_spike", "token_expiring"])).default([])
+});
+
+const notificationTargetsInputSchema = z.object({
+  version: z.literal(1).default(1),
+  telegram: z.array(notificationTelegramTargetSchema).default([]),
+  email: z.array(notificationEmailTargetSchema).default([])
 });
 
 export const listPagesBodySchema = z.object({
@@ -108,7 +87,7 @@ export const registerPageBodySchema = z
     pancake_page_id: z.string().min(1),
     user_access_token: z.string().min(1),
     business_timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
-    etl_enabled: z.boolean().default(false),
+    etl_enabled: z.boolean().default(true),
     analysis_enabled: z.boolean().default(false)
   })
   .transform((raw) => ({
@@ -119,525 +98,272 @@ export const registerPageBodySchema = z
     analysisEnabled: raw.analysis_enabled
   }));
 
-export const setupSampleBodySchema = z
+export const createConfigVersionBodySchema = z
   .object({
-    pancake_page_id: z.string().min(1),
-    user_access_token: z.string().min(1),
-    business_timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
-    processing_mode: processingModeSchema.default("etl_only"),
-    initial_conversation_limit: z.number().int().positive(),
-    active_tag_mapping_json: z.unknown().optional(),
-    active_opening_rules_json: z.unknown().optional()
-  })
-  .transform((raw) => ({
-    pancakePageId: raw.pancake_page_id,
-    userAccessToken: raw.user_access_token,
-    businessTimezone: raw.business_timezone,
-    processingMode: raw.processing_mode,
-    initialConversationLimit: raw.initial_conversation_limit,
-    activeTagMappingJson: normalizeTagMappingConfig(raw.active_tag_mapping_json),
-    activeOpeningRulesJson: normalizeOpeningRulesConfig(raw.active_opening_rules_json)
-  }));
-
-export const commitSetupBodySchema = z
-  .object({
-    pancake_page_id: z.string().min(1),
-    user_access_token: z.string().min(1),
-    business_timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
-    etl_enabled: z.boolean().default(true),
-    analysis_enabled: z.boolean().default(true),
-    active_tag_mapping_json: z.unknown().default({}),
-    active_opening_rules_json: z.unknown().default({}),
-    notification_targets_json: z.unknown().default({}),
+    tag_mapping_json: z.unknown().optional(),
+    opening_rules_json: z.unknown().optional(),
+    scheduler_json: z.union([z.null(), z.unknown()]).optional(),
+    notification_targets_json: z.union([z.null(), z.unknown()]).optional(),
     prompt_text: z.string().trim().optional(),
-    prompt_notes: z.string().trim().optional(),
-    conversation_analysis_profile_json: aiProfileJsonSchema.optional(),
-    thread_customer_mapping_profile_json: aiProfileJsonSchema.optional(),
-    onboarding_state_json: z.record(z.string(), z.any()).optional()
-  })
-  .superRefine((raw, ctx) => {
-    const hasPromptText = (raw.prompt_text?.trim().length ?? 0) > 0;
-    if (!hasPromptText && !raw.conversation_analysis_profile_json) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        path: ["prompt_text"],
-        message: "prompt_text hoặc conversation_analysis_profile_json là bắt buộc"
-      });
-    }
-  })
-  .transform((raw) => ({
-    pancakePageId: raw.pancake_page_id,
-    userAccessToken: raw.user_access_token,
-    businessTimezone: raw.business_timezone,
-    etlEnabled: raw.etl_enabled,
-    analysisEnabled: raw.analysis_enabled,
-    activeTagMappingJson: normalizeTagMappingConfig(raw.active_tag_mapping_json),
-    activeOpeningRulesJson: normalizeOpeningRulesConfig(raw.active_opening_rules_json),
-    notificationTargetsJson: normalizeNotificationTargets(raw.notification_targets_json),
-    conversationAnalysisProfileJson: raw.conversation_analysis_profile_json ?? buildPromptProfile(raw.prompt_text ?? "", raw.prompt_notes),
-    threadCustomerMappingProfileJson: raw.thread_customer_mapping_profile_json ?? null,
-    onboardingStateJson: raw.onboarding_state_json ?? null,
-    promptNotes: normalizeOptionalText(raw.prompt_notes)
-  }));
-
-export const updateConnectedPageBodySchema = z
-  .object({
-    business_timezone: businessTimezoneSchema.optional(),
+    analysis_taxonomy_version_id: z.string().uuid().optional(),
+    notes: z.string().trim().optional(),
+    activate: z.boolean().default(false),
     etl_enabled: z.boolean().optional(),
-    analysis_enabled: z.boolean().optional(),
-    active_tag_mapping_json: z.unknown().optional(),
-    active_opening_rules_json: z.unknown().optional(),
-    notification_targets_json: z.unknown().optional(),
-    onboarding_state_json: z.record(z.string(), z.any()).optional()
-  })
-  .refine((raw) => Object.keys(raw).length > 0, {
-    message: "At least one page config field must be provided."
+    analysis_enabled: z.boolean().optional()
   })
   .transform((raw) => ({
-    businessTimezone: raw.business_timezone,
+    tagMappingJson: raw.tag_mapping_json === undefined ? undefined : normalizeTagMappingConfig(raw.tag_mapping_json),
+    openingRulesJson: raw.opening_rules_json === undefined ? undefined : normalizeOpeningRulesConfig(raw.opening_rules_json),
+    schedulerJson: raw.scheduler_json === undefined
+      ? undefined
+      : raw.scheduler_json === null
+        ? null
+        : normalizeSchedulerConfig(raw.scheduler_json),
+    notificationTargetsJson: raw.notification_targets_json === undefined
+      ? undefined
+      : raw.notification_targets_json === null
+        ? null
+        : normalizeNotificationTargets(raw.notification_targets_json),
+    promptText: normalizeOptionalText(raw.prompt_text),
+    analysisTaxonomyVersionId: raw.analysis_taxonomy_version_id,
+    notes: normalizeOptionalText(raw.notes),
+    activate: raw.activate,
     etlEnabled: raw.etl_enabled,
-    analysisEnabled: raw.analysis_enabled,
-    activeTagMappingJson: raw.active_tag_mapping_json === undefined ? undefined : normalizeTagMappingConfig(raw.active_tag_mapping_json),
-    activeOpeningRulesJson: raw.active_opening_rules_json === undefined ? undefined : normalizeOpeningRulesConfig(raw.active_opening_rules_json),
-    notificationTargetsJson: raw.notification_targets_json === undefined ? undefined : normalizeNotificationTargets(raw.notification_targets_json),
-    onboardingStateJson: raw.onboarding_state_json
-  }));
-
-export const createAiProfileVersionBodySchema = z
-  .object({
-    capability_key: capabilityKeySchema,
-    profile_json: aiProfileJsonSchema,
-    notes: z.string().trim().optional(),
-    activate: z.boolean().default(false)
-  })
-  .transform((raw) => ({
-    capabilityKey: raw.capability_key,
-    profileJson: raw.profile_json,
-    notes: normalizeOptionalText(raw.notes),
-    activate: raw.activate
-  }));
-
-export const cloneAiProfileVersionBodySchema = z
-  .object({
-    source_page_id: z.string().min(1),
-    capability_key: capabilityKeySchema,
-    notes: z.string().trim().optional(),
-    activate: z.boolean().default(false)
-  })
-  .transform((raw) => ({
-    sourcePageId: raw.source_page_id,
-    capabilityKey: raw.capability_key,
-    notes: normalizeOptionalText(raw.notes),
-    activate: raw.activate
-  }));
-
-export const createPromptVersionBodySchema = z
-  .object({
-    prompt_text: z.string().min(1),
-    notes: z.string().trim().optional(),
-    model_name: z.string().trim().optional(),
-    output_schema_version: z.string().trim().optional()
-  })
-  .transform((raw) => ({
-    promptText: raw.prompt_text,
-    notes: normalizeOptionalText(raw.notes),
-    modelName: normalizeOptionalText(raw.model_name),
-    outputSchemaVersion: normalizeOptionalText(raw.output_schema_version)
-  }));
-
-export const clonePromptVersionBodySchema = z
-  .object({
-    source_page_id: z.string().min(1),
-    notes: z.string().trim().optional()
-  })
-  .transform((raw) => ({
-    sourcePageId: raw.source_page_id,
-    notes: normalizeOptionalText(raw.notes)
-  }));
-
-export const onboardingJobBodySchema = z
-  .object({
-    job_name: z.string().min(1).default("onboarding-sample"),
-    target_date: z.string().min(1),
-    processing_mode: processingModeSchema.default("etl_only"),
-    initial_conversation_limit: z.number().int().positive(),
-    snapshot_version: z.number().int().positive().optional(),
-    requested_window_start_at: z.string().optional(),
-    requested_window_end_exclusive_at: z.string().optional(),
-    window_start_at: z.string().optional(),
-    window_end_exclusive_at: z.string().optional(),
-    max_message_pages_per_conversation: z.number().int().min(0).optional()
-  })
-  .transform((raw) => ({
-    jobName: raw.job_name,
-    targetDate: raw.target_date,
-    processingMode: raw.processing_mode,
-    initialConversationLimit: raw.initial_conversation_limit,
-    snapshotVersion: raw.snapshot_version ?? null,
-    requestedWindowStartAt: raw.requested_window_start_at ?? null,
-    requestedWindowEndExclusiveAt: raw.requested_window_end_exclusive_at ?? null,
-    windowStartAt: raw.window_start_at ?? null,
-    windowEndExclusiveAt: raw.window_end_exclusive_at ?? null,
-    maxMessagePagesPerConversation: raw.max_message_pages_per_conversation ?? 0
+    analysisEnabled: raw.analysis_enabled
   }));
 
 export const manualJobBodySchema = z
   .object({
-    job_name: z.string().min(1).default("manual-run"),
     processing_mode: processingModeSchema.default("etl_only"),
-    target_date: z.string().optional(),
-    run_mode: z.enum(["manual_range", "backfill_day"]).optional(),
-    requested_window_start_at: z.string().optional(),
-    requested_window_end_exclusive_at: z.string().optional(),
-    publish: z.boolean().optional(),
-    snapshot_version: z.number().int().positive().optional(),
-    run_group_id: z.string().uuid().optional(),
-    window_start_at: z.string().optional(),
-    window_end_exclusive_at: z.string().optional(),
-    max_conversations: z.number().int().min(0).optional(),
-    max_message_pages_per_conversation: z.number().int().min(0).optional()
+    target_date: dateOnlySchema.optional(),
+    requested_window_start_at: rfc3339Schema.optional(),
+    requested_window_end_exclusive_at: rfc3339Schema.optional()
   })
   .superRefine((raw, ctx) => {
-    const hasDay = typeof raw.target_date === "string";
-    const hasRange = typeof raw.requested_window_start_at === "string" || typeof raw.requested_window_end_exclusive_at === "string";
-    const isMaterializedRun = typeof raw.run_mode === "string";
+    const hasTargetDate = typeof raw.target_date === "string";
+    const hasRangeStart = typeof raw.requested_window_start_at === "string";
+    const hasRangeEnd = typeof raw.requested_window_end_exclusive_at === "string";
 
-    if (!hasDay && !(raw.requested_window_start_at && raw.requested_window_end_exclusive_at)) {
+    if (!hasTargetDate && !(hasRangeStart && hasRangeEnd)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "manual job must provide target_date or both requested_window_* fields"
+        message: "job phải có target_date hoặc đủ requested_window_start_at + requested_window_end_exclusive_at."
       });
     }
 
-    if (hasDay && hasRange && !isMaterializedRun) {
+    if (hasTargetDate && (hasRangeStart || hasRangeEnd)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "manual job cannot provide target_date together with requested_window_* fields"
+        message: "job không được gửi đồng thời target_date và requested_window_*."
       });
     }
   })
   .transform((raw) => ({
-    jobName: raw.job_name,
     processingMode: raw.processing_mode,
-    runMode: raw.run_mode ?? null,
     targetDate: raw.target_date ?? null,
     requestedWindowStartAt: raw.requested_window_start_at ?? null,
-    requestedWindowEndExclusiveAt: raw.requested_window_end_exclusive_at ?? null,
-    publish: raw.publish ?? false,
-    runGroupId: raw.run_group_id ?? null,
-    snapshotVersion: raw.snapshot_version ?? null,
-    windowStartAt: raw.window_start_at ?? null,
-    windowEndExclusiveAt: raw.window_end_exclusive_at ?? null,
-    maxConversations: raw.max_conversations ?? 0,
-    maxMessagePagesPerConversation: raw.max_message_pages_per_conversation ?? 0
+    requestedWindowEndExclusiveAt: raw.requested_window_end_exclusive_at ?? null
   }));
 
-export const schedulerJobBodySchema = z
+export const previewJobBodySchema = z
   .object({
-    job_name: z.string().min(1).default("scheduled-daily"),
-    target_date: z.string().min(1),
-    processing_mode: processingModeSchema.default("etl_only"),
-    snapshot_version: z.number().int().positive().optional(),
-    is_published: z.boolean().optional(),
-    max_conversations: z.number().int().min(0).optional(),
-    max_message_pages_per_conversation: z.number().int().min(0).optional()
+    kind: z.literal("manual"),
+    connected_page_id: z.string().uuid(),
+    job: manualJobBodySchema
   })
   .transform((raw) => ({
-    jobName: raw.job_name,
-    targetDate: raw.target_date,
-    processingMode: raw.processing_mode,
-    snapshotVersion: raw.snapshot_version ?? null,
-    isPublished: raw.is_published ?? true,
-    maxConversations: raw.max_conversations ?? 0,
-    maxMessagePagesPerConversation: raw.max_message_pages_per_conversation ?? 0
+    kind: "manual" as const,
+    connectedPageId: raw.connected_page_id,
+    job: raw.job
   }));
 
-export const previewJobBodySchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("manual"),
-      connected_page_id: z.string().min(1),
-      job: manualJobBodySchema
-    })
-    .transform((raw) => ({
-      kind: "manual" as const,
-      connectedPageId: raw.connected_page_id,
-      job: raw.job
-    })),
-  z
-    .object({
-      kind: z.literal("onboarding"),
-      connected_page_id: z.string().min(1),
-      job: onboardingJobBodySchema
-    })
-    .transform((raw) => ({
-      kind: "onboarding" as const,
-      connectedPageId: raw.connected_page_id,
-      job: raw.job
-    })),
-  z
-    .object({
-      kind: z.literal("scheduler"),
-      job: schedulerJobBodySchema
-    })
-    .transform((raw) => ({
-      kind: "scheduler" as const,
-      job: raw.job
-    }))
-]);
+export const executeJobBodySchema = z
+  .object({
+    kind: z.literal("manual"),
+    connected_page_id: z.string().uuid(),
+    job: manualJobBodySchema
+  })
+  .transform((raw) => ({
+    kind: "manual" as const,
+    connectedPageId: raw.connected_page_id,
+    job: raw.job
+  }));
 
-export const executeJobBodySchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("manual"),
-      connected_page_id: z.string().min(1),
-      job: manualJobBodySchema,
-      write_artifacts: z.boolean().default(false)
-    })
-    .transform((raw) => ({
-      kind: "manual" as const,
-      connectedPageId: raw.connected_page_id,
-      job: raw.job,
-      writeArtifacts: raw.write_artifacts
-    })),
-  z
-    .object({
-      kind: z.literal("onboarding"),
-      connected_page_id: z.string().min(1),
-      job: onboardingJobBodySchema,
-      write_artifacts: z.boolean().default(true)
-    })
-    .transform((raw) => ({
-      kind: "onboarding" as const,
-      connectedPageId: raw.connected_page_id,
-      job: raw.job,
-      writeArtifacts: raw.write_artifacts
-    })),
-  z
-    .object({
-      kind: z.literal("scheduler"),
-      job: schedulerJobBodySchema,
-      write_artifacts: z.boolean().default(false)
-    })
-    .transform((raw) => ({
-      kind: "scheduler" as const,
-      job: raw.job,
-      writeArtifacts: raw.write_artifacts
-    }))
-]);
+export const publishRunBodySchema = z
+  .object({
+    publish_as: publishAsSchema,
+    confirm_historical_overwrite: z.boolean().default(false),
+    expected_replaced_run_id: z.string().uuid().nullable().optional()
+  })
+  .transform((raw) => ({
+    publishAs: raw.publish_as,
+    confirmHistoricalOverwrite: raw.confirm_historical_overwrite,
+    expectedReplacedRunId: raw.expected_replaced_run_id ?? null
+  }));
 
 export type ProcessingMode = z.infer<typeof processingModeSchema>;
-export type CapabilityKey = z.infer<typeof capabilityKeySchema>;
+export type RunMode = z.infer<typeof runModeSchema>;
+export type PublishEligibility = z.infer<typeof publishEligibilitySchema>;
+export type PublishAs = z.infer<typeof publishAsSchema>;
+export type TagRole = z.infer<typeof tagRoleSchema>;
+
 export type TagMappingConfig = ReturnType<typeof normalizeTagMappingConfig>;
 export type OpeningRulesConfig = ReturnType<typeof normalizeOpeningRulesConfig>;
+export type SchedulerConfig = ReturnType<typeof normalizeSchedulerConfig>;
 export type NotificationTargetsConfig = ReturnType<typeof normalizeNotificationTargets>;
-export type CustomerDirectoryEntry = z.infer<typeof customerDirectoryEntrySchema>;
 export type RegisterPageBody = z.infer<typeof registerPageBodySchema>;
-export type SetupSampleBody = z.infer<typeof setupSampleBodySchema>;
-export type CommitSetupBody = z.infer<typeof commitSetupBodySchema>;
-export type UpdateConnectedPageBody = z.infer<typeof updateConnectedPageBodySchema>;
-export type CreateAiProfileVersionBody = z.infer<typeof createAiProfileVersionBodySchema>;
-export type CloneAiProfileVersionBody = z.infer<typeof cloneAiProfileVersionBodySchema>;
-export type CreatePromptVersionBody = z.infer<typeof createPromptVersionBodySchema>;
-export type ClonePromptVersionBody = z.infer<typeof clonePromptVersionBodySchema>;
+export type CreateConfigVersionBody = z.infer<typeof createConfigVersionBodySchema>;
 export type ManualJobBody = z.infer<typeof manualJobBodySchema>;
-export type OnboardingJobBody = z.infer<typeof onboardingJobBodySchema>;
-export type SchedulerJobBody = z.infer<typeof schedulerJobBodySchema>;
 export type PreviewJobBody = z.infer<typeof previewJobBodySchema>;
 export type ExecuteJobBody = z.infer<typeof executeJobBodySchema>;
+export type PublishRunBody = z.infer<typeof publishRunBodySchema>;
 
-export type WorkerJob = {
-  connected_page_id: string;
-  processing_mode: ProcessingMode;
-  run_params_json: Record<string, unknown>;
-  user_access_token: string;
-  page_id: string;
-  target_date: string;
-  business_timezone: string;
-  run_mode: "scheduled_daily" | "manual_range" | "backfill_day" | "onboarding_sample";
+export type WorkerManifest = {
+  manifest_version: 1;
+  pipeline_run_id: string;
   run_group_id: string;
-  snapshot_version: number;
-  is_published: boolean;
+  connected_page_id: string;
+  page_id: string;
+  user_access_token: string;
+  business_timezone: string;
+  target_date: string;
+  run_mode: RunMode;
+  processing_mode: ProcessingMode;
+  publish_eligibility: PublishEligibility;
   requested_window_start_at: string | null;
   requested_window_end_exclusive_at: string | null;
-  window_start_at: string | null;
-  window_end_exclusive_at: string | null;
-  max_conversations: number;
-  max_message_pages_per_conversation: number;
-  tag_mapping: {
-    default_signal: string;
-    entries: Array<{
-      pancake_tag_id: string;
-      raw_label: string;
-      signal: string;
-    }>;
+  window_start_at: string;
+  window_end_exclusive_at: string;
+  is_full_day: boolean;
+  etl_config: {
+    config_version_id: string;
+    etl_config_hash: string;
+    tag_mapping: TagMappingConfig;
+    opening_rules: OpeningRulesConfig;
+    scheduler: SchedulerConfig | null;
   };
-  opening_rules: {
-    boundary: {
-      mode: "until_first_meaningful_human_message";
-      max_messages: number;
-    };
-    selectors: Array<{
-      signal: string;
-      allowed_message_types: string[];
-      options: Array<{
-        raw_text: string;
-        decision: string;
-      }>;
-    }>;
-    fallback: {
-      store_candidate_if_unmatched: boolean;
-    };
-  };
-  customer_directory: CustomerDirectoryEntry[];
 };
-
-export type RunSlice = {
-  targetDate: string;
-  requestedWindowStartAt: string | null;
-  requestedWindowEndExclusiveAt: string | null;
-  windowStartAt: string | null;
-  windowEndExclusiveAt: string | null;
-  isFullDay: boolean;
-};
-
-export type JobPreview =
-  | {
-      kind: "manual";
-      jobName: string;
-      connectedPageId: string;
-      pageName: string;
-      workerJobs: WorkerJob[];
-    }
-  | {
-      kind: "onboarding";
-      jobName: string;
-      connectedPageId: string;
-      pageName: string;
-      workerJobs: WorkerJob[];
-    }
-  | {
-      kind: "scheduler";
-      jobName: string;
-      pageNames: string[];
-      workerJobs: WorkerJob[];
-    };
 
 export function normalizeTagMappingConfig(value: unknown) {
-  const parsed = tagMappingSchema.safeParse(value ?? {});
-  const config = parsed.success
-    ? parsed.data
-    : {
-        versionNo: 1,
-        updatedAt: null,
-        defaultSignal: "null",
-        entries: [] as Array<{ pancakeTagId: string; rawLabel: string; signal: string }>
-      };
+  const parsed = tagMappingInputSchema.safeParse(value ?? {});
+  const source = parsed.success ? parsed.data : {
+    version: 1 as const,
+    default_role: "noise" as const,
+    entries: [] as Array<z.input<typeof tagMappingEntryInputSchema>>
+  };
+
+  const deduped = new Map<string, {
+    sourceTagId: string;
+    sourceTagText: string;
+    role: TagRole;
+    canonicalCode: string | null;
+    mappingSource: "auto_default" | "operator";
+    status: "active" | "inactive";
+  }>();
+
+  for (const entry of source.entries) {
+    const sourceTagId = entry.source_tag_id.trim();
+    const sourceTagText = entry.source_tag_text.trim();
+    const role = entry.role;
+    const canonicalCode = normalizeOptionalText(entry.canonical_code ?? undefined);
+    if (!sourceTagId || !sourceTagText) {
+      continue;
+    }
+    if (role !== "noise" && !canonicalCode) {
+      continue;
+    }
+    if (canonicalCode === "revisit" && role !== "journey") {
+      continue;
+    }
+    deduped.set(sourceTagId, {
+      sourceTagId,
+      sourceTagText,
+      role,
+      canonicalCode,
+      mappingSource: entry.mapping_source ?? "operator",
+      status: entry.status ?? "active"
+    });
+  }
+
   return {
-    versionNo: config.versionNo,
-    updatedAt: config.updatedAt,
-    defaultSignal: config.defaultSignal,
-    entries: config.entries
+    version: 1 as const,
+    defaultRole: "noise" as const,
+    entries: [...deduped.values()].sort((left, right) => left.sourceTagText.localeCompare(right.sourceTagText))
   };
 }
 
 export function normalizeOpeningRulesConfig(value: unknown) {
-  const parsed = openingRulesSchema.safeParse(value ?? {});
-  const config = parsed.success
-    ? parsed.data
-    : {
-        versionNo: 1,
-        updatedAt: null,
-        boundary: {
-          mode: "until_first_meaningful_human_message" as const,
-          maxMessages: 12
-        },
-        selectors: [] as Array<{
-          signal: string;
-          allowedMessageTypes: string[];
-          options: Array<{ rawText: string; decision: string }>;
-        }>,
-        fallback: {
-          storeCandidateIfUnmatched: true
-        }
-      };
-  return config;
+  const parsed = openingRulesInputSchema.safeParse(value ?? {});
+  const source = parsed.success ? parsed.data : {
+    version: 1 as const,
+    selectors: [] as Array<z.input<typeof openingSelectorInputSchema>>
+  };
+
+  const selectors = source.selectors
+    .map((selector) => ({
+      selectorId: selector.selector_id.trim(),
+      signalRole: selector.signal_role,
+      signalCode: selector.signal_code.trim(),
+      allowedMessageTypes: (selector.allowed_message_types ?? []).map((value) => value.trim()).filter(Boolean),
+      options: (selector.options ?? [])
+        .map((option) => ({
+          rawText: option.raw_text.trim(),
+          matchMode: option.match_mode ?? "exact"
+        }))
+        .filter((option) => option.rawText.length > 0)
+    }))
+    .filter((selector) => selector.selectorId.length > 0 && selector.signalCode.length > 0 && selector.allowedMessageTypes.length > 0)
+    .sort((left, right) => left.selectorId.localeCompare(right.selectorId));
+
+  return {
+    version: 1 as const,
+    selectors
+  };
+}
+
+export function normalizeSchedulerConfig(value: unknown) {
+  const parsed = schedulerInputSchema.safeParse(value ?? {});
+  const source = parsed.success ? parsed.data : {
+    version: 1 as const,
+    timezone: "Asia/Ho_Chi_Minh",
+    official_daily_time: "00:00",
+    lookback_hours: 2,
+    max_conversations_per_run: 0,
+    max_message_pages_per_thread: 0
+  };
+
+  return {
+    version: 1 as const,
+    timezone: source.timezone,
+    officialDailyTime: source.official_daily_time,
+    lookbackHours: source.lookback_hours,
+    maxConversationsPerRun: source.max_conversations_per_run,
+    maxMessagePagesPerThread: source.max_message_pages_per_thread
+  };
 }
 
 export function normalizeNotificationTargets(value: unknown) {
-  const parsed = notificationTargetsSchema.safeParse(value ?? {});
-  return parsed.success
-    ? {
-        telegramChatIds: parsed.data.telegram_chat_ids,
-        emailRecipients: parsed.data.email_recipients,
-        notifyOnNewTag: parsed.data.notify_on_new_tag,
-        notifyOnPipelineFailure: parsed.data.notify_on_pipeline_failure
-      }
-    : {
-        telegramChatIds: [] as string[],
-        emailRecipients: [] as string[],
-        notifyOnNewTag: true,
-        notifyOnPipelineFailure: true
-      };
-}
+  const parsed = notificationTargetsInputSchema.safeParse(value ?? {});
+  const source = parsed.success ? parsed.data : {
+    version: 1 as const,
+    telegram: [] as Array<z.input<typeof notificationTelegramTargetSchema>>,
+    email: [] as Array<z.input<typeof notificationEmailTargetSchema>>
+  };
 
-export function toWorkerTagMapping(config: TagMappingConfig): WorkerJob["tag_mapping"] {
   return {
-    default_signal: config.defaultSignal,
-    entries: config.entries.map((entry) => ({
-      pancake_tag_id: entry.pancakeTagId,
-      raw_label: entry.rawLabel,
-      signal: entry.signal
+    version: 1 as const,
+    telegram: source.telegram.map((item) => ({
+      chatId: item.chat_id,
+      events: [...(item.events ?? [])].sort()
+    })),
+    email: source.email.map((item) => ({
+      address: item.address,
+      events: [...(item.events ?? [])].sort()
     }))
   };
 }
 
-export function toWorkerOpeningRules(config: OpeningRulesConfig): WorkerJob["opening_rules"] {
-  return {
-    boundary: {
-      mode: config.boundary.mode,
-      max_messages: config.boundary.maxMessages
-    },
-    selectors: config.selectors.map((selector) => ({
-      signal: selector.signal,
-      allowed_message_types: selector.allowedMessageTypes,
-      options: selector.options.map((option) => ({
-        raw_text: option.rawText,
-        decision: option.decision
-      }))
-    })),
-    fallback: {
-      store_candidate_if_unmatched: config.fallback.storeCandidateIfUnmatched
-    }
-  };
-}
-
-export function parseTagMappingConfig(value: unknown): TagMappingConfig {
-  return normalizeTagMappingConfig(value);
-}
-
-export function parseOpeningRulesConfig(value: unknown): OpeningRulesConfig {
-  return normalizeOpeningRulesConfig(value);
-}
-
-export function parseNotificationTargets(value: unknown): NotificationTargetsConfig {
-  return normalizeNotificationTargets(value);
-}
-
-export function buildPromptProfile(promptText: string, notes?: string | null, overrides?: { modelName?: string | null; outputSchemaVersion?: string | null }) {
-  return {
-    prompt_template: promptText.trim(),
-    model_name: overrides?.modelName ?? "gemini-2.5-flash",
-    output_schema_version: overrides?.outputSchemaVersion ?? "conversation_analysis.v1",
-    generation_config: {
-      temperature: 0.2,
-      top_p: 0.95
-    },
-    notes: notes ?? null
-  };
-}
-
-function normalizeOptionalText(value: string | undefined) {
+function normalizeOptionalText(value: string | undefined | null) {
   const trimmed = value?.trim();
   return trimmed ? trimmed : null;
 }

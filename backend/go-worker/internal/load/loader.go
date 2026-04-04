@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"chat-analyzer-v2/backend/go-worker/internal/config"
-	"chat-analyzer-v2/backend/go-worker/internal/pancake"
 	"chat-analyzer-v2/backend/go-worker/internal/transform"
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -17,11 +16,16 @@ import (
 )
 
 type Result struct {
-	ETLRunID string
+	PipelineRunID string
 }
 
 type execer interface {
 	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+}
+
+type queryer interface {
+	Exec(context.Context, string, ...any) (pgconn.CommandTag, error)
+	QueryRow(context.Context, string, ...any) pgx.Row
 }
 
 func StartRun(ctx context.Context, cfg config.Config) (Result, error) {
@@ -31,22 +35,19 @@ func StartRun(ctx context.Context, cfg config.Config) (Result, error) {
 	}
 	defer pool.Close()
 
-	startedAt := time.Now().UTC()
-	etlRunID, err := insertETLRunStart(ctx, pool, cfg, startedAt)
-	if err != nil {
+	if err := markPipelineRunStarted(ctx, pool, cfg.PipelineRunID, time.Now().UTC()); err != nil {
 		return Result{}, err
 	}
-	return Result{ETLRunID: etlRunID}, nil
+	return Result{PipelineRunID: cfg.PipelineRunID}, nil
 }
 
 func SaveSuccess(
 	ctx context.Context,
 	cfg config.Config,
-	etlRunID string,
+	pipelineRunID string,
 	metrics map[string]any,
-	tags []pancake.Tag,
+	_ any,
 	conversationDays []transform.ConversationDaySource,
-	threadMappings []transform.ThreadCustomerMapping,
 ) error {
 	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
 	if err != nil {
@@ -54,43 +55,45 @@ func SaveSuccess(
 	}
 	defer pool.Close()
 
-	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
-	if err != nil {
-		return fmt.Errorf("begin transaction: %w", err)
+	loadedThreadDays := 0
+	loadedMessages := 0
+	failures := make([]string, 0)
+
+	for _, threadDay := range conversationDays {
+		if err := persistThreadDay(ctx, pool, cfg, pipelineRunID, threadDay); err != nil {
+			failures = append(failures, fmt.Sprintf("%s: %s", threadDay.ConversationID, compactErrorText(err)))
+			continue
+		}
+		loadedThreadDays++
+		loadedMessages += len(threadDay.Messages)
 	}
-	defer rollbackOnError(ctx, tx)
+
+	finalMetrics := cloneMetrics(metrics)
+	finalMetrics["thread_days_loaded"] = loadedThreadDays
+	finalMetrics["messages_loaded"] = loadedMessages
+	finalMetrics["thread_day_failures_count"] = len(failures)
+	if len(failures) > 0 {
+		finalMetrics["thread_day_failures"] = failures
+	}
 
 	finishedAt := time.Now().UTC()
-	if err := updateETLRunSuccess(ctx, tx, cfg, etlRunID, metrics, tags, finishedAt); err != nil {
-		return err
+	reuseSummary := buildReuseSummary(loadedThreadDays)
+	errorText := ""
+	if len(failures) > 0 {
+		errorText = strings.Join(failures, "\n")
 	}
 
-	for _, conversationDay := range conversationDays {
-		conversationDayID, err := insertConversationDay(ctx, tx, etlRunID, conversationDay, finishedAt)
-		if err != nil {
-			return err
-		}
-		if err := insertMessages(ctx, tx, conversationDayID, conversationDay.Messages, finishedAt); err != nil {
-			return err
-		}
+	status := "loaded"
+	if loadedThreadDays == 0 && len(failures) > 0 {
+		status = "failed"
 	}
-
-	for _, mapping := range threadMappings {
-		if err := insertThreadCustomerMapping(ctx, tx, mapping, finishedAt); err != nil {
-			return err
-		}
-	}
-
-	if err := tx.Commit(ctx); err != nil {
-		return fmt.Errorf("commit transaction: %w", err)
-	}
-	return nil
+	return updatePipelineRunCompletion(ctx, pool, pipelineRunID, status, finalMetrics, reuseSummary, errorText, finishedAt)
 }
 
 func SaveFailure(
 	ctx context.Context,
 	cfg config.Config,
-	etlRunID string,
+	pipelineRunID string,
 	metrics map[string]any,
 	runErr error,
 ) error {
@@ -100,26 +103,112 @@ func SaveFailure(
 	}
 	defer pool.Close()
 
-	metricsJSON, err := json.Marshal(metrics)
-	if err != nil {
-		return fmt.Errorf("marshal failed run metrics: %w", err)
-	}
-	_, err = pool.Exec(ctx, `
-		UPDATE etl_run
-		SET status = 'failed',
-		    is_published = false,
-		    metrics_json = $2::jsonb,
-		    error_text = NULLIF($3, ''),
-		    finished_at = $4
-		WHERE id = $1
-	`,
-		etlRunID,
-		metricsJSON,
+	finalMetrics := cloneMetrics(metrics)
+	finalMetrics["thread_day_failures_count"] = finalMetrics["thread_day_failures_count"]
+	return updatePipelineRunCompletion(
+		ctx,
+		pool,
+		pipelineRunID,
+		"failed",
+		finalMetrics,
+		buildReuseSummary(0),
 		compactErrorText(runErr),
 		time.Now().UTC(),
 	)
+}
+
+func markPipelineRunStarted(ctx context.Context, db execer, pipelineRunID string, startedAt time.Time) error {
+	commandTag, err := db.Exec(ctx, `
+		UPDATE pipeline_run
+		SET status = 'running',
+		    error_text = NULL,
+		    started_at = $2,
+		    finished_at = NULL
+		WHERE id = $1::uuid
+	`,
+		pipelineRunID,
+		startedAt,
+	)
 	if err != nil {
-		return fmt.Errorf("update etl_run failure %s: %w", etlRunID, err)
+		return fmt.Errorf("update pipeline_run start %s: %w", pipelineRunID, err)
+	}
+	if commandTag.RowsAffected() == 0 {
+		return fmt.Errorf("pipeline_run %s not found", pipelineRunID)
+	}
+	return nil
+}
+
+func updatePipelineRunCompletion(
+	ctx context.Context,
+	db execer,
+	pipelineRunID string,
+	status string,
+	metrics map[string]any,
+	reuseSummary map[string]any,
+	errorText string,
+	finishedAt time.Time,
+) error {
+	metricsJSON, err := json.Marshal(metrics)
+	if err != nil {
+		return fmt.Errorf("marshal run metrics: %w", err)
+	}
+	reuseSummaryJSON, err := json.Marshal(reuseSummary)
+	if err != nil {
+		return fmt.Errorf("marshal reuse summary: %w", err)
+	}
+
+	commandTag, err := db.Exec(ctx, `
+		UPDATE pipeline_run
+		SET status = $2,
+		    metrics_json = $3::jsonb,
+		    reuse_summary_json = $4::jsonb,
+		    error_text = NULLIF($5, ''),
+		    finished_at = $6
+		WHERE id = $1::uuid
+	`,
+		pipelineRunID,
+		status,
+		metricsJSON,
+		reuseSummaryJSON,
+		errorText,
+		finishedAt,
+	)
+	if err != nil {
+		return fmt.Errorf("update pipeline_run completion %s: %w", pipelineRunID, err)
+	}
+	if commandTag.RowsAffected() == 0 {
+		return fmt.Errorf("pipeline_run %s not found", pipelineRunID)
+	}
+	return nil
+}
+
+func persistThreadDay(
+	ctx context.Context,
+	pool *pgxpool.Pool,
+	cfg config.Config,
+	pipelineRunID string,
+	threadDay transform.ConversationDaySource,
+) error {
+	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return fmt.Errorf("begin transaction: %w", err)
+	}
+	defer rollbackOnError(ctx, tx)
+
+	threadID, err := upsertThread(ctx, tx, cfg, threadDay)
+	if err != nil {
+		return err
+	}
+	threadDayID, err := upsertThreadDay(ctx, tx, pipelineRunID, threadID, threadDay)
+	if err != nil {
+		return err
+	}
+	if err := insertMessages(ctx, tx, threadDayID, threadDay.Messages, time.Now().UTC()); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(ctx); err != nil {
+		return fmt.Errorf("commit transaction: %w", err)
 	}
 	return nil
 }
@@ -128,196 +217,179 @@ func rollbackOnError(ctx context.Context, tx pgx.Tx) {
 	_ = tx.Rollback(ctx)
 }
 
-func insertETLRunStart(
+func upsertThread(
 	ctx context.Context,
-	db execer,
+	db queryer,
 	cfg config.Config,
-	startedAt time.Time,
+	threadDay transform.ConversationDaySource,
 ) (string, error) {
-	targetDate, _ := cfg.BusinessWindow()
-	windowStartAt, windowEndAt := cfg.EffectiveWindow()
-	metricsJSON, err := json.Marshal(map[string]any{})
-	if err != nil {
-		return "", fmt.Errorf("marshal run metrics: %w", err)
-	}
-	tagDictionaryJSON, err := json.Marshal([]any{})
-	if err != nil {
-		return "", fmt.Errorf("marshal tag dictionary: %w", err)
-	}
-	runParamsJSON := cfg.RunParamsJSON
-	if len(runParamsJSON) == 0 {
-		runParamsJSON = json.RawMessage(`{}`)
-	}
-
-	etlRunID := uuid.NewString()
-	_, err = db.Exec(ctx, `
-		INSERT INTO etl_run (
+	now := time.Now().UTC()
+	threadID := ""
+	if err := db.QueryRow(ctx, `
+		INSERT INTO thread (
 			id,
-			run_group_id,
-			run_mode,
 			connected_page_id,
-			processing_mode,
-			target_date,
-			business_timezone,
-			requested_window_start_at,
-			requested_window_end_exclusive_at,
-			window_start_at,
-			window_end_exclusive_at,
-			status,
-			snapshot_version,
-			is_published,
-			run_params_json,
-			tag_dictionary_json,
-			metrics_json,
-			started_at,
-			finished_at
-		) VALUES (
-			$1, NULLIF($2, '')::uuid, $3, $4::uuid, $5, $6, $7, $8, $9, $10, $11, 'running', $12, false, $13::jsonb, $14::jsonb, $15::jsonb, $16, NULL
-		)
-	`,
-		etlRunID,
-		cfg.RunGroupID,
-		cfg.RunMode,
-		cfg.ConnectedPageID,
-		cfg.ProcessingMode,
-		targetDate.Format(time.DateOnly),
-		cfg.BusinessTimezone,
-		cfg.RequestedWindowStartAt,
-		cfg.RequestedWindowEndExclusiveAt,
-		windowStartAt,
-		windowEndAt,
-		cfg.SnapshotVersion,
-		runParamsJSON,
-		tagDictionaryJSON,
-		metricsJSON,
-		startedAt,
-	)
-	if err != nil {
-		return "", fmt.Errorf("insert etl_run: %w", err)
-	}
-
-	return etlRunID, nil
-}
-
-func updateETLRunSuccess(
-	ctx context.Context,
-	tx pgx.Tx,
-	cfg config.Config,
-	etlRunID string,
-	metrics map[string]any,
-	tags []pancake.Tag,
-	finishedAt time.Time,
-) error {
-	metricsJSON, err := json.Marshal(metrics)
-	if err != nil {
-		return fmt.Errorf("marshal run metrics: %w", err)
-	}
-	tagDictionaryJSON, err := json.Marshal(tags)
-	if err != nil {
-		return fmt.Errorf("marshal tag dictionary: %w", err)
-	}
-
-	status := "loaded"
-	if cfg.IsPublished {
-		status = "published"
-	}
-
-	_, err = tx.Exec(ctx, `
-		UPDATE etl_run
-		SET status = $2,
-		    is_published = $3,
-		    tag_dictionary_json = $4::jsonb,
-		    metrics_json = $5::jsonb,
-		    error_text = NULL,
-		    finished_at = $6
-		WHERE id = $1
-	`,
-		etlRunID,
-		status,
-		cfg.IsPublished,
-		tagDictionaryJSON,
-		metricsJSON,
-		finishedAt,
-	)
-	if err != nil {
-		return fmt.Errorf("update etl_run success %s: %w", etlRunID, err)
-	}
-	return nil
-}
-
-func insertConversationDay(
-	ctx context.Context,
-	tx pgx.Tx,
-	etlRunID string,
-	conversationDay transform.ConversationDaySource,
-	createdAt time.Time,
-) (string, error) {
-	conversationDayID := uuid.NewString()
-	_, err := tx.Exec(ctx, `
-		INSERT INTO conversation_day (
-			id,
-			etl_run_id,
-			conversation_id,
+			source_thread_id,
 			thread_first_seen_at,
+			thread_last_seen_at,
 			customer_display_name,
-			conversation_updated_at,
-			message_count_persisted,
-			message_count_seen_from_source,
-			normalized_phone_candidates_json,
+			current_phone_candidates_json,
+			latest_entry_source_type,
+			latest_entry_post_id,
+			latest_entry_ad_id,
+			created_at,
+			updated_at
+		) VALUES (
+			$1::uuid, $2::uuid, $3, $4, $5, NULLIF($6, ''), $7::jsonb, NULLIF($8, ''), NULLIF($9, ''), NULLIF($10, ''), $11, $11
+		)
+		ON CONFLICT (connected_page_id, source_thread_id) DO UPDATE
+		SET thread_first_seen_at = CASE
+			WHEN EXCLUDED.thread_first_seen_at IS NULL THEN thread.thread_first_seen_at
+			WHEN thread.thread_first_seen_at IS NULL OR EXCLUDED.thread_first_seen_at < thread.thread_first_seen_at THEN EXCLUDED.thread_first_seen_at
+			ELSE thread.thread_first_seen_at
+		END,
+		    thread_last_seen_at = CASE
+			WHEN EXCLUDED.thread_last_seen_at IS NULL THEN thread.thread_last_seen_at
+			WHEN thread.thread_last_seen_at IS NULL OR EXCLUDED.thread_last_seen_at > thread.thread_last_seen_at THEN EXCLUDED.thread_last_seen_at
+			ELSE thread.thread_last_seen_at
+		END,
+		    customer_display_name = COALESCE(NULLIF(EXCLUDED.customer_display_name, ''), thread.customer_display_name),
+		    current_phone_candidates_json = CASE
+			WHEN EXCLUDED.current_phone_candidates_json = '[]'::jsonb THEN thread.current_phone_candidates_json
+			ELSE EXCLUDED.current_phone_candidates_json
+		END,
+		    latest_entry_source_type = COALESCE(NULLIF(EXCLUDED.latest_entry_source_type, ''), thread.latest_entry_source_type),
+		    latest_entry_post_id = COALESCE(NULLIF(EXCLUDED.latest_entry_post_id, ''), thread.latest_entry_post_id),
+		    latest_entry_ad_id = COALESCE(NULLIF(EXCLUDED.latest_entry_ad_id, ''), thread.latest_entry_ad_id),
+		    updated_at = EXCLUDED.updated_at
+		RETURNING id
+	`,
+		uuid.NewString(),
+		cfg.ConnectedPageID,
+		threadDay.ConversationID,
+		threadDay.ThreadFirstSeenAt,
+		threadDay.ThreadLastSeenAt,
+		threadDay.CustomerDisplayName,
+		threadDay.CurrentPhoneCandidatesJSON,
+		threadDay.EntrySourceType,
+		threadDay.EntryPostID,
+		threadDay.EntryAdID,
+		now,
+	).Scan(&threadID); err != nil {
+		return "", fmt.Errorf("upsert thread %s: %w", threadDay.ConversationID, err)
+	}
+	return threadID, nil
+}
+
+func upsertThreadDay(
+	ctx context.Context,
+	db queryer,
+	pipelineRunID string,
+	threadID string,
+	threadDay transform.ConversationDaySource,
+) (string, error) {
+	now := time.Now().UTC()
+	threadDayID := ""
+	if err := db.QueryRow(ctx, `
+		INSERT INTO thread_day (
+			id,
+			pipeline_run_id,
+			thread_id,
+			is_new_inbox,
+			entry_source_type,
+			entry_post_id,
+			entry_ad_id,
 			observed_tags_json,
 			normalized_tag_signals_json,
-			opening_blocks_json,
-			first_meaningful_human_message_id,
-			first_meaningful_human_sender_role,
-			source_conversation_json_redacted,
+			opening_block_json,
+			first_meaningful_message_id,
+			first_meaningful_message_text_redacted,
+			first_meaningful_message_sender_role,
+			message_count,
+			first_staff_response_seconds,
+			avg_staff_response_seconds,
+			staff_participants_json,
+			staff_message_stats_json,
+			explicit_revisit_signal,
+			explicit_need_signal,
+			explicit_outcome_signal,
+			source_thread_json_redacted,
 			created_at
 		) VALUES (
-			$1, $2, $3, $4, NULLIF($5, ''), $6, $7, $8, $9::jsonb, $10::jsonb, $11::jsonb, $12::jsonb, NULLIF($13, ''), NULLIF($14, ''), $15::jsonb, $16
+			$1::uuid, $2::uuid, $3::uuid, $4, NULLIF($5, ''), NULLIF($6, ''), NULLIF($7, ''), $8::jsonb, $9::jsonb, $10::jsonb,
+			NULLIF($11, ''), NULLIF($12, ''), NULLIF($13, ''), $14, $15, $16, $17::jsonb, $18::jsonb,
+			NULLIF($19, ''), NULLIF($20, ''), NULLIF($21, ''), $22::jsonb, $23
 		)
+		ON CONFLICT (pipeline_run_id, thread_id) DO UPDATE
+		SET is_new_inbox = EXCLUDED.is_new_inbox,
+		    entry_source_type = EXCLUDED.entry_source_type,
+		    entry_post_id = EXCLUDED.entry_post_id,
+		    entry_ad_id = EXCLUDED.entry_ad_id,
+		    observed_tags_json = EXCLUDED.observed_tags_json,
+		    normalized_tag_signals_json = EXCLUDED.normalized_tag_signals_json,
+		    opening_block_json = EXCLUDED.opening_block_json,
+		    first_meaningful_message_id = EXCLUDED.first_meaningful_message_id,
+		    first_meaningful_message_text_redacted = EXCLUDED.first_meaningful_message_text_redacted,
+		    first_meaningful_message_sender_role = EXCLUDED.first_meaningful_message_sender_role,
+		    message_count = EXCLUDED.message_count,
+		    first_staff_response_seconds = EXCLUDED.first_staff_response_seconds,
+		    avg_staff_response_seconds = EXCLUDED.avg_staff_response_seconds,
+		    staff_participants_json = EXCLUDED.staff_participants_json,
+		    staff_message_stats_json = EXCLUDED.staff_message_stats_json,
+		    explicit_revisit_signal = EXCLUDED.explicit_revisit_signal,
+		    explicit_need_signal = EXCLUDED.explicit_need_signal,
+		    explicit_outcome_signal = EXCLUDED.explicit_outcome_signal,
+		    source_thread_json_redacted = EXCLUDED.source_thread_json_redacted
+		RETURNING id
 	`,
-		conversationDayID,
-		etlRunID,
-		conversationDay.ConversationID,
-		conversationDay.ThreadFirstSeenAt,
-		conversationDay.CustomerDisplayName,
-		conversationDay.ConversationUpdatedAt,
-		conversationDay.MessageCountPersisted,
-		conversationDay.MessageCountSeenFromSource,
-		conversationDay.NormalizedPhoneCandidatesJSON,
-		conversationDay.ObservedTagsJSON,
-		conversationDay.NormalizedTagSignalsJSON,
-		conversationDay.OpeningBlocksJSON,
-		conversationDay.FirstMeaningfulHumanMessageID,
-		conversationDay.FirstMeaningfulHumanSenderRole,
-		conversationDay.SourceConversationJSONRedacted,
-		createdAt,
-	)
-	if err != nil {
-		return "", fmt.Errorf("insert conversation_day %s: %w", conversationDay.ConversationID, err)
+		uuid.NewString(),
+		pipelineRunID,
+		threadID,
+		threadDay.IsNewInbox,
+		threadDay.EntrySourceType,
+		threadDay.EntryPostID,
+		threadDay.EntryAdID,
+		threadDay.ObservedTagsJSON,
+		threadDay.NormalizedTagSignalsJSON,
+		threadDay.OpeningBlockJSON,
+		threadDay.FirstMeaningfulMessageID,
+		threadDay.FirstMeaningfulMessageText,
+		threadDay.FirstMeaningfulMessageSenderRole,
+		threadDay.MessageCount,
+		threadDay.FirstStaffResponseSeconds,
+		threadDay.AvgStaffResponseSeconds,
+		threadDay.StaffParticipantsJSON,
+		threadDay.StaffMessageStatsJSON,
+		threadDay.ExplicitRevisitSignal,
+		threadDay.ExplicitNeedSignal,
+		threadDay.ExplicitOutcomeSignal,
+		threadDay.SourceConversationJSONRedacted,
+		now,
+	).Scan(&threadDayID); err != nil {
+		return "", fmt.Errorf("upsert thread_day %s: %w", threadDay.ConversationID, err)
 	}
-	return conversationDayID, nil
+	return threadDayID, nil
 }
 
 func insertMessages(
 	ctx context.Context,
-	tx pgx.Tx,
-	conversationDayID string,
+	db execer,
+	threadDayID string,
 	messages []transform.MessageSource,
 	createdAt time.Time,
 ) error {
 	for _, message := range messages {
-		_, err := tx.Exec(ctx, `
+		_, err := db.Exec(ctx, `
 			INSERT INTO message (
 				id,
-				conversation_day_id,
-				message_id,
-				conversation_id,
+				thread_day_id,
+				source_message_id,
 				inserted_at,
+				sender_role,
 				sender_source_id,
 				sender_name,
-				sender_role,
-				source_message_type_raw,
 				message_type,
+				source_message_type_raw,
 				redacted_text,
 				attachments_json,
 				is_meaningful_human_message,
@@ -325,19 +397,31 @@ func insertMessages(
 				source_message_json_redacted,
 				created_at
 			) VALUES (
-				$1, $2, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), $8, NULLIF($9, ''), $10, NULLIF($11, ''), $12::jsonb, $13, $14, $15::jsonb, $16
+				$1::uuid, $2::uuid, $3, $4, $5, NULLIF($6, ''), NULLIF($7, ''), $8, NULLIF($9, ''), NULLIF($10, ''),
+				$11::jsonb, $12, $13, $14::jsonb, $15
 			)
+			ON CONFLICT (thread_day_id, source_message_id) DO UPDATE
+			SET inserted_at = EXCLUDED.inserted_at,
+			    sender_role = EXCLUDED.sender_role,
+			    sender_source_id = EXCLUDED.sender_source_id,
+			    sender_name = EXCLUDED.sender_name,
+			    message_type = EXCLUDED.message_type,
+			    source_message_type_raw = EXCLUDED.source_message_type_raw,
+			    redacted_text = EXCLUDED.redacted_text,
+			    attachments_json = EXCLUDED.attachments_json,
+			    is_meaningful_human_message = EXCLUDED.is_meaningful_human_message,
+			    is_opening_block_message = EXCLUDED.is_opening_block_message,
+			    source_message_json_redacted = EXCLUDED.source_message_json_redacted
 		`,
 			uuid.NewString(),
-			conversationDayID,
+			threadDayID,
 			message.MessageID,
-			message.ConversationID,
 			message.InsertedAt,
+			message.SenderRole,
 			message.SenderSourceID,
 			message.SenderName,
-			message.SenderRole,
-			message.SourceMessageTypeRaw,
 			message.MessageType,
+			message.SourceMessageTypeRaw,
 			message.RedactedText,
 			message.AttachmentsJSON,
 			message.IsMeaningfulHumanMessage,
@@ -352,54 +436,22 @@ func insertMessages(
 	return nil
 }
 
-func insertThreadCustomerMapping(
-	ctx context.Context,
-	tx pgx.Tx,
-	mapping transform.ThreadCustomerMapping,
-	timestamp time.Time,
-) error {
-	if mapping.ConnectedPageID == "" || mapping.ThreadID == "" || mapping.CustomerID == "" || mapping.MappingMethod == "" {
-		return nil
+func buildReuseSummary(threadCount int) map[string]any {
+	return map[string]any{
+		"raw_reused_thread_count":    0,
+		"raw_refetched_thread_count": threadCount,
+		"ods_reused_thread_count":    0,
+		"ods_rebuilt_thread_count":   threadCount,
+		"reuse_reason":               "fresh_run",
 	}
-	confidence := any(nil)
-	if mapping.ConfidenceScore != nil {
-		confidence = *mapping.ConfidenceScore
-	}
+}
 
-	_, err := tx.Exec(ctx, `
-		INSERT INTO thread_customer_mapping (
-			connected_page_id,
-			thread_id,
-			customer_id,
-			mapping_method,
-			mapping_confidence_score,
-			mapped_phone_e164,
-			source_decision_id,
-			created_at,
-			updated_at
-		) VALUES (
-			$1::uuid, $2, $3, $4, $5, NULLIF($6, ''), NULL, $7, $7
-		)
-		ON CONFLICT (connected_page_id, thread_id) DO UPDATE
-		SET customer_id = EXCLUDED.customer_id,
-		    mapping_method = EXCLUDED.mapping_method,
-		    mapping_confidence_score = EXCLUDED.mapping_confidence_score,
-		    mapped_phone_e164 = EXCLUDED.mapped_phone_e164,
-		    source_decision_id = EXCLUDED.source_decision_id,
-		    updated_at = EXCLUDED.updated_at
-	`,
-		mapping.ConnectedPageID,
-		mapping.ThreadID,
-		mapping.CustomerID,
-		mapping.MappingMethod,
-		confidence,
-		mapping.MappedPhoneE164,
-		timestamp,
-	)
-	if err != nil {
-		return fmt.Errorf("upsert thread_customer_mapping %s/%s: %w", mapping.ConnectedPageID, mapping.ThreadID, err)
+func cloneMetrics(metrics map[string]any) map[string]any {
+	cloned := make(map[string]any, len(metrics))
+	for key, value := range metrics {
+		cloned[key] = value
 	}
-	return nil
+	return cloned
 }
 
 func compactErrorText(runErr error) string {

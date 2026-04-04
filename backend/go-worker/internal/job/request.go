@@ -11,31 +11,32 @@ import (
 	"chat-analyzer-v2/backend/go-worker/internal/controlplane"
 )
 
-const defaultRunMode = "scheduled_daily"
-
-type CustomerDirectoryEntry = controlplane.CustomerDirectoryEntry
+const defaultRunMode = "official_daily"
 
 type Request struct {
-	ConnectedPageID                string                          `json:"connected_page_id"`
-	ProcessingMode                 string                          `json:"processing_mode"`
-	RunParamsJSON                  json.RawMessage                 `json:"run_params_json"`
-	UserAccessToken                string                          `json:"user_access_token"`
-	PageID                         string                          `json:"page_id"`
-	TargetDate                     string                          `json:"target_date"`
-	BusinessTimezone               string                          `json:"business_timezone"`
-	RunMode                        string                          `json:"run_mode"`
-	RunGroupID                     string                          `json:"run_group_id"`
-	SnapshotVersion                int                             `json:"snapshot_version"`
-	IsPublished                    bool                            `json:"is_published"`
-	RequestedWindowStartAt         *string                         `json:"requested_window_start_at"`
-	RequestedWindowEndExclusiveAt  *string                         `json:"requested_window_end_exclusive_at"`
-	WindowStartAt                  *string                         `json:"window_start_at"`
-	WindowEndExclusiveAt           *string                         `json:"window_end_exclusive_at"`
-	MaxConversations               int                             `json:"max_conversations"`
-	MaxMessagePagesPerConversation int                             `json:"max_message_pages_per_conversation"`
-	TagMapping                     controlplane.TagMappingConfig   `json:"tag_mapping"`
-	OpeningRules                   controlplane.OpeningRulesConfig `json:"opening_rules"`
-	CustomerDirectory              []CustomerDirectoryEntry        `json:"customer_directory"`
+	ManifestVersion               int     `json:"manifest_version"`
+	PipelineRunID                 string  `json:"pipeline_run_id"`
+	RunGroupID                    string  `json:"run_group_id"`
+	ConnectedPageID               string  `json:"connected_page_id"`
+	PageID                        string  `json:"page_id"`
+	UserAccessToken               string  `json:"user_access_token"`
+	BusinessTimezone              string  `json:"business_timezone"`
+	TargetDate                    string  `json:"target_date"`
+	RunMode                       string  `json:"run_mode"`
+	ProcessingMode                string  `json:"processing_mode"`
+	PublishEligibility            string  `json:"publish_eligibility"`
+	RequestedWindowStartAt        *string `json:"requested_window_start_at"`
+	RequestedWindowEndExclusiveAt *string `json:"requested_window_end_exclusive_at"`
+	WindowStartAt                 *string `json:"window_start_at"`
+	WindowEndExclusiveAt          *string `json:"window_end_exclusive_at"`
+	IsFullDay                     bool    `json:"is_full_day"`
+	ETLConfig                     struct {
+		ConfigVersionID string                          `json:"config_version_id"`
+		ETLConfigHash   string                          `json:"etl_config_hash"`
+		TagMapping      controlplane.TagMappingConfig   `json:"tag_mapping"`
+		OpeningRules    controlplane.OpeningRulesConfig `json:"opening_rules"`
+		Scheduler       *controlplane.SchedulerConfig   `json:"scheduler"`
+	} `json:"etl_config"`
 }
 
 func LoadFile(path string) (Request, error) {
@@ -50,6 +51,9 @@ func ParseJSON(raw string) (Request, error) {
 	var req Request
 	if err := json.Unmarshal([]byte(raw), &req); err != nil {
 		return Request{}, fmt.Errorf("decode job json: %w", err)
+	}
+	if req.ManifestVersion == 0 {
+		req.ManifestVersion = 1
 	}
 	return req, nil
 }
@@ -70,10 +74,6 @@ func (r Request) Apply(cfg *config.Config) error {
 	businessTimezone := strings.TrimSpace(r.BusinessTimezone)
 	if businessTimezone == "" {
 		businessTimezone = config.DefaultBusinessTimezone()
-	}
-	snapshotVersion := r.SnapshotVersion
-	if snapshotVersion == 0 {
-		snapshotVersion = 1
 	}
 
 	businessDay, err := config.ParseBusinessDay(r.TargetDate, businessTimezone)
@@ -97,6 +97,7 @@ func (r Request) Apply(cfg *config.Config) error {
 		return err
 	}
 
+	cfg.PipelineRunID = strings.TrimSpace(r.PipelineRunID)
 	cfg.ConnectedPageID = strings.TrimSpace(r.ConnectedPageID)
 	cfg.UserAccessToken = strings.TrimSpace(r.UserAccessToken)
 	cfg.PageID = strings.TrimSpace(r.PageID)
@@ -105,18 +106,21 @@ func (r Request) Apply(cfg *config.Config) error {
 	cfg.RunMode = runMode
 	cfg.ProcessingMode = processingMode
 	cfg.RunGroupID = strings.TrimSpace(r.RunGroupID)
-	cfg.SnapshotVersion = snapshotVersion
-	cfg.IsPublished = r.IsPublished
-	cfg.RunParamsJSON = append(json.RawMessage(nil), r.RunParamsJSON...)
+	cfg.PublishEligibility = strings.TrimSpace(r.PublishEligibility)
+	cfg.IsFullDay = r.IsFullDay
 	cfg.RequestedWindowStartAt = requestedWindowStartAt
 	cfg.RequestedWindowEndExclusiveAt = requestedWindowEndExclusiveAt
 	cfg.WindowStartAt = windowStartAt
 	cfg.WindowEndExclusiveAt = windowEndExclusiveAt
-	cfg.MaxConversations = r.MaxConversations
-	cfg.MaxMessagePagesPerConversation = r.MaxMessagePagesPerConversation
-	cfg.TagMapping = r.TagMapping
-	cfg.OpeningRules = r.OpeningRules
-	cfg.CustomerDirectory = append([]controlplane.CustomerDirectoryEntry(nil), r.CustomerDirectory...)
+	cfg.ETLConfigVersionID = strings.TrimSpace(r.ETLConfig.ConfigVersionID)
+	cfg.ETLConfigHash = strings.TrimSpace(r.ETLConfig.ETLConfigHash)
+	cfg.TagMapping = r.ETLConfig.TagMapping
+	cfg.OpeningRules = r.ETLConfig.OpeningRules
+	cfg.Scheduler = r.ETLConfig.Scheduler
+	if cfg.Scheduler != nil {
+		cfg.MaxConversations = cfg.Scheduler.MaxConversationsPerRun
+		cfg.MaxMessagePagesPerConversation = cfg.Scheduler.MaxMessagePagesPerThread
+	}
 	return nil
 }
 

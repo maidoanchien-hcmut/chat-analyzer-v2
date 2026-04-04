@@ -1,8 +1,6 @@
 # backend
 
-Full project setup is documented in the root [README](D:/Code/chat-analyzer-v2/README.md).
-
-Quick start:
+Thiết lập nhanh:
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\backend
@@ -11,48 +9,42 @@ bunx prisma generate
 bun run dev
 ```
 
-`chat-extractor` hiện chạy bằng HTTP request trực tiếp từ frontend hoặc client bất kỳ. Backend không còn giữ control-plane JSON runtime cho page/job input.
+Schema extraction hiện theo owner-clean seam:
 
-Frontend standalone hiện dùng backend theo flow gọn sau:
+- `connected_page`
+- `page_config_version`
+- `page_prompt_identity`
+- `analysis_taxonomy_version`
+- `pipeline_run_group`
+- `pipeline_run`
+- `thread`
+- `thread_day`
+- `message`
+- `thread_customer_link`
 
-- `POST /chat-extractor/pages/list-from-token` để list page từ user token
-- `POST /chat-extractor/control-center/setup/sample` để lấy runtime sample cho ngày hiện tại mà chưa persist DB
-- `POST /chat-extractor/control-center/setup/commit` để persist page config và prompt sau khi đã chỉnh xong
-- `PATCH /chat-extractor/control-center/pages/:id` để lưu config page đang chạy
-- `POST /chat-extractor/jobs/execute` để chạy custom run ngay, không yêu cầu nhập tay tên job
+`chat-extractor` là owner của control-plane và manual execution. Các endpoint local hiện có:
 
-Frontend standalone không surface `scheduler preview/execute`; các endpoint đó vẫn tồn tại cho orchestration và test nội bộ.
-
-Unauthenticated local endpoints for `chat-extractor`:
-
-- `POST /chat-extractor/pages/list-from-token`
+- `POST /chat-extractor/control-center/pages/list-from-token`
+- `POST /chat-extractor/control-center/pages/register`
 - `GET /chat-extractor/control-center/pages`
 - `GET /chat-extractor/control-center/pages/:id`
-- `POST /chat-extractor/control-center/pages/register`
-- `PATCH /chat-extractor/control-center/pages/:id`
-- `POST /chat-extractor/control-center/pages/:id/onboarding/preview`
-- `POST /chat-extractor/control-center/pages/:id/onboarding/execute`
-- `GET /chat-extractor/control-center/pages/:id/prompts`
-- `POST /chat-extractor/control-center/pages/:id/prompts`
-- `POST /chat-extractor/control-center/pages/:id/prompts/clone`
-- `POST /chat-extractor/control-center/pages/:id/prompts/:promptVersionId/activate`
-- `GET /chat-extractor/health/summary`
-- `GET /chat-extractor/runs/:id`
+- `POST /chat-extractor/control-center/pages/:id/config-versions`
+- `POST /chat-extractor/control-center/pages/:id/config-versions/:configVersionId/activate`
 - `POST /chat-extractor/jobs/preview`
 - `POST /chat-extractor/jobs/execute`
-- `POST /chat-extractor/jobs/scheduler/preview`
-- `POST /chat-extractor/jobs/scheduler/execute`
+- `POST /chat-extractor/runs/:id/publish`
+- `GET /chat-extractor/run-groups/:id`
+- `GET /chat-extractor/runs/:id`
 
-Control-plane source of truth:
+Run group freeze `page_config_version`, taxonomy version, và compiled prompt identity; `pipeline_run` chỉ giữ coverage/request/metrics/publish state. `go-worker` nhận manifest versioned từ backend và load ODS vào `thread/thread_day/message`.
 
-- `connected_page` giữ config page vận hành.
-- `page_prompt_version` giữ version prompt theo page.
-- `etl_run` nhận thêm `connected_page_id`, `processing_mode`, `run_params_json` để audit onboarding/manual/scheduler từ DB-backed control-plane.
+Backend runtime hiện chỉ mount extraction control-plane và run APIs. Các route `analysis` và `read_models` cũ đã bị loại khỏi runtime path để tránh giữ seam HTTP legacy không còn khớp với schema mới.
 
 Prisma local flow:
 
 ```powershell
 $env:DATABASE_URL='postgresql://chat_admin:your_password@localhost:5432/chat_analyzer_v2?schema=public'
+bunx prisma validate
 bunx prisma migrate deploy
 bunx prisma db seed
 ```

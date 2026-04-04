@@ -1,17 +1,11 @@
 import { Elysia, t } from "elysia";
 import {
-  cloneAiProfileVersionBodySchema,
-  clonePromptVersionBodySchema,
-  commitSetupBodySchema,
-  createAiProfileVersionBodySchema,
-  createPromptVersionBodySchema,
+  createConfigVersionBodySchema,
   executeJobBodySchema,
   listPagesBodySchema,
-  onboardingJobBodySchema,
   previewJobBodySchema,
-  registerPageBodySchema,
-  setupSampleBodySchema,
-  updateConnectedPageBodySchema
+  publishRunBodySchema,
+  registerPageBodySchema
 } from "./chat_extractor.types.ts";
 import { chatExtractorService } from "./chat_extractor.service.ts";
 
@@ -19,24 +13,26 @@ const pageIdParamsSchema = t.Object({
   id: t.String()
 });
 
+const configVersionParamsSchema = t.Object({
+  id: t.String(),
+  configVersionId: t.String()
+});
+
 const runIdParamsSchema = t.Object({
   id: t.String()
 });
 
-const promptVersionParamsSchema = t.Object({
-  id: t.String(),
-  promptVersionId: t.String()
-});
-
-const aiProfileVersionParamsSchema = t.Object({
-  id: t.String(),
-  profileVersionId: t.String()
-});
-
 export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
-  .post("/pages/list-from-token", async ({ body }) => {
+  .post("/control-center/pages/list-from-token", async ({ body }) => {
     const parsed = listPagesBodySchema.parse(normalizeBodyKeys(body));
     return chatExtractorService.listPagesFromToken(parsed.user_access_token);
+  }, {
+    body: t.Any(),
+    response: t.Any()
+  })
+  .post("/control-center/pages/register", async ({ body }) => {
+    const parsed = registerPageBodySchema.parse(normalizeBodyKeys(body));
+    return chatExtractorService.registerPageConfig(parsed);
   }, {
     body: t.Any(),
     response: t.Any()
@@ -48,127 +44,18 @@ export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
     params: pageIdParamsSchema,
     response: t.Any()
   })
-  .get("/control-center/pages/:id/run-groups", async ({ params }) => chatExtractorService.listPageRunGroups(params.id), {
-    params: pageIdParamsSchema,
-    response: t.Any()
-  })
-  .get("/control-center/run-groups/:id", async ({ params }) => chatExtractorService.getRunGroup(params.id), {
-    params: runIdParamsSchema,
-    response: t.Any()
-  })
-  .post("/control-center/pages/register", async ({ body }) => {
-    const parsed = registerPageBodySchema.parse(normalizeBodyKeys(body));
-    return chatExtractorService.registerPageConfig(parsed);
-  }, {
-    body: t.Any(),
-    response: t.Any()
-  })
-  .post("/control-center/setup/sample", async ({ body }) => {
-    const parsed = setupSampleBodySchema.parse(normalizeBodyKeys(body));
-    return chatExtractorService.previewSetupSample(parsed);
-  }, {
-    body: t.Any(),
-    response: t.Any()
-  })
-  .post("/control-center/setup/commit", async ({ body }) => {
-    const parsed = commitSetupBodySchema.parse(normalizeBodyKeys(body));
-    return chatExtractorService.commitSetupPage(parsed);
-  }, {
-    body: t.Any(),
-    response: t.Any()
-  })
-  .patch("/control-center/pages/:id", async ({ params, body }) => {
-    const parsed = updateConnectedPageBodySchema.parse(normalizeBodyKeys(body));
-    return chatExtractorService.updateConnectedPage(params.id, parsed);
+  .post("/control-center/pages/:id/config-versions", async ({ params, body }) => {
+    const parsed = createConfigVersionBodySchema.parse(normalizeBodyKeys(body));
+    return chatExtractorService.createConfigVersion(params.id, parsed);
   }, {
     params: pageIdParamsSchema,
     body: t.Any(),
     response: t.Any()
   })
-  .post("/control-center/pages/:id/onboarding/preview", async ({ params, body }) => {
-    const parsed = onboardingJobBodySchema.parse(normalizeBodyKeys(body));
-    return chatExtractorService.previewJobRequest({
-      kind: "onboarding",
-      connectedPageId: params.id,
-      job: parsed
-    });
+  .post("/control-center/pages/:id/config-versions/:configVersionId/activate", async ({ params }) => {
+    return chatExtractorService.activateConfigVersion(params.id, params.configVersionId);
   }, {
-    params: pageIdParamsSchema,
-    body: t.Any(),
-    response: t.Any()
-  })
-  .post("/control-center/pages/:id/onboarding/execute", async ({ params, body }) => {
-    const normalizedBody = normalizeBodyKeys(body) as { write_artifacts?: boolean };
-    const parsed = onboardingJobBodySchema.parse(normalizedBody);
-    const writeArtifacts = typeof normalizedBody.write_artifacts === "boolean" ? normalizedBody.write_artifacts : true;
-    return chatExtractorService.executeJobRequest({
-      kind: "onboarding",
-      connectedPageId: params.id,
-      job: parsed,
-      writeArtifacts
-    });
-  }, {
-    params: pageIdParamsSchema,
-    body: t.Any(),
-    response: t.Any()
-  })
-  .get("/control-center/pages/:id/ai-profiles", async ({ params }) => chatExtractorService.listPageAiProfiles(params.id), {
-    params: pageIdParamsSchema,
-    response: t.Any()
-  })
-  .post("/control-center/pages/:id/ai-profiles", async ({ params, body }) => {
-    const parsed = createAiProfileVersionBodySchema.parse(normalizeBodyKeys(body));
-    return chatExtractorService.createAiProfileVersion(params.id, parsed);
-  }, {
-    params: pageIdParamsSchema,
-    body: t.Any(),
-    response: t.Any()
-  })
-  .post("/control-center/pages/:id/ai-profiles/clone", async ({ params, body }) => {
-    const parsed = cloneAiProfileVersionBodySchema.parse(normalizeBodyKeys(body));
-    return chatExtractorService.cloneAiProfileVersion(params.id, parsed);
-  }, {
-    params: pageIdParamsSchema,
-    body: t.Any(),
-    response: t.Any()
-  })
-  .post("/control-center/pages/:id/ai-profiles/:profileVersionId/activate", async ({ params }) => {
-    return chatExtractorService.activateAiProfileVersion(params.id, params.profileVersionId);
-  }, {
-    params: aiProfileVersionParamsSchema,
-    response: t.Any()
-  })
-  .get("/control-center/pages/:id/prompts", async ({ params }) => chatExtractorService.listPagePrompts(params.id), {
-    params: pageIdParamsSchema,
-    response: t.Any()
-  })
-  .post("/control-center/pages/:id/prompts", async ({ params, body }) => {
-    const parsed = createPromptVersionBodySchema.parse(normalizeBodyKeys(body));
-    return chatExtractorService.createPromptVersion(params.id, parsed);
-  }, {
-    params: pageIdParamsSchema,
-    body: t.Any(),
-    response: t.Any()
-  })
-  .post("/control-center/pages/:id/prompts/clone", async ({ params, body }) => {
-    const parsed = clonePromptVersionBodySchema.parse(normalizeBodyKeys(body));
-    return chatExtractorService.clonePromptVersion(params.id, parsed);
-  }, {
-    params: pageIdParamsSchema,
-    body: t.Any(),
-    response: t.Any()
-  })
-  .post("/control-center/pages/:id/prompts/:promptVersionId/activate", async ({ params }) => {
-    return chatExtractorService.activatePromptVersion(params.id, params.promptVersionId);
-  }, {
-    params: promptVersionParamsSchema,
-    response: t.Any()
-  })
-  .get("/health/summary", async () => chatExtractorService.getHealthSummary(), {
-    response: t.Any()
-  })
-  .get("/runs/:id", async ({ params }) => chatExtractorService.getRun(params.id), {
-    params: runIdParamsSchema,
+    params: configVersionParamsSchema,
     response: t.Any()
   })
   .post("/jobs/preview", async ({ body }) => {
@@ -185,27 +72,20 @@ export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
     body: t.Any(),
     response: t.Any()
   })
-  .post("/jobs/scheduler/preview", async ({ body }) => {
-    const normalizedBody = normalizeBodyKeys(body);
-    const parsed = previewJobBodySchema.parse({
-      kind: "scheduler",
-      job: normalizedBody
-    });
-    return chatExtractorService.previewJobRequest(parsed);
+  .post("/runs/:id/publish", async ({ params, body }) => {
+    const parsed = publishRunBodySchema.parse(normalizeBodyKeys(body));
+    return chatExtractorService.publishRun(params.id, parsed);
   }, {
+    params: runIdParamsSchema,
     body: t.Any(),
     response: t.Any()
   })
-  .post("/jobs/scheduler/execute", async ({ body }) => {
-    const normalizedBody = normalizeBodyKeys(body);
-    const parsed = executeJobBodySchema.parse({
-      kind: "scheduler",
-      job: normalizedBody,
-      write_artifacts: false
-    });
-    return chatExtractorService.executeJobRequest(parsed);
-  }, {
-    body: t.Any(),
+  .get("/run-groups/:id", async ({ params }) => chatExtractorService.getRunGroup(params.id), {
+    params: runIdParamsSchema,
+    response: t.Any()
+  })
+  .get("/runs/:id", async ({ params }) => chatExtractorService.getRun(params.id), {
+    params: runIdParamsSchema,
     response: t.Any()
   });
 

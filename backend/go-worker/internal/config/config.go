@@ -2,7 +2,6 @@ package config
 
 import (
 	"bufio"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -20,6 +19,7 @@ func DefaultBusinessTimezone() string {
 }
 
 type Config struct {
+	PipelineRunID                  string
 	ConnectedPageID                string
 	UserAccessToken                string
 	DatabaseURL                    string
@@ -30,9 +30,8 @@ type Config struct {
 	RunMode                        string
 	ProcessingMode                 string
 	RunGroupID                     string
-	SnapshotVersion                int
-	IsPublished                    bool
-	RunParamsJSON                  json.RawMessage
+	PublishEligibility             string
+	IsFullDay                      bool
 	RequestedWindowStartAt         *time.Time
 	RequestedWindowEndExclusiveAt  *time.Time
 	WindowStartAt                  *time.Time
@@ -40,9 +39,11 @@ type Config struct {
 	MaxConversations               int
 	MaxMessagePagesPerConversation int
 	RequestTimeout                 time.Duration
+	ETLConfigVersionID             string
+	ETLConfigHash                  string
 	TagMapping                     controlplane.TagMappingConfig
 	OpeningRules                   controlplane.OpeningRulesConfig
-	CustomerDirectory              []controlplane.CustomerDirectoryEntry
+	Scheduler                      *controlplane.SchedulerConfig
 }
 
 func Load() (Config, error) {
@@ -58,9 +59,8 @@ func Load() (Config, error) {
 	return Config{
 		DatabaseURL:      strings.TrimSpace(os.Getenv("DATABASE_URL")),
 		BusinessTimezone: defaultBusinessTimezone,
-		RunMode:          "scheduled_daily",
+		RunMode:          "official_daily",
 		ProcessingMode:   "etl_only",
-		SnapshotVersion:  1,
 		RequestTimeout:   time.Duration(timeoutSeconds) * time.Second,
 	}, nil
 }
@@ -71,6 +71,12 @@ func (c Config) Validate() error {
 	}
 	if !c.RuntimeOnly && c.DatabaseURL == "" {
 		return errors.New("DATABASE_URL is required")
+	}
+	if !c.RuntimeOnly && strings.TrimSpace(c.PipelineRunID) == "" {
+		return errors.New("pipeline_run_id is required")
+	}
+	if !c.RuntimeOnly && strings.TrimSpace(c.ConnectedPageID) == "" {
+		return errors.New("connected_page_id is required")
 	}
 	if c.BusinessDay.IsZero() {
 		return errors.New("target_date is required")
@@ -87,8 +93,14 @@ func (c Config) Validate() error {
 	if c.ProcessingMode != "etl_only" && c.ProcessingMode != "etl_and_ai" {
 		return errors.New("processing_mode must be etl_only or etl_and_ai")
 	}
-	if c.SnapshotVersion <= 0 {
-		return errors.New("snapshot_version must be >= 1")
+	if !c.RuntimeOnly && strings.TrimSpace(c.PublishEligibility) == "" {
+		return errors.New("publish_eligibility is required")
+	}
+	if !c.RuntimeOnly && strings.TrimSpace(c.ETLConfigVersionID) == "" {
+		return errors.New("etl_config.config_version_id is required")
+	}
+	if !c.RuntimeOnly && strings.TrimSpace(c.ETLConfigHash) == "" {
+		return errors.New("etl_config.etl_config_hash is required")
 	}
 	if c.MaxConversations < 0 {
 		return errors.New("max_conversations must be >= 0")
@@ -106,9 +118,6 @@ func (c Config) Validate() error {
 	}
 	if c.RequestedWindowStartAt != nil && c.RequestedWindowEndExclusiveAt != nil && !c.RequestedWindowStartAt.Before(*c.RequestedWindowEndExclusiveAt) {
 		return errors.New("requested window must satisfy start < end")
-	}
-	if c.IsPublished && (windowStart != dayStart || windowEnd != dayEnd) {
-		return errors.New("partial-day runs cannot be published")
 	}
 	return nil
 }

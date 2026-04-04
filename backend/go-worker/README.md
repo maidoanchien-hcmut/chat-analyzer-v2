@@ -1,24 +1,13 @@
 # go-worker
 
-`go-worker` owns chat-extractor ETL work.
+`go-worker` là ETL runtime deterministic cho extraction seam mới. Worker nhận manifest từ backend, extract dữ liệu Pancake theo coverage window, transform theo ETL config đã freeze, rồi load trực tiếp vào:
 
-Current worker path follows the production extract shape from [pancake-chat-extractor-extract-transform-audit.md](D:/Code/chat-analyzer-v2/docs/plans/pancake-chat-extractor-extract-transform-audit.md):
+- `pipeline_run`
+- `thread`
+- `thread_day`
+- `message`
 
-- loads only process-level config from `.env`
-- accepts per-run input from a backend job payload or local CLI flags
-- resolves the target page from the Pancake user access token
-- generates a page access token at runtime
-- fetches the page tag dictionary once per run
-- selects conversations in the requested `business_day` window
-- pages conversation messages and keeps only the `message-day` slice for that business day
-- stops paging a conversation as soon as a message page contains records older than the day window
-- transforms the filtered slice into canonical `conversation_day` and `message` rows
-- applies optional deterministic control-plane rules from the job JSON:
-  - `tag_rules`
-  - `opening_rules`
-  - `customer_directory`
-- loads chat-extractor rows directly into Postgres via `etl_run`, `conversation_day`, `message`, and `thread_customer_mapping`
-- persists `etl_run` lifecycle as `running -> loaded/published` or `running -> failed`
+Worker không làm AI reasoning và không còn ghi `etl_run` hay `conversation_day`.
 
 ## Run
 
@@ -28,54 +17,53 @@ copy .env.example .env
 go run . -job-file .\json\local-run.example.json
 ```
 
-Manual local run:
+Runtime local preview không ghi DB:
 
 ```powershell
 go run . `
+  -runtime-only `
   -user-access-token <token> `
   -page-id <page_id> `
   -target-date 2026-03-31 `
   -business-timezone Asia/Ho_Chi_Minh
 ```
 
-Job payload sample:
+Direct database load ngoài backend path vẫn cần thêm ít nhất:
 
-```json
-{
-  "connected_page_id": "connected-page-uuid",
-  "processing_mode": "etl_only",
-  "run_params_json": {},
-  "user_access_token": "token",
-  "page_id": "1406535699642677",
-  "target_date": "2026-03-31",
-  "business_timezone": "Asia/Ho_Chi_Minh",
-  "run_mode": "scheduled_daily",
-  "run_group_id": null,
-  "snapshot_version": 1,
-  "is_published": false,
-  "requested_window_start_at": null,
-  "requested_window_end_exclusive_at": null,
-  "window_start_at": null,
-  "window_end_exclusive_at": null,
-  "max_conversations": 0,
-  "max_message_pages_per_conversation": 0,
-  "tag_rules": [],
-  "opening_rules": [],
-  "customer_directory": []
-}
-```
+- `-connected-page-id`
+- `-pipeline-run-id`
+- `-run-group-id`
+- `-publish-eligibility`
+- `-etl-config-version-id`
+- `-etl-config-hash`
 
-File mẫu nằm ở [local-run.example.json](D:/Code/chat-analyzer-v2/backend/go-worker/json/local-run.example.json).
+## Manifest
+
+Manifest chuẩn từ backend gồm các trường chính:
+
+- `manifest_version`
+- `pipeline_run_id`
+- `run_group_id`
+- `connected_page_id`
+- `page_id`
+- `user_access_token`
+- `business_timezone`
+- `target_date`
+- `run_mode`
+- `processing_mode`
+- `publish_eligibility`
+- `requested_window_start_at`
+- `requested_window_end_exclusive_at`
+- `window_start_at`
+- `window_end_exclusive_at`
+- `is_full_day`
+- `etl_config.{config_version_id, etl_config_hash, tag_mapping, opening_rules, scheduler}`
 
 ## Notes
 
-- `DATABASE_URL` is required because `go-worker` loads chat-extractor rows directly into Postgres.
-- `WORKER_REQUEST_TIMEOUT_SECONDS` is process-level. Per-run ETL scope belongs in the job payload.
-- `connected_page_id` is the DB-backed control-plane owner for the run; `page_id` stays in the payload because the worker still talks to Pancake and writes thread-level mappings keyed by source page.
-- `processing_mode` and `run_params_json` are persisted onto `etl_run` for onboarding/manual/scheduler audit.
-- `PANCAKE_PAGE_ACCESS_TOKEN` is intentionally not part of any config surface. The worker obtains it from Pancake.
-- `window_*` allow a partial-day operational run inside the selected `target_date`.
-- `is_published = true` is only valid for a full-day bucket.
-- `metrics_json` on `etl_run` now includes compact Pancake API health counters such as failed requests, rate limits, and timeouts.
-- `target_date` is the design-aligned term. `-business-day` remains only as a CLI compatibility alias.
-- `docs/pancake-api-samples/` stays as a static audit artifact only. The worker no longer writes sample payloads there.
+- `DATABASE_URL` là bắt buộc cho non-preview path vì worker cập nhật `pipeline_run` và load ODS trực tiếp vào Postgres.
+- `PANCAKE_PAGE_ACCESS_TOKEN` không nằm trong config; worker tự generate từ `user_access_token`.
+- `window_*` cho phép partial-day run, nhưng canonical persist vẫn chỉ nằm trong window của run.
+- Worker update lifecycle của `pipeline_run` theo `queued -> running -> loaded|failed`.
+- `thread.current_phone_candidates_json` giữ raw source values đã dedupe; không normalize hay tự tạo CRM match key.
+- `thread_day.opening_block_json` luôn dùng schema `candidate_message_ids/messages/explicit_signals/cut_reason`.

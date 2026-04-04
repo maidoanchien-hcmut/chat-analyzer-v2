@@ -1,2 +1,1 @@
-ALTER TABLE "connected_page"
-DROP COLUMN IF EXISTS "active_bot_signatures_json";
+-- Superseded by 20260404110000_extract_owner_clean_rewrite.

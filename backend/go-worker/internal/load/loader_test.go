@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"chat-analyzer-v2/backend/go-worker/internal/config"
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
@@ -25,27 +24,15 @@ func (r *recordingExecer) Exec(_ context.Context, query string, args ...any) (pg
 		query: query,
 		args:  append([]any(nil), args...),
 	})
-	return pgconn.NewCommandTag("INSERT 0 1"), nil
+	return pgconn.NewCommandTag("UPDATE 1"), nil
 }
 
-func TestInsertETLRunStartPersistsControlPlaneOwnership(t *testing.T) {
+func TestMarkPipelineRunStartedUpdatesPipelineRunLifecycle(t *testing.T) {
 	db := &recordingExecer{}
 	startedAt := time.Date(2026, time.April, 2, 9, 0, 0, 0, time.UTC)
-	runParams := json.RawMessage(`{"initial_conversation_limit":25}`)
-	cfg := config.Config{
-		ConnectedPageID:  "connected-page-1",
-		PageID:           "1406535699642677",
-		BusinessTimezone: "Asia/Ho_Chi_Minh",
-		RunMode:          "onboarding_sample",
-		RunGroupID:       "ce3ee49c-cb9c-48d3-bf89-f34c419e726e",
-		ProcessingMode:   "etl_and_ai",
-		BusinessDay:      time.Date(2026, time.April, 1, 0, 0, 0, 0, time.FixedZone("ICT", 7*60*60)),
-		SnapshotVersion:  3,
-		RunParamsJSON:    runParams,
-	}
 
-	if _, err := insertETLRunStart(context.Background(), db, cfg, startedAt); err != nil {
-		t.Fatalf("insertETLRunStart returned error: %v", err)
+	if err := markPipelineRunStarted(context.Background(), db, "ce3ee49c-cb9c-48d3-bf89-f34c419e726e", startedAt); err != nil {
+		t.Fatalf("markPipelineRunStarted returned error: %v", err)
 	}
 
 	if len(db.calls) != 1 {
@@ -53,22 +40,68 @@ func TestInsertETLRunStartPersistsControlPlaneOwnership(t *testing.T) {
 	}
 
 	call := db.calls[0]
-	if !strings.Contains(call.query, "connected_page_id") {
-		t.Fatalf("expected INSERT query to include connected_page_id column")
+	if !strings.Contains(call.query, "UPDATE pipeline_run") {
+		t.Fatalf("expected UPDATE pipeline_run query")
 	}
-	if !strings.Contains(call.query, "processing_mode") {
-		t.Fatalf("expected INSERT query to include processing_mode column")
+	if !strings.Contains(call.query, "status = 'running'") {
+		t.Fatalf("expected running status to be set")
 	}
-	if !strings.Contains(call.query, "run_params_json") {
-		t.Fatalf("expected INSERT query to include run_params_json column")
+	if got := call.args[0]; got != "ce3ee49c-cb9c-48d3-bf89-f34c419e726e" {
+		t.Fatalf("expected pipeline run id arg, got %#v", got)
 	}
-	if got := call.args[3]; got != "connected-page-1" {
-		t.Fatalf("expected connected_page_id arg, got %#v", got)
+}
+
+func TestUpdatePipelineRunCompletionPersistsMetricsAndReuseSummary(t *testing.T) {
+	db := &recordingExecer{}
+	metrics := map[string]any{"thread_days_loaded": 3}
+	reuseSummary := map[string]any{
+		"raw_reused_thread_count":    0,
+		"raw_refetched_thread_count": 3,
+		"ods_reused_thread_count":    0,
+		"ods_rebuilt_thread_count":   3,
+		"reuse_reason":               "fresh_run",
 	}
-	if got := call.args[4]; got != "etl_and_ai" {
-		t.Fatalf("expected processing_mode arg, got %#v", got)
+	finishedAt := time.Date(2026, time.April, 2, 9, 30, 0, 0, time.UTC)
+
+	if err := updatePipelineRunCompletion(
+		context.Background(),
+		db,
+		"ce3ee49c-cb9c-48d3-bf89-f34c419e726e",
+		"loaded",
+		metrics,
+		reuseSummary,
+		"",
+		finishedAt,
+	); err != nil {
+		t.Fatalf("updatePipelineRunCompletion returned error: %v", err)
 	}
-	if got := string(call.args[12].(json.RawMessage)); got != string(runParams) {
-		t.Fatalf("expected run_params_json %s, got %s", string(runParams), got)
+
+	if len(db.calls) != 1 {
+		t.Fatalf("expected 1 Exec call, got %d", len(db.calls))
+	}
+
+	call := db.calls[0]
+	if !strings.Contains(call.query, "reuse_summary_json") {
+		t.Fatalf("expected reuse_summary_json to be updated")
+	}
+
+	metricsJSON, ok := call.args[2].([]byte)
+	if !ok {
+		t.Fatalf("expected marshaled metrics bytes, got %#v", call.args[2])
+	}
+	if got := string(metricsJSON); !strings.Contains(got, `"thread_days_loaded":3`) {
+		t.Fatalf("expected metrics json to include thread_days_loaded, got %s", got)
+	}
+
+	reuseJSON, ok := call.args[3].([]byte)
+	if !ok {
+		t.Fatalf("expected marshaled reuse summary bytes, got %#v", call.args[3])
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(reuseJSON, &decoded); err != nil {
+		t.Fatalf("unmarshal reuse summary: %v", err)
+	}
+	if decoded["reuse_reason"] != "fresh_run" {
+		t.Fatalf("expected reuse_reason fresh_run, got %#v", decoded["reuse_reason"])
 	}
 }

@@ -1,22 +1,39 @@
 {
-  "connected_page_id": "your-connected-page-uuid",
-  "processing_mode": "etl_only",
-  "run_params_json": {},
-  "user_access_token": "your-user-access-token",
+  "manifest_version": 1,
+  "pipeline_run_id": "00000000-0000-0000-0000-000000000001",
+  "run_group_id": "00000000-0000-0000-0000-000000000002",
+  "connected_page_id": "00000000-0000-0000-0000-000000000003",
   "page_id": "your-page-id",
-  "target_date": "2026-03-31",
+  "user_access_token": "your-user-access-token",
   "business_timezone": "Asia/Ho_Chi_Minh",
-  "run_mode": "scheduled_daily",
-  "run_group_id": null,
-  "snapshot_version": 1,
-  "is_published": false,
+  "target_date": "2026-03-31",
+  "run_mode": "official_daily",
+  "processing_mode": "etl_only",
+  "publish_eligibility": "official_full_day",
   "requested_window_start_at": null,
   "requested_window_end_exclusive_at": null,
-  "window_start_at": null,
-  "window_end_exclusive_at": null,
-  "max_conversations": 0,
-  "max_message_pages_per_conversation": 0,
-  "tag_rules": [],
-  "opening_rules": [],
-  "customer_directory": []
+  "window_start_at": "2026-03-30T17:00:00Z",
+  "window_end_exclusive_at": "2026-03-31T17:00:00Z",
+  "is_full_day": true,
+  "etl_config": {
+    "config_version_id": "00000000-0000-0000-0000-000000000004",
+    "etl_config_hash": "sha256:local-preview",
+    "tag_mapping": {
+      "version": 1,
+      "default_role": "noise",
+      "entries": []
+    },
+    "opening_rules": {
+      "version": 1,
+      "selectors": []
+    },
+    "scheduler": {
+      "version": 1,
+      "timezone": "Asia/Ho_Chi_Minh",
+      "official_daily_time": "00:00",
+      "lookback_hours": 2,
+      "max_conversations_per_run": 0,
+      "max_message_pages_per_thread": 0
+    }
+  }
 }

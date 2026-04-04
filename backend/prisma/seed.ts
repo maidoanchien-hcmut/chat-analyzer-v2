@@ -3,7 +3,41 @@ import { PrismaClient } from "@prisma/client";
 const prisma = new PrismaClient();
 
 async function seedCatalogs() {
-  console.log("No Prisma seed steps are required for the current standalone backend.");
+  await prisma.analysisTaxonomyVersion.upsert({
+    where: {
+      versionCode: "default.v1"
+    },
+    update: {
+      taxonomyJson: {
+        version: 1,
+        note: "Default dev taxonomy bootstrap for extraction control-plane.",
+        categories: {}
+      },
+      isActive: true
+    },
+    create: {
+      versionCode: "default.v1",
+      taxonomyJson: {
+        version: 1,
+        note: "Default dev taxonomy bootstrap for extraction control-plane.",
+        categories: {}
+      },
+      isActive: true
+    }
+  });
+
+  await prisma.analysisTaxonomyVersion.updateMany({
+    where: {
+      NOT: {
+        versionCode: "default.v1"
+      }
+    },
+    data: {
+      isActive: false
+    }
+  });
+
+  console.log("Seeded default analysis taxonomy version.");
 }
 
 seedCatalogs()

@@ -1,137 +1,89 @@
 import {
-  commitOnboarding,
-  executeManualRun,
-  loadComparison,
-  loadDashboard,
-  loadExploratoryThreads,
-  loadHealth,
-  loadHistoryDetail,
-  loadHistoryThreads,
-  loadMappingReview,
-  loadOnboardingPages,
-  loadOnboardingSample,
-  loadPages,
-  loadRunGroupThreads,
-  loadRunGroups,
-  loadSettings,
-  savePrompt,
-  saveSettings
+  activateConfigVersion,
+  createConfigVersion,
+  executeManualJob,
+  getConnectedPage,
+  getRun,
+  getRunGroup,
+  listConnectedPages,
+  listPagesFromToken,
+  previewManualJob,
+  publishRun,
+  registerPage
 } from "./api.ts";
 import { renderApp } from "./render.ts";
-import type { AppState } from "./types.ts";
+import type { AppState, ConnectedPageDetail, ProcessingMode, PublishAs } from "./types.ts";
 import {
-  addDays,
-  dateToken,
-  parseProcessingMode,
-  parseRunMode,
-  parseSortBy,
-  parseSortOrder,
-  parseView,
+  parseJsonText,
+  prettyJson,
   readCheck,
   readInput,
   readSelect,
-  readTextArea
+  readTextArea,
+  toDatetimeLocalValue,
+  toIsoStringOrNull
 } from "./utils.ts";
 
 const rootElement = document.querySelector<HTMLDivElement>("#app");
 if (!rootElement) {
   throw new Error("Missing #app root.");
 }
-const root = rootElement;
-
-const yesterday = dateToken(addDays(new Date(), -1));
-const today = dateToken(new Date());
+const appRoot = rootElement;
 
 const state: AppState = {
   apiBaseUrl: "http://localhost:3000",
   loading: null,
   error: null,
   info: null,
-  view: "dashboard",
+  registerToken: "",
+  tokenPages: [],
+  registerSelectedPancakePageId: "",
+  registerTimezone: "Asia/Ho_Chi_Minh",
+  registerEtlEnabled: true,
+  registerAnalysisEnabled: false,
   pages: [],
-  pageId: "",
-  startDate: yesterday,
-  endDate: yesterday,
-  mood: "",
-  need: "",
-  customerType: "",
-  risk: "",
-  dashboard: null,
-  exploratory: null,
-  historyThreads: [],
-  historyThreadId: "",
-  historyDetail: null,
-  comparison: null,
-  search: "",
-  minMessages: "",
-  sortBy: "latest_message",
-  sortOrder: "desc",
-  runGroups: [],
-  selectedRunGroupId: "",
-  runGroupThreads: [],
-  mappingReview: [],
-  health: null,
-  settingTimezone: "Asia/Ho_Chi_Minh",
-  settingEtlEnabled: true,
-  settingAnalysisEnabled: true,
-  settingTagRulesText: "",
-  settingOpeningRulesText: "",
-  settingPrompt: "",
-  activePrompt: "",
-  runProcessingMode: "etl_and_ai",
-  runMode: "full_day",
-  runTargetDate: today,
-  runWindowStart: "",
-  runWindowEnd: "",
-  runMaxConversations: "",
-  runMaxMessagePages: "",
-  onboardingToken: "",
-  onboardingPages: [],
-  onboardingPageId: "",
-  onboardingTimezone: "Asia/Ho_Chi_Minh",
-  onboardingLimit: "25",
-  onboardingMode: "etl_only",
-  onboardingEtlEnabled: true,
-  onboardingAnalysisEnabled: true,
-  onboardingTagCandidates: [],
-  onboardingCustomTagSignals: [],
-  onboardingNewTagSignal: "",
-  onboardingOpeningCandidates: [],
-  onboardingOpeningMaxMessages: "12",
-  onboardingPrompt: `Mục tiêu vận hành theo page (SOP):
-- Team áp dụng: (sales / cskh / tên team cụ thể)
-- Mục tiêu ca chat: (chốt hẹn, thu lead, chăm sóc sau khám, ...)
-
-Checklist bắt buộc trong hội thoại:
-1) ...
-2) ...
-3) ...
-
-Các lỗi cần bắt:
-- Bỏ sót bước nào thì xem là lỗi
-- Trường hợp nào xem là vi phạm quy định
-- Trường hợp nào phải escalate cho quản lý
-
-Tiêu chí đánh giá chất lượng phản hồi:
-- Nhãn tốt / đạt / cần cải thiện theo điều kiện cụ thể
-- Ví dụ phản hồi đúng quy trình và phản hồi sai quy trình`,
-  onboardingSample: null
+  selectedPageId: "",
+  selectedPage: null,
+  selectedConfigVersionId: "",
+  configPromptText: defaultPromptText(),
+  configTagMappingText: prettyJson(defaultTagMapping()),
+  configOpeningRulesText: prettyJson(defaultOpeningRules()),
+  configSchedulerText: "",
+  configNotificationTargetsText: "",
+  configNotes: "",
+  configActivate: true,
+  configEtlEnabled: true,
+  configAnalysisEnabled: false,
+  jobProcessingMode: "etl_only",
+  jobTargetDate: currentDateToken(),
+  jobRequestedWindowStartAt: "",
+  jobRequestedWindowEndExclusiveAt: "",
+  previewResult: null,
+  executeResult: null,
+  inspectRunGroupId: "",
+  runGroupResult: null,
+  inspectRunId: "",
+  runDetailResult: null,
+  publishRunId: "",
+  publishAs: "provisional",
+  confirmHistoricalOverwrite: false,
+  expectedReplacedRunId: "",
+  publishResult: null
 };
 
-root.addEventListener("click", onClick);
+appRoot.addEventListener("click", onClick);
 
 render();
 void bootstrap();
 
 async function bootstrap() {
   await withLoading("bootstrap", async () => {
-    await loadPages(state);
-    await refreshActiveView();
+    await refreshConnectedPages();
   });
 }
 
 function render() {
-  root.innerHTML = renderApp(state);
+  appRoot.innerHTML = renderApp(state);
 }
 
 async function onClick(event: MouseEvent) {
@@ -139,155 +91,257 @@ async function onClick(event: MouseEvent) {
   if (!target) {
     return;
   }
-  const actionEl = target.closest<HTMLElement>("[data-action]");
-  if (!actionEl) {
+  const actionElement = target.closest<HTMLElement>("[data-action]");
+  if (!actionElement) {
     return;
   }
+
   syncInputs();
   state.error = null;
   state.info = null;
+
   try {
-    await act(actionEl.dataset.action ?? "", actionEl.dataset);
+    await act(actionElement.dataset.action ?? "");
   } catch (error) {
     state.error = error instanceof Error ? error.message : String(error);
   }
+
   render();
 }
 
-async function act(action: string, data: DOMStringMap) {
+async function act(action: string) {
   switch (action) {
-    case "switch-view":
-      state.view = parseView(data.view);
-      await refreshActiveView();
-      return;
-    case "preset": {
-      const days = Math.max(1, Number.parseInt(data.days ?? "1", 10));
-      const end = addDays(new Date(), -1);
-      const start = addDays(end, -(days - 1));
-      state.startDate = dateToken(start);
-      state.endDate = dateToken(end);
-      await refreshActiveView();
-      return;
-    }
-    case "refresh":
-      await refreshActiveView();
-      return;
-    case "load-threads":
-      await withLoading("exploratory", async () => loadExploratoryThreads(state));
-      return;
-    case "load-history-threads":
-      await withLoading("history-threads", async () => loadHistoryThreads(state));
-      return;
-    case "open-thread": {
-      const threadId = data.threadId ?? "";
-      if (!threadId) {
-        return;
-      }
-      state.view = "history";
-      state.historyThreadId = threadId;
-      await withLoading("history-detail", async () => {
-        if (state.historyThreads.length === 0) {
-          await loadHistoryThreads(state);
+    case "token-pages":
+      await withLoading("token-pages", async () => {
+        if (!state.registerToken.trim()) {
+          throw new Error("Cần user access token.");
         }
-        await loadHistoryDetail(state, threadId);
+        const data = await listPagesFromToken(state, state.registerToken.trim());
+        state.tokenPages = Array.isArray(data) ? data : data.pages ?? [];
+        state.registerSelectedPancakePageId = state.tokenPages[0]?.pageId ?? "";
+        state.info = `Đã tải ${state.tokenPages.length} page từ token.`;
       });
       return;
-    }
-    case "load-setting":
-      await withLoading("setting-load", async () => loadSettings(state));
-      return;
-    case "save-setting":
-      await withLoading("setting-save", async () => {
-        await saveSettings(state);
-        state.info = "Đã lưu config page.";
+    case "register-page":
+      await withLoading("register-page", async () => {
+        if (!state.registerSelectedPancakePageId) {
+          throw new Error("Cần chọn Pancake page.");
+        }
+        await registerPage(state, {
+          pancakePageId: state.registerSelectedPancakePageId,
+          userAccessToken: state.registerToken.trim(),
+          businessTimezone: state.registerTimezone.trim() || "Asia/Ho_Chi_Minh",
+          etlEnabled: state.registerEtlEnabled,
+          analysisEnabled: state.registerAnalysisEnabled
+        });
+        await refreshConnectedPages();
+        state.info = "Đã register page và tạo default config.";
       });
       return;
-    case "save-prompt":
-      await withLoading("prompt-save", async () => {
-        await savePrompt(state);
-        state.info = "Đã tạo và activate prompt.";
+    case "refresh-pages":
+      await withLoading("refresh-pages", async () => {
+        await refreshConnectedPages();
+        state.info = "Đã tải lại danh sách page.";
       });
       return;
-    case "execute-run":
-      await withLoading("manual-run", async () => {
-        const jobName = await executeManualRun(state);
-        state.info = `Đã chạy job ${jobName}.`;
-        await loadRunGroups(state);
+    case "load-page":
+      await withLoading("load-page", async () => {
+        const page = await requireSelectedPage();
+        setSelectedPage(page);
+        state.info = `Đã tải chi tiết page ${page.pageName}.`;
       });
       return;
-    case "load-run-groups":
-      await withLoading("run-groups", async () => loadRunGroups(state));
-      return;
-    case "load-run-group-threads":
-      await withLoading("run-group-threads", async () => loadRunGroupThreads(state));
-      return;
-    case "load-mapping-review":
-      await withLoading("mapping-review", async () => loadMappingReview(state));
-      return;
-    case "load-health":
-      await withLoading("health", async () => loadHealth(state));
-      return;
-    case "ob-list-pages":
-      await withLoading("onboarding-pages", async () => loadOnboardingPages(state));
-      return;
-    case "ob-sample":
-      await withLoading("onboarding-sample", async () => loadOnboardingSample(state));
-      return;
-    case "ob-commit":
-      await withLoading("onboarding-commit", async () => {
-        await commitOnboarding(state);
-        await loadPages(state);
-        state.view = "settings";
-        await refreshActiveView();
-        state.info = "Đã thêm page thành công.";
+    case "create-config":
+      await withLoading("create-config", async () => {
+        if (!state.selectedPageId) {
+          throw new Error("Cần chọn connected page.");
+        }
+        await createConfigVersion(state, state.selectedPageId, {
+          tagMappingJson: parseJsonText(state.configTagMappingText, "tagMappingJson") ?? defaultTagMapping(),
+          openingRulesJson: parseJsonText(state.configOpeningRulesText, "openingRulesJson") ?? defaultOpeningRules(),
+          schedulerJson: parseJsonText(state.configSchedulerText, "schedulerJson"),
+          notificationTargetsJson: parseJsonText(state.configNotificationTargetsText, "notificationTargetsJson"),
+          promptText: state.configPromptText.trim(),
+          notes: state.configNotes.trim() || null,
+          activate: state.configActivate,
+          etlEnabled: state.configEtlEnabled,
+          analysisEnabled: state.configAnalysisEnabled
+        });
+        const page = await requireSelectedPage();
+        setSelectedPage(page);
+        state.info = "Đã tạo config version mới.";
       });
       return;
-    case "ob-add-tag-signal": {
-      const key = canonicalSignalKey(state.onboardingNewTagSignal);
-      if (!key) {
-        throw new Error("Signal mới không hợp lệ. Chỉ dùng chữ thường, số và dấu gạch dưới.");
+    case "activate-config":
+      await withLoading("activate-config", async () => {
+        if (!state.selectedPageId || !state.selectedConfigVersionId) {
+          throw new Error("Cần chọn page và config version.");
+        }
+        const response = await activateConfigVersion(state, state.selectedPageId, state.selectedConfigVersionId);
+        setSelectedPage(response.page);
+        state.info = "Đã activate config version.";
+      });
+      return;
+    case "use-active-config":
+      if (!state.selectedPage?.activeConfigVersion) {
+        throw new Error("Page này chưa có active config version.");
       }
-      if (!state.onboardingCustomTagSignals.includes(key)) {
-        state.onboardingCustomTagSignals = [...state.onboardingCustomTagSignals, key].sort();
-      }
-      state.onboardingNewTagSignal = "";
+      hydrateConfigEditor(state.selectedPage.activeConfigVersion);
+      state.info = "Đã nạp active config vào editor.";
       return;
-    }
+    case "preview-job":
+      await withLoading("preview-job", async () => {
+        if (!state.selectedPageId) {
+          throw new Error("Cần chọn connected page.");
+        }
+        state.previewResult = await previewManualJob(state, buildManualJobBody());
+        state.info = "Đã preview run.";
+      });
+      return;
+    case "execute-job":
+      await withLoading("execute-job", async () => {
+        if (!state.selectedPageId) {
+          throw new Error("Cần chọn connected page.");
+        }
+        state.executeResult = await executeManualJob(state, buildManualJobBody());
+        state.inspectRunGroupId = state.executeResult.run_group.id;
+        state.inspectRunId = state.executeResult.child_runs[0]?.id ?? state.inspectRunId;
+        state.publishRunId = state.executeResult.child_runs[0]?.id ?? state.publishRunId;
+        state.info = "Đã execute run group.";
+      });
+      return;
+    case "load-run-group":
+      await withLoading("load-run-group", async () => {
+        if (!state.inspectRunGroupId.trim()) {
+          throw new Error("Cần run_group_id.");
+        }
+        state.runGroupResult = await getRunGroup(state, state.inspectRunGroupId.trim());
+        state.info = "Đã tải run group.";
+      });
+      return;
+    case "load-run":
+      await withLoading("load-run", async () => {
+        if (!state.inspectRunId.trim()) {
+          throw new Error("Cần run_id.");
+        }
+        state.runDetailResult = await getRun(state, state.inspectRunId.trim());
+        state.info = "Đã tải run detail.";
+      });
+      return;
+    case "publish-run":
+      await withLoading("publish-run", async () => {
+        if (!state.publishRunId.trim()) {
+          throw new Error("Cần run_id để publish.");
+        }
+        state.publishResult = await publishRun(state, state.publishRunId.trim(), {
+          publishAs: state.publishAs,
+          confirmHistoricalOverwrite: state.confirmHistoricalOverwrite,
+          expectedReplacedRunId: state.expectedReplacedRunId.trim() || null
+        });
+        state.inspectRunId = state.publishRunId.trim();
+        state.info = "Đã publish run.";
+      });
+      return;
     default:
       return;
   }
 }
 
-async function refreshActiveView() {
-  switch (state.view) {
-    case "onboarding":
-      return;
-    case "dashboard":
-      await withLoading("dashboard", async () => loadDashboard(state));
-      return;
-    case "exploratory":
-      await withLoading("exploratory", async () => loadExploratoryThreads(state));
-      return;
-    case "history":
-      await withLoading("history", async () => {
-        await loadHistoryThreads(state);
-        if (state.historyThreadId) {
-          await loadHistoryDetail(state, state.historyThreadId);
-        }
-      });
-      return;
-    case "comparison":
-      await withLoading("comparison", async () => loadComparison(state));
-      return;
-    case "settings":
-      await withLoading("settings", async () => {
-        await loadSettings(state);
-        await loadRunGroups(state);
-        await loadMappingReview(state);
-        await loadHealth(state);
-      });
-      return;
+async function refreshConnectedPages() {
+  const response = await listConnectedPages(state);
+  state.pages = response.pages ?? [];
+  if (!state.pages.some((page) => page.id === state.selectedPageId)) {
+    state.selectedPageId = state.pages[0]?.id ?? "";
   }
+  if (state.selectedPageId) {
+    const page = await requireSelectedPage();
+    setSelectedPage(page);
+  } else {
+    state.selectedPage = null;
+    state.selectedConfigVersionId = "";
+  }
+}
+
+async function requireSelectedPage() {
+  if (!state.selectedPageId) {
+    throw new Error("Chưa có connected page nào.");
+  }
+  const response = await getConnectedPage(state, state.selectedPageId);
+  return response.page;
+}
+
+function setSelectedPage(page: ConnectedPageDetail) {
+  state.selectedPage = page;
+  state.selectedPageId = page.id;
+  state.selectedConfigVersionId = page.activeConfigVersionId ?? page.configVersions[0]?.id ?? "";
+  if (page.activeConfigVersion) {
+    hydrateConfigEditor(page.activeConfigVersion);
+  }
+  state.configEtlEnabled = page.etlEnabled;
+  state.configAnalysisEnabled = page.analysisEnabled;
+}
+
+function hydrateConfigEditor(configVersion: ConnectedPageDetail["activeConfigVersion"] extends infer T ? Exclude<T, null> : never) {
+  state.configPromptText = configVersion.promptText;
+  state.configTagMappingText = prettyJson(configVersion.tagMappingJson);
+  state.configOpeningRulesText = prettyJson(configVersion.openingRulesJson);
+  state.configSchedulerText = configVersion.schedulerJson === null ? "" : prettyJson(configVersion.schedulerJson);
+  state.configNotificationTargetsText = configVersion.notificationTargetsJson === null ? "" : prettyJson(configVersion.notificationTargetsJson);
+  state.configNotes = configVersion.notes ?? "";
+}
+
+function buildManualJobBody() {
+  const hasTargetDate = state.jobTargetDate.trim().length > 0;
+  const hasWindowStart = state.jobRequestedWindowStartAt.trim().length > 0;
+  const hasWindowEnd = state.jobRequestedWindowEndExclusiveAt.trim().length > 0;
+
+  if (hasTargetDate && (hasWindowStart || hasWindowEnd)) {
+    throw new Error("Chỉ chọn target_date hoặc requested window, không dùng đồng thời.");
+  }
+  if (!hasTargetDate && !(hasWindowStart && hasWindowEnd)) {
+    throw new Error("Cần target_date hoặc đủ requested window start/end.");
+  }
+
+  return {
+    kind: "manual",
+    connectedPageId: state.selectedPageId,
+    job: {
+      processingMode: state.jobProcessingMode,
+      targetDate: hasTargetDate ? state.jobTargetDate.trim() : undefined,
+      requestedWindowStartAt: hasWindowStart ? toIsoStringOrNull(state.jobRequestedWindowStartAt) : undefined,
+      requestedWindowEndExclusiveAt: hasWindowEnd ? toIsoStringOrNull(state.jobRequestedWindowEndExclusiveAt) : undefined
+    }
+  };
+}
+
+function syncInputs() {
+  state.apiBaseUrl = readInput("#api-base-url", state.apiBaseUrl);
+  state.registerToken = readInput("#register-token", state.registerToken);
+  state.registerSelectedPancakePageId = readSelect("#register-page-id", state.registerSelectedPancakePageId);
+  state.registerTimezone = readSelect("#register-timezone", state.registerTimezone);
+  state.registerEtlEnabled = readCheck("#register-etl-enabled", state.registerEtlEnabled);
+  state.registerAnalysisEnabled = readCheck("#register-analysis-enabled", state.registerAnalysisEnabled);
+  state.selectedPageId = readSelect("#connected-page-id", state.selectedPageId);
+  state.selectedConfigVersionId = readSelect("#config-version-id", state.selectedConfigVersionId);
+  state.configPromptText = readTextArea("#config-prompt-text", state.configPromptText);
+  state.configTagMappingText = readTextArea("#config-tag-mapping", state.configTagMappingText);
+  state.configOpeningRulesText = readTextArea("#config-opening-rules", state.configOpeningRulesText);
+  state.configSchedulerText = readTextArea("#config-scheduler", state.configSchedulerText);
+  state.configNotificationTargetsText = readTextArea("#config-notification-targets", state.configNotificationTargetsText);
+  state.configNotes = readTextArea("#config-notes", state.configNotes);
+  state.configActivate = readCheck("#config-activate", state.configActivate);
+  state.configEtlEnabled = readCheck("#config-etl-enabled", state.configEtlEnabled);
+  state.configAnalysisEnabled = readCheck("#config-analysis-enabled", state.configAnalysisEnabled);
+  state.jobProcessingMode = readSelect("#job-processing-mode", state.jobProcessingMode) as ProcessingMode;
+  state.jobTargetDate = readInput("#job-target-date", state.jobTargetDate);
+  state.jobRequestedWindowStartAt = readInput("#job-window-start", state.jobRequestedWindowStartAt);
+  state.jobRequestedWindowEndExclusiveAt = readInput("#job-window-end", state.jobRequestedWindowEndExclusiveAt);
+  state.inspectRunGroupId = readInput("#inspect-run-group-id", state.inspectRunGroupId);
+  state.inspectRunId = readInput("#inspect-run-id", state.inspectRunId);
+  state.publishRunId = readInput("#publish-run-id", state.publishRunId);
+  state.publishAs = readSelect("#publish-as", state.publishAs) as PublishAs;
+  state.confirmHistoricalOverwrite = readCheck("#publish-confirm-historical-overwrite", state.confirmHistoricalOverwrite);
+  state.expectedReplacedRunId = readInput("#publish-expected-replaced-run-id", state.expectedReplacedRunId);
 }
 
 async function withLoading(key: string, fn: () => Promise<void>) {
@@ -300,67 +354,44 @@ async function withLoading(key: string, fn: () => Promise<void>) {
   }
 }
 
-function syncInputs() {
-  state.pageId = readSelect("#page-id", state.pageId);
-  state.startDate = readInput("#start-date", state.startDate);
-  state.endDate = readInput("#end-date", state.endDate);
-  state.mood = readInput("#dice-mood", state.mood).trim();
-  state.need = readInput("#dice-need", state.need).trim();
-  state.customerType = readInput("#dice-type", state.customerType).trim();
-  state.risk = readInput("#dice-risk", state.risk).trim();
-  state.search = readInput("#search", state.search).trim();
-  state.search = readInput("#history-search", state.search).trim();
-  state.minMessages = readInput("#min-messages", state.minMessages).trim();
-  state.sortBy = parseSortBy(readSelect("#sort-by", state.sortBy));
-  state.sortOrder = parseSortOrder(readSelect("#sort-order", state.sortOrder));
-  state.settingTimezone = readSelect("#setting-timezone", state.settingTimezone);
-  state.settingEtlEnabled = readCheck("#setting-etl", state.settingEtlEnabled);
-  state.settingAnalysisEnabled = readCheck("#setting-analysis", state.settingAnalysisEnabled);
-  state.settingTagRulesText = readTextArea("#setting-tag-rules", state.settingTagRulesText);
-  state.settingOpeningRulesText = readTextArea("#setting-opening-rules", state.settingOpeningRulesText);
-  state.settingPrompt = readTextArea("#setting-prompt", state.settingPrompt);
-  state.runProcessingMode = parseProcessingMode(readSelect("#run-processing", state.runProcessingMode));
-  state.runMode = parseRunMode(readSelect("#run-mode", state.runMode));
-  state.runTargetDate = readInput("#run-target-date", state.runTargetDate);
-  state.runWindowStart = readInput("#run-window-start", state.runWindowStart);
-  state.runWindowEnd = readInput("#run-window-end", state.runWindowEnd);
-  state.runMaxConversations = readInput("#run-max-conversations", state.runMaxConversations).trim();
-  state.runMaxMessagePages = readInput("#run-max-message-pages", state.runMaxMessagePages).trim();
-  state.selectedRunGroupId = readSelect("#run-group-id", state.selectedRunGroupId);
-  state.onboardingToken = readInput("#ob-token", state.onboardingToken);
-  state.onboardingPageId = readSelect("#ob-page-id", state.onboardingPageId);
-  state.onboardingTimezone = readSelect("#ob-timezone", state.onboardingTimezone);
-  state.onboardingLimit = readInput("#ob-limit", state.onboardingLimit);
-  state.onboardingMode = parseProcessingMode(readSelect("#ob-mode", state.onboardingMode));
-  state.onboardingEtlEnabled = readCheck("#ob-etl", state.onboardingEtlEnabled);
-  state.onboardingAnalysisEnabled = readCheck("#ob-analysis", state.onboardingAnalysisEnabled);
-  state.onboardingOpeningMaxMessages = readInput("#ob-opening-max", state.onboardingOpeningMaxMessages).trim();
-  state.onboardingPrompt = readTextArea("#ob-prompt", state.onboardingPrompt);
-  state.onboardingNewTagSignal = readInput("#ob-new-tag-signal", state.onboardingNewTagSignal);
-  syncOnboardingCandidateInputs();
+function currentDateToken() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
 }
 
-function syncOnboardingCandidateInputs() {
-  for (let index = 0; index < state.onboardingTagCandidates.length; index += 1) {
-    const next = readSelect(`#ob-tag-signal-${index}`, state.onboardingTagCandidates[index].signal);
-    state.onboardingTagCandidates[index].signal = next.trim();
-  }
-  for (let index = 0; index < state.onboardingOpeningCandidates.length; index += 1) {
-    const signal = readSelect(`#ob-opening-signal-${index}`, state.onboardingOpeningCandidates[index].signal);
-    const decision = readInput(`#ob-opening-decision-${index}`, state.onboardingOpeningCandidates[index].decision);
-    state.onboardingOpeningCandidates[index].signal = signal.trim();
-    state.onboardingOpeningCandidates[index].decision = decision.trim();
-  }
+function defaultPromptText() {
+  return [
+    "Mục tiêu vận hành theo page:",
+    "- Mô tả quy trình sales/cskh áp dụng cho page này.",
+    "",
+    "Checklist bắt buộc:",
+    "1. ...",
+    "2. ...",
+    "",
+    "Các lỗi cần bắt:",
+    "- ...",
+    "",
+    "Tiêu chí đánh giá phản hồi nhân viên:",
+    "- ..."
+  ].join("\n");
 }
 
-function canonicalSignalKey(value: string) {
-  const normalized = value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/đ/g, "d")
-    .replace(/Đ/g, "d")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, "_")
-    .replace(/^_+|_+$/g, "");
-  return /^[a-z][a-z0-9_]*$/.test(normalized) ? normalized : "";
+function defaultTagMapping() {
+  return {
+    version: 1,
+    defaultRole: "noise",
+    entries: []
+  };
 }
+
+function defaultOpeningRules() {
+  return {
+    version: 1,
+    selectors: []
+  };
+}
+
+void toDatetimeLocalValue;

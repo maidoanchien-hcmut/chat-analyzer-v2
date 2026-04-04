@@ -34,7 +34,7 @@ func TestFilterMessagePageKeepsBusinessDayMessagesAndStopsOnOlderPage(t *testing
 	}
 }
 
-func TestBuildConversationDayRedactsPhonesAndSkipsOpeningSelections(t *testing.T) {
+func TestBuildConversationDayRedactsPhonesAndPreservesRawPhoneCandidates(t *testing.T) {
 	location := time.FixedZone("ICT", 7*60*60)
 	window := DayWindow{
 		Start:        time.Date(2026, 3, 31, 0, 0, 0, 0, location),
@@ -58,7 +58,7 @@ func TestBuildConversationDayRedactsPhonesAndSkipsOpeningSelections(t *testing.T
 		AvailableForReportPhoneNumbers: []string{"+84774665884"},
 	}
 	messages := []pancake.Message{
-		mustMessage(t, "m-1", "2026-03-31T14:00:10", "26456821540601695", "Bắt đầu", nil),
+		mustMessage(t, "m-1", "2026-03-31T14:00:10", "26456821540601695", "Khách hàng lần đầu", nil),
 		mustTemplateMessage(t, "m-2", "2026-03-31T14:00:13", "1406535699642677", "Botcake", []string{"Khách hàng lần đầu", "Khách hàng tái khám"}),
 		mustMessage(t, "m-3", "2026-03-31T14:00:18", "26456821540601695", "Khách hàng lần đầu", nil),
 		mustTemplateMessage(t, "m-4", "2026-03-31T14:00:21", "1406535699642677", "Botcake", []string{"Đặt lịch hẹn"}),
@@ -72,18 +72,21 @@ func TestBuildConversationDayRedactsPhonesAndSkipsOpeningSelections(t *testing.T
 		t.Fatalf("BuildConversationDay returned error: %v", err)
 	}
 
-	if day.FirstMeaningfulHumanMessageID != "m-6" {
-		t.Fatalf("expected first meaningful message to be m-6, got %q", day.FirstMeaningfulHumanMessageID)
+	if day.FirstMeaningfulMessageID != "m-6" {
+		t.Fatalf("expected first meaningful message to be m-6, got %q", day.FirstMeaningfulMessageID)
 	}
 	if got := day.Messages[6].RedactedText; got != "Sdt <redacted_phone>" {
 		t.Fatalf("expected phone redaction, got %q", got)
 	}
-	if got := string(day.NormalizedPhoneCandidatesJSON); got != `["+84774665884"]` {
-		t.Fatalf("expected normalized phone candidate, got %s", got)
+	if got := string(day.CurrentPhoneCandidatesJSON); !strings.Contains(got, `"phone_number":"0774665884"`) {
+		t.Fatalf("expected raw phone candidate to be preserved, got %s", got)
+	}
+	if got := string(day.CurrentPhoneCandidatesJSON); !strings.Contains(got, `"source":"message_context_available_for_report"`) {
+		t.Fatalf("expected phone candidate source to be persisted, got %s", got)
 	}
 }
 
-func TestBuildConversationDayAppliesTagSignalsAndOpeningSignatures(t *testing.T) {
+func TestBuildConversationDayAppliesTagSignalsAndOpeningSignals(t *testing.T) {
 	location := time.FixedZone("ICT", 7*60*60)
 	window := DayWindow{
 		Start:        time.Date(2026, 4, 1, 0, 0, 0, 0, location),
@@ -100,49 +103,47 @@ func TestBuildConversationDayAppliesTagSignalsAndOpeningSignatures(t *testing.T)
 			json.RawMessage(`{"id":101}`),
 		},
 	}
-
 	tagDictionary := map[int64]pancake.Tag{
 		101: {
 			ID:   101,
 			Text: "KH TÁI KHÁM",
 		},
 	}
-
 	messages := []pancake.Message{
-		mustTemplateMessage(t, "m-open", "2026-04-01T09:00:05", "page-1", "Botcake", []string{"Bắt đầu"}),
+		mustTemplateMessage(t, "m-open", "2026-04-01T09:00:05", "page-1", "Botcake", []string{"Khách hàng tái khám"}),
 		mustMessage(t, "m-real", "2026-04-01T09:01:00", "customer-1", "em muốn đặt lịch tái khám", nil),
 	}
 
 	day, err := BuildConversationDay(window, conversation, pancake.MessageContext{}, messages, len(messages), tagDictionary, controlplane.RuntimeConfig{
 		TagMapping: controlplane.TagMappingConfig{
-			DefaultSignal: "null",
+			Version:     1,
+			DefaultRole: "noise",
 			Entries: []controlplane.TagMappingEntry{
 				{
-					PancakeTagID: "101",
-					RawLabel:     "KH TÁI KHÁM",
-					Signal:       "customer_type",
+					SourceTagID:   "101",
+					SourceTagText: "KH TÁI KHÁM",
+					Role:          "journey",
+					CanonicalCode: "revisit",
+					MappingSource: "operator",
+					Status:        "active",
 				},
 			},
 		},
 		OpeningRules: controlplane.OpeningRulesConfig{
-			Boundary: controlplane.OpeningBoundary{
-				Mode:        "until_first_meaningful_human_message",
-				MaxMessages: 12,
-			},
+			Version: 1,
 			Selectors: []controlplane.OpeningSelector{
 				{
-					Signal:              "entry_flow",
+					SelectorID:          "journey-revisit",
+					SignalRole:          "journey",
+					SignalCode:          "revisit",
 					AllowedMessageTypes: []string{"template", "text"},
 					Options: []controlplane.OpeningOption{
 						{
-							RawText:  "Bắt đầu",
-							Decision: "welcome_bot",
+							RawText:   "Khách hàng tái khám",
+							MatchMode: "exact",
 						},
 					},
 				},
-			},
-			Fallback: controlplane.OpeningFallback{
-				StoreCandidateIfUnmatched: true,
 			},
 		},
 	})
@@ -150,11 +151,17 @@ func TestBuildConversationDayAppliesTagSignalsAndOpeningSignatures(t *testing.T)
 		t.Fatalf("BuildConversationDay returned error: %v", err)
 	}
 
-	if got := string(day.NormalizedTagSignalsJSON); !strings.Contains(got, `"customer_type":["KH TÁI KHÁM"]`) {
-		t.Fatalf("expected normalized tag signals to include customer_type, got %s", got)
+	if got := string(day.ObservedTagsJSON); !strings.Contains(got, `"source_tag_id":"101"`) {
+		t.Fatalf("expected observed tags to use source_tag_id, got %s", got)
 	}
-	if got := string(day.OpeningBlocksJSON); !strings.Contains(got, `"entry_flow":["welcome_bot"]`) {
-		t.Fatalf("expected opening blocks to include matched signature payload, got %s", got)
+	if got := string(day.NormalizedTagSignalsJSON); !strings.Contains(got, `"canonical_code":"revisit"`) {
+		t.Fatalf("expected normalized tag signals to include revisit, got %s", got)
+	}
+	if got := string(day.OpeningBlockJSON); !strings.Contains(got, `"signal_role":"journey"`) || !strings.Contains(got, `"signal_code":"revisit"`) {
+		t.Fatalf("expected opening block to include explicit journey signal, got %s", got)
+	}
+	if day.ExplicitRevisitSignal != "revisit" {
+		t.Fatalf("expected explicit revisit signal to be revisit, got %q", day.ExplicitRevisitSignal)
 	}
 }
 
@@ -185,7 +192,7 @@ func TestBuildConversationDayTreatsBotFlowAndOptionClicksAsOpeningBlock(t *testi
 	botText.From.FlowID = int64Ptr(44058712)
 
 	messages := []pancake.Message{
-		mustMessage(t, "m-1", "2026-03-31T13:58:27", "customer-1", "Bắt đầu", nil),
+		mustMessage(t, "m-1", "2026-03-31T13:58:27", "customer-1", "Khách hàng lần đầu", nil),
 		mustTemplateMessage(t, "m-2", "2026-03-31T13:58:30", "1406535699642677", "Botcake", []string{"Khách hàng lần đầu", "Khách hàng tái khám"}),
 		mustMessage(t, "m-3", "2026-03-31T13:58:36", "customer-1", "Khách hàng lần đầu", nil),
 		mustTemplateMessage(t, "m-4", "2026-03-31T13:58:39", "1406535699642677", "Botcake", []string{"Tôi muốn chat tư vấn", "Đặt lịch hẹn"}),
@@ -198,56 +205,18 @@ func TestBuildConversationDayTreatsBotFlowAndOptionClicksAsOpeningBlock(t *testi
 	if err != nil {
 		t.Fatalf("BuildConversationDay returned error: %v", err)
 	}
-	if day.FirstMeaningfulHumanMessageID != "m-7" {
-		t.Fatalf("expected first meaningful message m-7, got %q", day.FirstMeaningfulHumanMessageID)
+	if day.FirstMeaningfulMessageID != "m-7" {
+		t.Fatalf("expected first meaningful message m-7, got %q", day.FirstMeaningfulMessageID)
 	}
 
 	var opening struct {
-		OpeningCandidateWindow []struct {
-			MessageID string `json:"message_id"`
-		} `json:"opening_candidate_window"`
+		CandidateMessageIDs []string `json:"candidate_message_ids"`
 	}
-	if err := json.Unmarshal(day.OpeningBlocksJSON, &opening); err != nil {
-		t.Fatalf("unmarshal opening blocks: %v", err)
+	if err := json.Unmarshal(day.OpeningBlockJSON, &opening); err != nil {
+		t.Fatalf("unmarshal opening block: %v", err)
 	}
-	if len(opening.OpeningCandidateWindow) != 6 {
-		t.Fatalf("expected 6 opening-block messages before first meaningful message, got %d", len(opening.OpeningCandidateWindow))
-	}
-}
-
-func TestBuildThreadCustomerMappingsUsesSingleDeterministicPhone(t *testing.T) {
-	mappings, err := BuildThreadCustomerMappings("page-1", []ConversationDaySource{
-		{
-			ConversationID:                "thread-1",
-			NormalizedPhoneCandidatesJSON: json.RawMessage(`["+84774665884"]`),
-		},
-		{
-			ConversationID:                "thread-2",
-			NormalizedPhoneCandidatesJSON: json.RawMessage(`["+84770000000","+84881111111"]`),
-		},
-	}, controlplane.RuntimeConfig{
-		CustomerDirectory: []controlplane.CustomerDirectoryEntry{
-			{
-				CustomerID: "customer-1",
-				PhoneE164:  "+84774665884",
-			},
-		},
-	})
-	if err != nil {
-		t.Fatalf("BuildThreadCustomerMappings returned error: %v", err)
-	}
-
-	if len(mappings) != 1 {
-		t.Fatalf("expected one deterministic mapping, got %d", len(mappings))
-	}
-	if mappings[0].ThreadID != "thread-1" || mappings[0].CustomerID != "customer-1" {
-		t.Fatalf("unexpected mapping: %+v", mappings[0])
-	}
-	if mappings[0].MappingMethod != "deterministic_single_phone" {
-		t.Fatalf("expected deterministic_single_phone mapping method, got %s", mappings[0].MappingMethod)
-	}
-	if mappings[0].ConnectedPageID != "page-1" {
-		t.Fatalf("expected connected page id to be page-1, got %s", mappings[0].ConnectedPageID)
+	if len(opening.CandidateMessageIDs) != 6 {
+		t.Fatalf("expected 6 opening-block messages before first meaningful message, got %d", len(opening.CandidateMessageIDs))
 	}
 }
 

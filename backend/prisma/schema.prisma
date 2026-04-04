@@ -8,314 +8,338 @@ datasource db {
 }
 
 model ConnectedPage {
-  id                      String                          @id @default(uuid()) @db.Uuid
-  pancakePageId           String                          @unique @map("pancake_page_id")
-  pageName                String                          @map("page_name")
-  pancakeUserAccessToken  String                          @map("pancake_user_access_token")
-  businessTimezone        String                          @map("business_timezone")
-  etlEnabled              Boolean                         @default(false) @map("etl_enabled")
-  analysisEnabled         Boolean                         @default(false) @map("analysis_enabled")
-  activeAiProfilesJson    Json                            @default("{}") @map("active_ai_profiles_json")
-  activeTagMappingJson    Json                            @default("{}") @map("active_tag_mapping_json")
-  activeOpeningRulesJson  Json                            @default("{}") @map("active_opening_rules_json")
-  notificationTargetsJson Json                            @default("{}") @map("notification_targets_json")
-  onboardingStateJson     Json                            @default("{}") @map("onboarding_state_json")
-  createdAt               DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt               DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
-  analysisRuns            AnalysisRun[]
-  etlRuns                 EtlRun[]
-  mappingCurrentStates    ThreadCustomerMapping[]
-  mappingDecisions        ThreadCustomerMappingDecision[]
-  pageAiProfileVersions   PageAiProfileVersion[]
+  id                     String              @id @default(uuid()) @db.Uuid
+  pancakePageId          String              @unique @map("pancake_page_id")
+  pageName               String              @map("page_name")
+  pancakeUserAccessToken String              @map("pancake_user_access_token")
+  businessTimezone       String              @map("business_timezone")
+  etlEnabled             Boolean             @default(false) @map("etl_enabled")
+  analysisEnabled        Boolean             @default(false) @map("analysis_enabled")
+  activeConfigVersionId  String?             @map("active_config_version_id") @db.Uuid
+  createdAt              DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  activeConfigVersion    PageConfigVersion?  @relation("ConnectedPageActiveConfigVersion", fields: [activeConfigVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  configVersions         PageConfigVersion[] @relation("ConnectedPageConfigVersions")
+  promptIdentities       PagePromptIdentity[]
+  threads                Thread[]
 
-  @@index([pageName])
-  @@index([etlEnabled])
-  @@index([analysisEnabled])
-  @@index([createdAt])
-  @@index([updatedAt])
+  @@index([etlEnabled, updatedAt(sort: Desc)])
+  @@index([analysisEnabled, updatedAt(sort: Desc)])
+  @@index([activeConfigVersionId])
   @@map("connected_page")
 }
 
-model PageAiProfileVersion {
-  id                String                          @id @default(uuid()) @db.Uuid
-  connectedPageId   String                          @map("connected_page_id") @db.Uuid
-  capabilityKey     String                          @map("capability_key")
-  versionNo         Int                             @map("version_no")
-  profileJson       Json                            @map("profile_json")
-  notes             String?
-  createdAt         DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
-  analysisRuns      AnalysisRun[]
-  connectedPage     ConnectedPage                   @relation(fields: [connectedPageId], references: [id], onDelete: Cascade)
-  mappingDecisions  ThreadCustomerMappingDecision[]
+model PagePromptIdentity {
+  id                 String        @id @default(uuid()) @db.Uuid
+  connectedPageId    String        @map("connected_page_id") @db.Uuid
+  compiledPromptHash String        @map("compiled_prompt_hash")
+  promptVersion      String        @map("prompt_version")
+  compiledPromptText String        @map("compiled_prompt_text")
+  createdAt          DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  connectedPage      ConnectedPage @relation(fields: [connectedPageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-  @@unique([connectedPageId, capabilityKey, versionNo])
-  @@index([connectedPageId])
-  @@index([capabilityKey])
-  @@index([createdAt])
-  @@map("page_ai_profile_version")
+  @@unique([connectedPageId, compiledPromptHash])
+  @@unique([connectedPageId, promptVersion])
+  @@index([connectedPageId, createdAt(sort: Desc)])
+  @@map("page_prompt_identity")
 }
 
-model EtlRun {
-  id                            String                          @id @default(uuid()) @db.Uuid
-  connectedPageId               String                          @map("connected_page_id") @db.Uuid
-  runGroupId                    String                          @map("run_group_id") @db.Uuid
-  runMode                       String                          @map("run_mode")
-  processingMode                String                          @map("processing_mode")
-  targetDate                    DateTime                        @map("target_date") @db.Date
-  businessTimezone              String                          @map("business_timezone")
-  requestedWindowStartAt        DateTime?                       @map("requested_window_start_at") @db.Timestamptz(6)
-  requestedWindowEndExclusiveAt DateTime?                       @map("requested_window_end_exclusive_at") @db.Timestamptz(6)
-  windowStartAt                 DateTime                        @map("window_start_at") @db.Timestamptz(6)
-  windowEndExclusiveAt          DateTime                        @map("window_end_exclusive_at") @db.Timestamptz(6)
-  snapshotVersion               Int                             @map("snapshot_version")
+model AnalysisTaxonomyVersion {
+  id              String              @id @default(uuid()) @db.Uuid
+  versionCode     String              @unique @map("version_code")
+  taxonomyJson    Json                @map("taxonomy_json")
+  isActive        Boolean             @default(false) @map("is_active")
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  configVersions  PageConfigVersion[]
+  frozenRunGroups PipelineRunGroup[]
+  analysisRuns    AnalysisRun[]
+
+  @@index([isActive, createdAt(sort: Desc)])
+  @@map("analysis_taxonomy_version")
+}
+
+model PageConfigVersion {
+  id                        String                  @id @default(uuid()) @db.Uuid
+  connectedPageId           String                  @map("connected_page_id") @db.Uuid
+  versionNo                 Int                     @map("version_no")
+  tagMappingJson            Json                    @default("{\"default_role\":\"noise\",\"entries\":[]}") @map("tag_mapping_json")
+  openingRulesJson          Json                    @default("{}") @map("opening_rules_json")
+  schedulerJson             Json?                   @map("scheduler_json")
+  notificationTargetsJson   Json?                   @map("notification_targets_json")
+  promptText                String                  @map("prompt_text")
+  analysisTaxonomyVersionId String                  @map("analysis_taxonomy_version_id") @db.Uuid
+  notes                     String?
+  createdAt                 DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  connectedPage             ConnectedPage           @relation("ConnectedPageConfigVersions", fields: [connectedPageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  analysisTaxonomyVersion   AnalysisTaxonomyVersion @relation(fields: [analysisTaxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  activeForPages            ConnectedPage[]         @relation("ConnectedPageActiveConfigVersion")
+  runGroups                 PipelineRunGroup[]
+  analysisRuns              AnalysisRun[]
+
+  @@unique([connectedPageId, versionNo])
+  @@index([connectedPageId, createdAt(sort: Desc)])
+  @@index([analysisTaxonomyVersionId])
+  @@map("page_config_version")
+}
+
+model PipelineRunGroup {
+  id                            String                     @id @default(uuid()) @db.Uuid
+  runMode                       String                     @map("run_mode")
+  requestedWindowStartAt        DateTime?                  @map("requested_window_start_at") @db.Timestamptz(6)
+  requestedWindowEndExclusiveAt DateTime?                  @map("requested_window_end_exclusive_at") @db.Timestamptz(6)
+  requestedTargetDate           DateTime?                  @map("requested_target_date") @db.Date
+  frozenConfigVersionId         String                     @map("frozen_config_version_id") @db.Uuid
+  frozenTaxonomyVersionId       String                     @map("frozen_taxonomy_version_id") @db.Uuid
+  frozenCompiledPromptHash      String                     @map("frozen_compiled_prompt_hash")
+  frozenPromptVersion           String                     @map("frozen_prompt_version")
+  publishIntent                 String                     @map("publish_intent")
   status                        String
-  isPublished                   Boolean                         @default(false) @map("is_published")
-  runParamsJson                 Json                            @default("{}") @map("run_params_json")
-  tagDictionaryJson             Json                            @default("[]") @map("tag_dictionary_json")
-  metricsJson                   Json                            @default("{}") @map("metrics_json")
-  errorText                     String?                         @map("error_text")
-  startedAt                     DateTime?                       @map("started_at") @db.Timestamptz(6)
-  finishedAt                    DateTime?                       @map("finished_at") @db.Timestamptz(6)
-  createdAt                     DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
-  analysisRuns                  AnalysisRun[]
-  connectedPage                 ConnectedPage                   @relation(fields: [connectedPageId], references: [id], onDelete: Cascade)
-  conversationDays              ConversationDay[]
-  mappingDecisions              ThreadCustomerMappingDecision[]
+  createdBy                     String                     @map("created_by")
+  createdAt                     DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  startedAt                     DateTime?                  @map("started_at") @db.Timestamptz(6)
+  finishedAt                    DateTime?                  @map("finished_at") @db.Timestamptz(6)
+  frozenConfigVersion           PageConfigVersion          @relation(fields: [frozenConfigVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  frozenTaxonomyVersion         AnalysisTaxonomyVersion    @relation(fields: [frozenTaxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  pipelineRuns                  PipelineRun[]
+  linkDecisions                 ThreadCustomerLinkDecision[]
 
-  @@unique([connectedPageId, targetDate, snapshotVersion])
-  @@index([connectedPageId])
-  @@index([runGroupId])
-  @@index([runMode])
-  @@index([processingMode])
-  @@index([targetDate])
-  @@index([status, createdAt])
-  @@index([startedAt])
-  @@index([finishedAt])
-  @@map("etl_run")
+  @@index([frozenConfigVersionId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([runMode, createdAt(sort: Desc)])
+  @@map("pipeline_run_group")
 }
 
-model ConversationDay {
-  id                             String          @id @default(uuid()) @db.Uuid
-  etlRunId                       String          @map("etl_run_id") @db.Uuid
-  conversationId                 String          @map("conversation_id")
-  threadFirstSeenAt              DateTime?       @map("thread_first_seen_at") @db.Timestamptz(6)
-  conversationUpdatedAt          DateTime?       @map("conversation_updated_at") @db.Timestamptz(6)
-  customerDisplayName            String?         @map("customer_display_name")
-  messageCountPersisted          Int             @map("message_count_persisted")
-  messageCountSeenFromSource     Int             @map("message_count_seen_from_source")
-  normalizedPhoneCandidatesJson  Json            @default("[]") @map("normalized_phone_candidates_json")
-  observedTagsJson               Json            @default("[]") @map("observed_tags_json")
-  normalizedTagSignalsJson       Json            @default("{}") @map("normalized_tag_signals_json")
-  openingBlocksJson              Json            @default("{}") @map("opening_blocks_json")
-  firstMeaningfulHumanMessageId  String?         @map("first_meaningful_human_message_id")
-  firstMeaningfulHumanSenderRole String?         @map("first_meaningful_human_sender_role")
-  sourceConversationJsonRedacted Json            @default("{}") @map("source_conversation_json_redacted")
-  createdAt                      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  analysisResults                AnalysisResult[]
-  etlRun                         EtlRun          @relation(fields: [etlRunId], references: [id], onDelete: Cascade)
-  messages                       Message[]
+model PipelineRun {
+  id                            String           @id @default(uuid()) @db.Uuid
+  runGroupId                    String           @map("run_group_id") @db.Uuid
+  targetDate                    DateTime         @map("target_date") @db.Date
+  windowStartAt                 DateTime         @map("window_start_at") @db.Timestamptz(6)
+  windowEndExclusiveAt          DateTime         @map("window_end_exclusive_at") @db.Timestamptz(6)
+  requestedWindowStartAt        DateTime?        @map("requested_window_start_at") @db.Timestamptz(6)
+  requestedWindowEndExclusiveAt DateTime?        @map("requested_window_end_exclusive_at") @db.Timestamptz(6)
+  isFullDay                     Boolean          @map("is_full_day")
+  runMode                       String           @map("run_mode")
+  status                        String
+  publishState                  String           @default("draft") @map("publish_state")
+  publishEligibility            String           @map("publish_eligibility")
+  supersedesRunId               String?          @map("supersedes_run_id") @db.Uuid
+  supersededByRunId             String?          @map("superseded_by_run_id") @db.Uuid
+  requestJson                   Json             @default("{}") @map("request_json")
+  metricsJson                   Json             @default("{}") @map("metrics_json")
+  reuseSummaryJson              Json             @default("{}") @map("reuse_summary_json")
+  errorText                     String?          @map("error_text")
+  createdAt                     DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  startedAt                     DateTime?        @map("started_at") @db.Timestamptz(6)
+  finishedAt                    DateTime?        @map("finished_at") @db.Timestamptz(6)
+  publishedAt                   DateTime?        @map("published_at") @db.Timestamptz(6)
+  runGroup                      PipelineRunGroup @relation(fields: [runGroupId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  threadDays                    ThreadDay[]
+  analysisRuns                  AnalysisRun[]
+  supersedesRun                 PipelineRun?     @relation("PipelineRunSupersedesRun", fields: [supersedesRunId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  supersededByRun               PipelineRun?     @relation("PipelineRunSupersededByRun", fields: [supersededByRunId], references: [id], onDelete: SetNull, onUpdate: Cascade)
+  supersededChildren            PipelineRun[]    @relation("PipelineRunSupersedesRun")
+  supersedesParents             PipelineRun[]    @relation("PipelineRunSupersededByRun")
 
-  @@unique([etlRunId, conversationId])
-  @@index([etlRunId])
-  @@index([conversationId])
+  @@unique([runGroupId, targetDate, windowStartAt, windowEndExclusiveAt])
+  @@index([runGroupId, targetDate])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([publishState, publishedAt(sort: Desc)])
+  @@index([targetDate, createdAt(sort: Desc)])
+  @@index([supersedesRunId])
+  @@index([supersededByRunId])
+  @@map("pipeline_run")
+}
+
+model Thread {
+  id                         String                     @id @default(uuid()) @db.Uuid
+  connectedPageId            String                     @map("connected_page_id") @db.Uuid
+  sourceThreadId             String                     @map("source_thread_id")
+  threadFirstSeenAt          DateTime?                  @map("thread_first_seen_at") @db.Timestamptz(6)
+  threadLastSeenAt           DateTime?                  @map("thread_last_seen_at") @db.Timestamptz(6)
+  customerDisplayName        String?                    @map("customer_display_name")
+  currentPhoneCandidatesJson Json                       @default("[]") @map("current_phone_candidates_json")
+  latestEntrySourceType      String?                    @map("latest_entry_source_type")
+  latestEntryPostId          String?                    @map("latest_entry_post_id")
+  latestEntryAdId            String?                    @map("latest_entry_ad_id")
+  createdAt                  DateTime                   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime                   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  connectedPage              ConnectedPage              @relation(fields: [connectedPageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  threadDays                 ThreadDay[]
+  customerLink               ThreadCustomerLink?
+  linkDecisions              ThreadCustomerLinkDecision[]
+
+  @@unique([connectedPageId, sourceThreadId])
+  @@index([connectedPageId, updatedAt(sort: Desc)])
   @@index([threadFirstSeenAt])
-  @@index([customerDisplayName])
+  @@index([threadLastSeenAt])
+  @@map("thread")
+}
+
+model ThreadDay {
+  id                                 String         @id @default(uuid()) @db.Uuid
+  pipelineRunId                      String         @map("pipeline_run_id") @db.Uuid
+  threadId                           String         @map("thread_id") @db.Uuid
+  isNewInbox                         Boolean        @map("is_new_inbox")
+  entrySourceType                    String?        @map("entry_source_type")
+  entryPostId                        String?        @map("entry_post_id")
+  entryAdId                          String?        @map("entry_ad_id")
+  observedTagsJson                   Json           @default("[]") @map("observed_tags_json")
+  normalizedTagSignalsJson           Json           @default("{}") @map("normalized_tag_signals_json")
+  openingBlockJson                   Json           @default("{}") @map("opening_block_json")
+  firstMeaningfulMessageId           String?        @map("first_meaningful_message_id")
+  firstMeaningfulMessageTextRedacted String?        @map("first_meaningful_message_text_redacted")
+  firstMeaningfulMessageSenderRole   String?        @map("first_meaningful_message_sender_role")
+  messageCount                       Int            @default(0) @map("message_count")
+  firstStaffResponseSeconds          Int?           @map("first_staff_response_seconds")
+  avgStaffResponseSeconds            Int?           @map("avg_staff_response_seconds")
+  staffParticipantsJson              Json           @default("[]") @map("staff_participants_json")
+  staffMessageStatsJson              Json           @default("[]") @map("staff_message_stats_json")
+  explicitRevisitSignal              String?        @map("explicit_revisit_signal")
+  explicitNeedSignal                 String?        @map("explicit_need_signal")
+  explicitOutcomeSignal              String?        @map("explicit_outcome_signal")
+  sourceThreadJsonRedacted           Json           @default("{}") @map("source_thread_json_redacted")
+  createdAt                          DateTime       @default(now()) @map("created_at") @db.Timestamptz(6)
+  pipelineRun                        PipelineRun    @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  thread                             Thread         @relation(fields: [threadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  messages                           Message[]
+  analysisResults                    AnalysisResult[]
+
+  @@unique([pipelineRunId, threadId])
+  @@index([pipelineRunId, isNewInbox])
+  @@index([threadId, pipelineRunId(sort: Desc)])
   @@index([createdAt])
-  @@map("conversation_day")
+  @@map("thread_day")
 }
 
 model Message {
-  id                       String          @id @default(uuid()) @db.Uuid
-  conversationDayId        String          @map("conversation_day_id") @db.Uuid
-  messageId                String          @map("message_id")
-  conversationId           String          @map("conversation_id")
-  insertedAt               DateTime        @map("inserted_at") @db.Timestamptz(6)
-  senderSourceId           String?         @map("sender_source_id")
-  senderName               String?         @map("sender_name")
-  senderRole               String          @map("sender_role")
-  sourceMessageTypeRaw     String?         @map("source_message_type_raw")
-  messageType              String          @map("message_type")
-  redactedText             String?         @map("redacted_text")
-  attachmentsJson          Json            @default("[]") @map("attachments_json")
-  isMeaningfulHumanMessage Boolean         @default(false) @map("is_meaningful_human_message")
-  isOpeningBlockMessage    Boolean         @default(false) @map("is_opening_block_message")
-  sourceMessageJsonRedacted Json           @default("{}") @map("source_message_json_redacted")
-  createdAt                DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
-  conversationDay          ConversationDay @relation(fields: [conversationDayId], references: [id], onDelete: Cascade)
+  id                        String    @id @default(uuid()) @db.Uuid
+  threadDayId               String    @map("thread_day_id") @db.Uuid
+  sourceMessageId           String    @map("source_message_id")
+  insertedAt                DateTime  @map("inserted_at") @db.Timestamptz(6)
+  senderRole                String    @map("sender_role")
+  senderSourceId            String?   @map("sender_source_id")
+  senderName                String?   @map("sender_name")
+  messageType               String    @map("message_type")
+  sourceMessageTypeRaw      String?   @map("source_message_type_raw")
+  redactedText              String?   @map("redacted_text")
+  attachmentsJson           Json      @default("[]") @map("attachments_json")
+  isMeaningfulHumanMessage  Boolean   @default(false) @map("is_meaningful_human_message")
+  isOpeningBlockMessage     Boolean   @default(false) @map("is_opening_block_message")
+  sourceMessageJsonRedacted Json      @default("{}") @map("source_message_json_redacted")
+  createdAt                 DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  threadDay                 ThreadDay @relation(fields: [threadDayId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-  @@unique([conversationDayId, messageId])
-  @@index([conversationDayId, insertedAt])
-  @@index([conversationId, insertedAt])
-  @@index([senderRole])
-  @@index([messageType])
-  @@index([isMeaningfulHumanMessage])
-  @@index([isOpeningBlockMessage])
+  @@unique([threadDayId, sourceMessageId])
+  @@index([threadDayId, insertedAt])
+  @@index([senderRole, insertedAt])
   @@index([createdAt])
   @@map("message")
 }
 
-model ThreadCustomerMapping {
-  connectedPageId         String                          @map("connected_page_id") @db.Uuid
-  threadId                String                          @map("thread_id")
-  customerId              String                          @map("customer_id")
-  mappingMethod           String                          @map("mapping_method")
-  mappingConfidenceScore  Decimal?                        @map("mapping_confidence_score") @db.Decimal(5, 4)
-  mappedPhoneE164         String?                         @map("mapped_phone_e164")
-  sourceDecisionId        String?                         @map("source_decision_id") @db.Uuid
-  createdAt               DateTime                        @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt               DateTime                        @updatedAt @map("updated_at") @db.Timestamptz(6)
-  connectedPage           ConnectedPage                   @relation(fields: [connectedPageId], references: [id], onDelete: Cascade)
-  sourceDecision          ThreadCustomerMappingDecision?  @relation("SourceMappingDecision", fields: [sourceDecisionId], references: [id], onDelete: SetNull)
+model ThreadCustomerLink {
+  threadId               String                      @id @map("thread_id") @db.Uuid
+  customerId             String                      @map("customer_id")
+  mappingMethod          String                      @map("mapping_method")
+  mappingConfidenceScore Decimal?                    @map("mapping_confidence_score") @db.Decimal(5, 4)
+  mappedPhoneMatchKey    String?                     @map("mapped_phone_match_key")
+  sourceDecisionId       String?                     @map("source_decision_id") @db.Uuid
+  createdAt              DateTime                    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  thread                 Thread                      @relation(fields: [threadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  sourceDecision         ThreadCustomerLinkDecision? @relation("SourceLinkDecision", fields: [sourceDecisionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
 
-  @@id([connectedPageId, threadId])
   @@index([customerId])
   @@index([mappingMethod])
   @@index([sourceDecisionId])
   @@index([createdAt])
   @@index([updatedAt])
-  @@map("thread_customer_mapping")
+  @@map("thread_customer_link")
+}
+
+model ThreadCustomerLinkDecision {
+  id                 String               @id @default(uuid()) @db.Uuid
+  runGroupId         String               @map("run_group_id") @db.Uuid
+  threadId           String               @map("thread_id") @db.Uuid
+  decisionSource     String               @map("decision_source")
+  selectedCustomerId String?              @map("selected_customer_id")
+  confidenceScore    Decimal?             @map("confidence_score") @db.Decimal(5, 4)
+  decisionStatus     String               @map("decision_status")
+  promotionState     String               @map("promotion_state")
+  promptHash         String?              @map("prompt_hash")
+  evidenceJson       Json                 @default("{}") @map("evidence_json")
+  usageJson          Json                 @default("{}") @map("usage_json")
+  costMicros         BigInt               @default(0) @map("cost_micros")
+  failureInfoJson    Json?                @map("failure_info_json")
+  createdByUserId    Int?                 @map("created_by_user_id")
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  runGroup           PipelineRunGroup     @relation(fields: [runGroupId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  thread             Thread               @relation(fields: [threadId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  currentLinks       ThreadCustomerLink[] @relation("SourceLinkDecision")
+
+  @@unique([runGroupId, threadId])
+  @@index([decisionStatus, promotionState, createdAt(sort: Desc)])
+  @@index([threadId, createdAt(sort: Desc)])
+  @@map("thread_customer_link_decision")
 }
 
 model AnalysisRun {
-  id                    String               @id @default(uuid()) @db.Uuid
-  connectedPageId       String               @map("connected_page_id") @db.Uuid
-  runGroupId            String               @map("run_group_id") @db.Uuid
-  runMode               String               @map("run_mode")
-  sourceEtlRunId        String?              @map("source_etl_run_id") @db.Uuid
-  scopeRefJson          Json?                @map("scope_ref_json")
-  jobStatus             String               @map("job_status")
-  runOutcome            String               @map("run_outcome")
-  idempotencyKey        String?              @unique @map("idempotency_key")
-  aiProfileVersionId    String               @map("ai_profile_version_id") @db.Uuid
-  modelName             String               @map("model_name")
-  outputSchemaVersion   String               @map("output_schema_version")
-  runtimeSnapshotJson   Json                 @map("runtime_snapshot_json")
-  attemptCount          Int                  @default(0) @map("attempt_count")
-  unitCountPlanned      Int                  @default(0) @map("unit_count_planned")
-  unitCountSucceeded    Int                  @default(0) @map("unit_count_succeeded")
-  unitCountUnknown      Int                  @default(0) @map("unit_count_unknown")
-  unitCountReviewQueue  Int                  @default(0) @map("unit_count_review_queue")
-  totalUsageJson        Json                 @default("{}") @map("total_usage_json")
-  totalCostMicros       BigInt               @default(0) @map("total_cost_micros")
-  createdByUserId       Int?                 @map("created_by_user_id")
-  startedAt             DateTime?            @map("started_at") @db.Timestamptz(6)
-  finishedAt            DateTime?            @map("finished_at") @db.Timestamptz(6)
-  publishedAt           DateTime?            @map("published_at") @db.Timestamptz(6)
-  createdAt             DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
-  aiProfileVersion      PageAiProfileVersion @relation(fields: [aiProfileVersionId], references: [id], onDelete: Restrict)
-  analysisResults       AnalysisResult[]
-  connectedPage         ConnectedPage        @relation(fields: [connectedPageId], references: [id], onDelete: Cascade)
-  sourceEtlRun          EtlRun?              @relation(fields: [sourceEtlRunId], references: [id], onDelete: SetNull)
+  id                  String                  @id @default(uuid()) @db.Uuid
+  pipelineRunId       String                  @map("pipeline_run_id") @db.Uuid
+  configVersionId     String                  @map("config_version_id") @db.Uuid
+  taxonomyVersionId   String                  @map("taxonomy_version_id") @db.Uuid
+  modelName           String                  @map("model_name")
+  promptHash          String                  @map("prompt_hash")
+  promptVersion       String                  @map("prompt_version")
+  runtimeSnapshotJson Json                    @map("runtime_snapshot_json")
+  outputSchemaVersion String                  @map("output_schema_version")
+  status              String
+  unitCountPlanned    Int                     @default(0) @map("unit_count_planned")
+  unitCountSucceeded  Int                     @default(0) @map("unit_count_succeeded")
+  unitCountUnknown    Int                     @default(0) @map("unit_count_unknown")
+  totalUsageJson      Json                    @default("{}") @map("total_usage_json")
+  totalCostMicros     BigInt                  @default(0) @map("total_cost_micros")
+  createdByUserId     Int?                    @map("created_by_user_id")
+  createdAt           DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  startedAt           DateTime?               @map("started_at") @db.Timestamptz(6)
+  finishedAt          DateTime?               @map("finished_at") @db.Timestamptz(6)
+  pipelineRun         PipelineRun             @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  configVersion       PageConfigVersion       @relation(fields: [configVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  taxonomyVersion     AnalysisTaxonomyVersion @relation(fields: [taxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  analysisResults     AnalysisResult[]
 
-  @@index([connectedPageId, createdAt(sort: Desc)])
-  @@index([runGroupId])
-  @@index([runMode])
-  @@index([sourceEtlRunId])
-  @@index([jobStatus])
-  @@index([runOutcome])
-  @@index([aiProfileVersionId])
-  @@index([modelName])
-  @@index([outputSchemaVersion])
-  @@index([totalCostMicros])
-  @@index([createdByUserId])
-  @@index([startedAt])
-  @@index([finishedAt])
-  @@index([publishedAt])
+  @@index([pipelineRunId, createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
   @@map("analysis_run")
 }
 
 model AnalysisResult {
-  id                               String           @id @default(uuid()) @db.Uuid
-  analysisRunId                    String           @map("analysis_run_id") @db.Uuid
-  conversationDayId                String?          @map("conversation_day_id") @db.Uuid
-  customScopeJson                  Json?            @map("custom_scope_json")
-  publishState                     String           @map("publish_state")
-  resultStatus                     String           @map("result_status")
-  promptHash                       String           @map("prompt_hash")
-  openingTheme                     String           @map("opening_theme")
-  customerMood                     String           @map("customer_mood")
-  primaryNeed                      String           @map("primary_need")
-  primaryTopic                     String           @map("primary_topic")
-  contentCustomerType              String           @map("content_customer_type")
-  closingOutcomeAsOfDay            String           @map("closing_outcome_as_of_day")
-  responseQualityLabel             String           @map("response_quality_label")
-  processRiskLevel                 String           @map("process_risk_level")
-  responseQualityIssueText         String?          @map("response_quality_issue_text")
-  responseQualityImprovementText   String?          @map("response_quality_improvement_text")
-  processRiskReasonText            String?          @map("process_risk_reason_text")
-  usageJson                        Json             @default("{}") @map("usage_json")
-  costMicros                       BigInt           @default(0) @map("cost_micros")
-  failureInfoJson                  Json?            @map("failure_info_json")
-  createdAt                        DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  publishedAt                      DateTime?        @map("published_at") @db.Timestamptz(6)
-  analysisRun                      AnalysisRun      @relation(fields: [analysisRunId], references: [id], onDelete: Cascade)
-  conversationDay                  ConversationDay? @relation(fields: [conversationDayId], references: [id], onDelete: SetNull)
+  id                             String      @id @default(uuid()) @db.Uuid
+  analysisRunId                  String      @map("analysis_run_id") @db.Uuid
+  threadDayId                    String      @map("thread_day_id") @db.Uuid
+  resultStatus                   String      @map("result_status")
+  promptHash                     String      @map("prompt_hash")
+  openingThemeCode               String      @map("opening_theme_code")
+  openingThemeReason             String?     @map("opening_theme_reason")
+  customerMoodCode               String      @map("customer_mood_code")
+  primaryNeedCode                String      @map("primary_need_code")
+  primaryTopicCode               String      @map("primary_topic_code")
+  journeyCode                    String      @map("journey_code")
+  closingOutcomeInferenceCode    String      @map("closing_outcome_inference_code")
+  processRiskLevelCode           String      @map("process_risk_level_code")
+  processRiskReasonText          String?     @map("process_risk_reason_text")
+  staffAssessmentsJson           Json        @default("[]") @map("staff_assessments_json")
+  evidenceUsedJson               Json        @default("{}") @map("evidence_used_json")
+  fieldExplanationsJson          Json        @default("{}") @map("field_explanations_json")
+  supportingMessageIdsJson       Json        @default("[]") @map("supporting_message_ids_json")
+  usageJson                      Json        @default("{}") @map("usage_json")
+  costMicros                     BigInt      @default(0) @map("cost_micros")
+  failureInfoJson                Json?       @map("failure_info_json")
+  createdAt                      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  analysisRun                    AnalysisRun @relation(fields: [analysisRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  threadDay                      ThreadDay   @relation(fields: [threadDayId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
-  @@unique([analysisRunId, conversationDayId])
-  @@index([analysisRunId, publishState])
-  @@index([conversationDayId])
-  @@index([publishState])
-  @@index([resultStatus])
-  @@index([promptHash])
-  @@index([openingTheme])
-  @@index([customerMood])
-  @@index([primaryNeed])
-  @@index([primaryTopic])
-  @@index([contentCustomerType])
-  @@index([closingOutcomeAsOfDay])
-  @@index([responseQualityLabel])
-  @@index([processRiskLevel])
-  @@index([costMicros])
-  @@index([createdAt])
-  @@index([publishedAt])
+  @@unique([analysisRunId, threadDayId])
+  @@index([threadDayId])
+  @@index([resultStatus, createdAt(sort: Desc)])
   @@map("analysis_result")
-}
-
-model ThreadCustomerMappingDecision {
-  id                   String                       @id @default(uuid()) @db.Uuid
-  runGroupId           String                       @map("run_group_id") @db.Uuid
-  connectedPageId      String                       @map("connected_page_id") @db.Uuid
-  runMode              String                       @map("run_mode")
-  sourceEtlRunId       String?                      @map("source_etl_run_id") @db.Uuid
-  scopeRefJson         Json?                        @map("scope_ref_json")
-  idempotencyKey       String?                      @map("idempotency_key")
-  aiProfileVersionId   String                       @map("ai_profile_version_id") @db.Uuid
-  modelName            String                       @map("model_name")
-  outputSchemaVersion  String                       @map("output_schema_version")
-  runtimeSnapshotJson  Json                         @map("runtime_snapshot_json")
-  threadId             String                       @map("thread_id")
-  decisionSource       String                       @map("decision_source")
-  selectedCustomerId   String?                      @map("selected_customer_id")
-  confidenceScore      Decimal?                     @map("confidence_score") @db.Decimal(5, 4)
-  decisionStatus       String                       @map("decision_status")
-  promotionState       String                       @map("promotion_state")
-  promptHash           String                       @map("prompt_hash")
-  evidenceJson         Json                         @default("{}") @map("evidence_json")
-  usageJson            Json                         @default("{}") @map("usage_json")
-  costMicros           BigInt                       @default(0) @map("cost_micros")
-  failureInfoJson      Json?                        @map("failure_info_json")
-  createdByUserId      Int?                         @map("created_by_user_id")
-  createdAt            DateTime                     @default(now()) @map("created_at") @db.Timestamptz(6)
-  aiProfileVersion     PageAiProfileVersion         @relation(fields: [aiProfileVersionId], references: [id], onDelete: Restrict)
-  connectedPage        ConnectedPage                @relation(fields: [connectedPageId], references: [id], onDelete: Cascade)
-  currentMappings      ThreadCustomerMapping[]      @relation("SourceMappingDecision")
-  sourceEtlRun         EtlRun?                      @relation(fields: [sourceEtlRunId], references: [id], onDelete: SetNull)
-
-  @@unique([runGroupId, threadId])
-  @@index([runGroupId])
-  @@index([connectedPageId, createdAt(sort: Desc)])
-  @@index([runMode])
-  @@index([sourceEtlRunId])
-  @@index([idempotencyKey])
-  @@index([aiProfileVersionId])
-  @@index([modelName])
-  @@index([outputSchemaVersion])
-  @@index([threadId])
-  @@index([decisionSource])
-  @@index([selectedCustomerId])
-  @@index([decisionStatus, promotionState, createdAt])
-  @@index([promptHash])
-  @@index([costMicros])
-  @@index([createdByUserId])
-  @@map("thread_customer_mapping_decision")
 }

@@ -1,164 +1,135 @@
-export type View = "onboarding" | "dashboard" | "exploratory" | "history" | "comparison" | "settings";
 export type ProcessingMode = "etl_only" | "etl_and_ai";
-export type SortBy = "latest_message" | "target_date" | "messages" | "cost";
-export type SortOrder = "asc" | "desc";
-export type RunMode = "full_day" | "custom_range";
-export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
+export type PublishAs = "official" | "provisional";
 
-export type ConnectedPageLite = {
+export type ListedPage = {
+  pageId: string;
+  pageName: string;
+};
+
+export type AnalysisTaxonomyVersion = {
   id: string;
+  versionCode: string;
+  taxonomyJson: unknown;
+  isActive: boolean;
+};
+
+export type PageConfigVersion = {
+  id: string;
+  versionNo: number;
+  tagMappingJson: unknown;
+  openingRulesJson: unknown;
+  schedulerJson: unknown;
+  notificationTargetsJson: unknown;
+  promptText: string;
+  analysisTaxonomyVersionId: string;
+  analysisTaxonomyVersion: AnalysisTaxonomyVersion;
+  notes: string | null;
+  createdAt: string;
+};
+
+export type ConnectedPageDetail = {
+  id: string;
+  pancakePageId: string;
   pageName: string;
   businessTimezone: string;
   etlEnabled: boolean;
   analysisEnabled: boolean;
-  activeTagMappingJson: unknown;
-  activeOpeningRulesJson: unknown;
-};
-
-export type ThreadSummary = {
-  threadId: string;
-  customerDisplayName: string | null;
-  dayCount: number;
-  totalMessages: number;
-  totalCostMicros: string;
-  latestTargetDate?: string;
-  latestMessageAt: string | null;
-  latestPrimaryNeed: string;
-  latestCustomerMood: string;
-  latestCustomerType?: string;
-  latestRiskLevel: string;
-  latestClosingOutcome?: string;
-  latestOpeningTheme?: string;
-  latestResponseQualityLabel?: string;
-  latestProcessRiskReasonText?: string | null;
-};
-
-export type DashboardData = {
-  kpis: {
-    totalInbox: number;
-    totalInboxNew: number;
-    totalInboxOld: number;
-    revisitCount: number;
-    goodMoodCount: number;
-    riskCount: number;
-    totalMessages: number;
-    totalAiCostMicros: string;
-    conversionRate: number;
-    conversionNumerator: number;
-    conversionDenominator: number;
-  };
-  breakdown: Array<{ value: string; count: number }>;
-  latestThreads: ThreadSummary[];
-};
-
-export type ThreadsData = {
-  threads: ThreadSummary[];
-  paging?: { total: number; offset: number; limit: number };
-  sort?: { by: SortBy; order: SortOrder };
-};
-
-export type ThreadDetail = {
-  thread: ThreadSummary;
-  days: Array<{
-    targetDate: string;
-    runGroupId: string;
-    messageCount: number;
-    costMicros: string;
-    primaryNeed: string;
-    customerMood: string;
-    contentCustomerType: string;
-    processRiskLevel: string;
-  }>;
-  messages: Array<{
-    insertedAt: string;
-    targetDate: string;
-    senderRole: string;
-    senderName: string | null;
-    messageType: string;
-    redactedText: string | null;
-  }>;
-};
-
-export type ComparisonData = {
-  pages: Array<{
-    connectedPageId: string;
-    pageName: string;
-    kpis: DashboardData["kpis"];
-  }>;
-};
-
-export type RunGroupSummary = {
-  runGroupId: string;
-  runMode: string;
-  status: string;
-  childRunCount: number;
-  publishedChildCount: number;
-  targetDateStart: string | null;
-  targetDateEnd: string | null;
-};
-
-export type RunGroupThread = {
-  threadId: string;
-  customerDisplayName: string | null;
-  dayCount: number;
-  totalMessages: number;
-  totalCostMicros: string;
-  latestPrimaryNeed: string;
-  latestCustomerMood: string;
-  latestRiskLevel: string;
-};
-
-export type MappingReviewItem = {
-  id: string;
-  runGroupId: string;
-  threadId: string;
-  decisionStatus: string;
-  confidenceScore: number | null;
-  selectedCustomerId: string | null;
+  activeConfigVersionId: string | null;
+  activeConfigVersion: PageConfigVersion | null;
+  configVersions: PageConfigVersion[];
   createdAt: string;
+  updatedAt: string;
 };
 
-export type HealthSummary = {
-  totals: {
-    running: number;
-    loaded: number;
-    published: number;
-    failed: number;
+export type PreviewResult = {
+  run_group: {
+    run_mode: string;
+    connected_page_id: string;
+    page_name: string;
+    requested_window_start_at: string | null;
+    requested_window_end_exclusive_at: string | null;
+    requested_target_date: string | null;
+    will_use_config_version: number;
+    will_use_prompt_version: string;
+    will_use_compiled_prompt_hash: string;
   };
+  child_runs: Array<{
+    target_date: string;
+    window_start_at: string;
+    window_end_exclusive_at: string;
+    is_full_day: boolean;
+    publish_eligibility: string;
+    historical_overwrite_required: boolean;
+  }>;
 };
 
-export type OnboardingSample = {
-  pageId: string;
-  pageName: string;
-  targetDate: string;
-  businessTimezone: string;
-  processingMode: ProcessingMode;
-  initialConversationLimit: number;
-  openingSampleConversationId?: string | null;
-  windowStartAt: string;
-  windowEndExclusiveAt: string;
-  metrics: Record<string, unknown>;
-  tagCandidates: Array<{ pancakeTagId: string; text: string; count: number; isDeactive?: boolean }>;
-  openingCandidates: {
-    topOpeningCandidateWindows: Array<{ signature: string[]; count: number; exampleConversationIds?: string[] }>;
-    unmatchedOpeningTexts: Array<{ text: string; count: number; exampleConversationIds?: string[] }>;
-    matchedOpeningSelections?: Array<{ signal: string; rawText: string; decision: string; count: number; exampleConversationIds?: string[] }>;
+export type WorkerExecution = {
+  pipelineRunId: string;
+  exitCode: number;
+  ok: boolean;
+  stdout: string;
+  stderr: string;
+};
+
+export type RunGroupResult = {
+  run_group: {
+    id: string;
+    run_mode: string;
+    status: string;
+    requested_window_start_at: string | null;
+    requested_window_end_exclusive_at: string | null;
+    requested_target_date: string | null;
+    publish_intent: string;
+    frozen_config_version_id: string;
+    frozen_taxonomy_version_id: string;
+    frozen_compiled_prompt_hash: string;
+    frozen_prompt_version: string;
+    created_by: string;
+    created_at: string;
+    started_at: string | null;
+    finished_at: string | null;
+    connected_page: {
+      id: string;
+      pancake_page_id: string;
+      page_name: string;
+      business_timezone: string;
+    };
   };
+  child_runs: RunSummary[];
+  executions?: WorkerExecution[];
 };
 
-export type OnboardingTagCandidate = {
-  pancakeTagId: string;
-  rawLabel: string;
-  count: number;
-  signal: string;
+export type RunSummary = {
+  id: string;
+  run_group_id: string;
+  target_date: string;
+  window_start_at: string;
+  window_end_exclusive_at: string;
+  requested_window_start_at: string | null;
+  requested_window_end_exclusive_at: string | null;
+  is_full_day: boolean;
+  run_mode: string;
+  status: string;
+  publish_state: string;
+  publish_eligibility: string;
+  supersedes_run_id: string | null;
+  superseded_by_run_id: string | null;
+  request_json: unknown;
+  metrics_json: unknown;
+  reuse_summary_json: unknown;
+  error_text: string | null;
+  created_at: string;
+  started_at: string | null;
+  finished_at: string | null;
+  published_at: string | null;
 };
 
-export type OnboardingOpeningCandidate = {
-  rawText: string;
-  count: number;
-  signal: string;
-  decision: string;
-  exampleConversationIds?: string[];
+export type RunDetailResult = {
+  run: RunSummary;
+  counts: {
+    threadDayCount: number;
+    messageCount: number;
+  };
 };
 
 export type AppState = {
@@ -166,57 +137,38 @@ export type AppState = {
   loading: string | null;
   error: string | null;
   info: string | null;
-  view: View;
-  pages: ConnectedPageLite[];
-  pageId: string;
-  startDate: string;
-  endDate: string;
-  mood: string;
-  need: string;
-  customerType: string;
-  risk: string;
-  dashboard: DashboardData | null;
-  exploratory: ThreadsData | null;
-  historyThreads: ThreadSummary[];
-  historyThreadId: string;
-  historyDetail: ThreadDetail | null;
-  comparison: ComparisonData | null;
-  search: string;
-  minMessages: string;
-  sortBy: SortBy;
-  sortOrder: SortOrder;
-  runGroups: RunGroupSummary[];
-  selectedRunGroupId: string;
-  runGroupThreads: RunGroupThread[];
-  mappingReview: MappingReviewItem[];
-  health: HealthSummary | null;
-  settingTimezone: string;
-  settingEtlEnabled: boolean;
-  settingAnalysisEnabled: boolean;
-  settingTagRulesText: string;
-  settingOpeningRulesText: string;
-  settingPrompt: string;
-  activePrompt: string;
-  runProcessingMode: ProcessingMode;
-  runMode: RunMode;
-  runTargetDate: string;
-  runWindowStart: string;
-  runWindowEnd: string;
-  runMaxConversations: string;
-  runMaxMessagePages: string;
-  onboardingToken: string;
-  onboardingPages: Array<{ pageId: string; pageName: string }>;
-  onboardingPageId: string;
-  onboardingTimezone: string;
-  onboardingLimit: string;
-  onboardingMode: ProcessingMode;
-  onboardingEtlEnabled: boolean;
-  onboardingAnalysisEnabled: boolean;
-  onboardingTagCandidates: OnboardingTagCandidate[];
-  onboardingCustomTagSignals: string[];
-  onboardingNewTagSignal: string;
-  onboardingOpeningCandidates: OnboardingOpeningCandidate[];
-  onboardingOpeningMaxMessages: string;
-  onboardingPrompt: string;
-  onboardingSample: OnboardingSample | null;
+  registerToken: string;
+  tokenPages: ListedPage[];
+  registerSelectedPancakePageId: string;
+  registerTimezone: string;
+  registerEtlEnabled: boolean;
+  registerAnalysisEnabled: boolean;
+  pages: ConnectedPageDetail[];
+  selectedPageId: string;
+  selectedPage: ConnectedPageDetail | null;
+  selectedConfigVersionId: string;
+  configPromptText: string;
+  configTagMappingText: string;
+  configOpeningRulesText: string;
+  configSchedulerText: string;
+  configNotificationTargetsText: string;
+  configNotes: string;
+  configActivate: boolean;
+  configEtlEnabled: boolean;
+  configAnalysisEnabled: boolean;
+  jobProcessingMode: ProcessingMode;
+  jobTargetDate: string;
+  jobRequestedWindowStartAt: string;
+  jobRequestedWindowEndExclusiveAt: string;
+  previewResult: PreviewResult | null;
+  executeResult: RunGroupResult | null;
+  inspectRunGroupId: string;
+  runGroupResult: RunGroupResult | null;
+  inspectRunId: string;
+  runDetailResult: RunDetailResult | null;
+  publishRunId: string;
+  publishAs: PublishAs;
+  confirmHistoricalOverwrite: boolean;
+  expectedReplacedRunId: string;
+  publishResult: RunDetailResult | null;
 };
