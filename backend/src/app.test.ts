@@ -28,6 +28,22 @@ describe("app health", () => {
       timestamp: expect.any(String)
     });
   });
+
+  it("returns 400 when read-models receives a non-UUID pageId", async () => {
+    const { app } = await import("./app.ts");
+    const response = await app.handle(new Request("http://localhost/read-models/overview?pageId=&startDate=2026-04-01&endDate=2026-04-05"));
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe("pageId phải là connected_page_id UUID hợp lệ.");
+  });
+
+  it("returns 400 when page comparison receives invalid comparePageIds", async () => {
+    const { app } = await import("./app.ts");
+    const response = await app.handle(new Request("http://localhost/read-models/page-comparison?startDate=2026-04-01&endDate=2026-04-05&comparePageIds=not-a-uuid"));
+
+    expect(response.status).toBe(400);
+    await expect(response.text()).resolves.toBe("comparePageIds phải là connected_page_id UUID hợp lệ.");
+  });
 });
 
 function patchValue<T extends object, K extends keyof T>(target: T, key: K, value: T[K]) {

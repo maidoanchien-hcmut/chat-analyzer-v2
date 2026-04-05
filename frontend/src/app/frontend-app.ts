@@ -27,7 +27,7 @@ import { defaultDateRange, isoFromDatetimeLocal } from "../shared/dates.ts";
 import { exportBusinessWorkbook } from "../shared/export.ts";
 import { escapeHtml } from "../shared/html.ts";
 import { createDefaultExportWorkflowState, ensureExportWorkflowPage, readExportRequest, type ExportWorkflowState } from "./export-workflow.ts";
-import { applyBusinessFilters, parseRouteState, serializeRouteState } from "./query-state.ts";
+import { applyBusinessFilters, parseRouteState, reconcileRouteStateWithCatalog, serializeRouteState } from "./query-state.ts";
 import type { ConfigurationState, OnboardingState, OperationsState } from "./screen-state.ts";
 
 export class FrontendApp {
@@ -95,8 +95,9 @@ export class FrontendApp {
     window.addEventListener("popstate", () => void this.restoreFromLocation());
     await this.withPending("load-shell", async () => {
       this.catalog = await this.businessAdapter.loadCatalog();
-      if (!this.route.filters.pageId) {
-        this.route.filters.pageId = this.catalog.pages[0]?.id ?? "";
+      const nextRoute = reconcileRouteStateWithCatalog(this.route, this.catalog.pages);
+      if (serializeRouteState(nextRoute) !== serializeRouteState(this.route)) {
+        this.route = nextRoute;
         window.history.replaceState({}, "", `?${serializeRouteState(this.route)}`);
       }
       this.exportWorkflow = ensureExportWorkflowPage(this.exportWorkflow, this.catalog.pages);
@@ -107,10 +108,12 @@ export class FrontendApp {
 
   private async restoreFromLocation() {
     this.route = parseRouteState(window.location.search);
-    if (!this.route.filters.pageId && this.catalog) {
-      this.route.filters.pageId = this.catalog.pages[0]?.id ?? "";
-    }
     if (this.catalog) {
+      const nextRoute = reconcileRouteStateWithCatalog(this.route, this.catalog.pages);
+      if (serializeRouteState(nextRoute) !== serializeRouteState(this.route)) {
+        this.route = nextRoute;
+        window.history.replaceState({}, "", `?${serializeRouteState(this.route)}`);
+      }
       this.exportWorkflow = ensureExportWorkflowPage(this.exportWorkflow, this.catalog.pages);
     }
     await this.loadCurrentView();
@@ -126,8 +129,8 @@ export class FrontendApp {
     if (routeElement) {
       event.preventDefault();
       this.route = mergeRouteSearch(this.route, routeElement.dataset.route ?? "");
-      if (!this.route.filters.pageId && this.catalog) {
-        this.route.filters.pageId = this.catalog.pages[0]?.id ?? "";
+      if (this.catalog) {
+        this.route = reconcileRouteStateWithCatalog(this.route, this.catalog.pages);
       }
       window.history.pushState({}, "", `?${serializeRouteState(this.route)}`);
       await this.loadCurrentView();
@@ -330,6 +333,10 @@ export class FrontendApp {
 
   private async loadCurrentView() {
     if (!this.catalog) {
+      return;
+    }
+    if (this.route.view !== "operations" && this.route.view !== "configuration" && !this.route.filters.pageId) {
+      this.currentViewHtml = renderNoConnectedPageState();
       return;
     }
     if (this.route.view === "overview") {
@@ -703,6 +710,15 @@ function renderFilterBar(catalog: NonNullable<FrontendApp["catalog"]>, route: Ro
       <label><span>Nhân viên</span><select name="staff">${catalog.staff.map((option) => `<option value="${escapeHtml(option.value)}" ${option.value === route.filters.staff ? "selected" : ""}>${escapeHtml(option.label)}</option>`).join("")}</select></label>
       ${route.filters.slicePreset === "custom" ? `<label><span>Từ ngày</span><input type="date" name="startDate" value="${escapeHtml(route.filters.startDate)}" /></label><label><span>Đến ngày</span><input type="date" name="endDate" value="${escapeHtml(route.filters.endDate)}" /></label>` : ""}
     </form>
+  `;
+}
+
+function renderNoConnectedPageState() {
+  return `
+    <section class="panel-card empty-state">
+      <h3>Chưa có connected page</h3>
+      <p>Cần đăng ký ít nhất một page ở màn Configuration trước khi mở dashboard read-model.</p>
+    </section>
   `;
 }
 

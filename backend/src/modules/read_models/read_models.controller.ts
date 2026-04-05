@@ -1,4 +1,5 @@
 import { Elysia, t } from "elysia";
+import { AppError } from "../../core/errors.ts";
 import { readModelsService } from "./read_models.service.ts";
 import type { ExportWorkbookRequest, ReadModelFilterInput } from "./read_models.types.ts";
 
@@ -55,7 +56,7 @@ export const readModelsController = new Elysia({ prefix: "/read-models" })
   })
   .get("/page-comparison", async ({ query }) => ({
     pageComparison: await readModelsService.getPageComparison(
-      parseFilters(query),
+      parseFilters(query, { requirePageId: false }),
       parseComparePageIds(query.comparePageIds)
     )
   }), {
@@ -74,9 +75,12 @@ export const readModelsController = new Elysia({ prefix: "/read-models" })
     response: t.Any()
   });
 
-function parseFilters(query: Record<string, unknown>): ReadModelFilterInput {
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function parseFilters(query: Record<string, unknown>, options?: { requirePageId?: boolean }): ReadModelFilterInput {
+  const requirePageId = options?.requirePageId ?? true;
   return {
-    pageId: readString(query.pageId),
+    pageId: requirePageId ? readConnectedPageId(query.pageId) : readString(query.pageId),
     startDate: readString(query.startDate),
     endDate: readString(query.endDate),
     publishSnapshot: readString(query.publishSnapshot) === "provisional" ? "provisional" : "official",
@@ -91,7 +95,7 @@ function parseFilters(query: Record<string, unknown>): ReadModelFilterInput {
 
 function parseExportRequest(query: Record<string, unknown>): ExportWorkbookRequest {
   return {
-    pageId: readString(query.pageId),
+    pageId: readConnectedPageId(query.pageId),
     startDate: readString(query.startDate),
     endDate: readString(query.endDate)
   };
@@ -99,10 +103,14 @@ function parseExportRequest(query: Record<string, unknown>): ExportWorkbookReque
 
 function parseComparePageIds(value: unknown) {
   if (Array.isArray(value)) {
-    return value.map((item) => String(item)).filter(Boolean);
+    return value.map((item) => readConnectedPageId(item, "comparePageIds")).filter(Boolean);
   }
   if (typeof value === "string") {
-    return value.split(",").map((item) => item.trim()).filter(Boolean);
+    return value
+      .split(",")
+      .map((item) => item.trim())
+      .filter(Boolean)
+      .map((item) => readConnectedPageId(item, "comparePageIds"));
   }
   return [];
 }
@@ -121,4 +129,16 @@ function parseThreadTab(value: unknown) {
 
 function readString(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
+}
+
+function readConnectedPageId(value: unknown, field = "pageId") {
+  const normalized = readString(value);
+  if (!UUID_PATTERN.test(normalized)) {
+    throw new AppError(
+      400,
+      field === "comparePageIds" ? "READ_MODELS_INVALID_COMPARE_PAGE_IDS" : "READ_MODELS_INVALID_PAGE_ID",
+      `${field} phải là connected_page_id UUID hợp lệ.`
+    );
+  }
+  return normalized;
 }

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { ConfigurationState, OnboardingState } from "../../app/screen-state.ts";
 import { renderConfiguration } from "./render.ts";
-import { buildCreateConfigVersionInput } from "./state.ts";
+import { buildCreateConfigVersionInput, configVersionToDraft } from "./state.ts";
 
 describe("configuration workflow", () => {
   it("serializes structured configuration editors into the control-plane contract", () => {
@@ -27,25 +27,158 @@ describe("configuration workflow", () => {
       version: 1,
       defaultRole: "noise",
       entries: [
-        { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+        {
+          sourceTagId: "tag-1",
+          sourceTagText: "KH mới",
+          role: "journey",
+          canonicalCode: "new_to_clinic",
+          mappingSource: "operator",
+          status: "active"
+        }
       ]
     });
     expect(payload.openingRulesJson).toEqual({
       version: 1,
       selectors: [
-        { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
+        {
+          selectorId: "opening-rule-1",
+          signalRole: "journey",
+          signalCode: "revisit",
+          allowedMessageTypes: ["postback", "quick_reply_selection", "text"],
+          options: [
+            { rawText: "Khách hàng tái khám", matchMode: "exact" }
+          ]
+        }
       ]
     });
     expect(payload.schedulerJson).toEqual({
+      version: 1,
+      timezone: "Asia/Ho_Chi_Minh",
+      officialDailyTime: "00:30",
+      lookbackHours: 3,
+      maxConversationsPerRun: 0,
+      maxMessagePagesPerThread: 0
+    });
+    expect(payload.notificationTargetsJson).toEqual({
+      version: 1,
+      telegram: [
+        { chatId: "@ops-alert", events: [] }
+      ],
+      email: []
+    });
+  });
+
+  it("parses backend config payload back into the editor draft shape", () => {
+    const draft = configVersionToDraft({
+      id: "cfg-18",
+      versionNo: 18,
+      promptText: "Prompt active có rubric risk cho khách tái khám.",
+      tagMappingJson: {
+        version: 1,
+        defaultRole: "noise",
+        entries: [
+          {
+            sourceTagId: "tag-1",
+            sourceTagText: "KH mới",
+            role: "journey",
+            canonicalCode: "new_to_clinic",
+            mappingSource: "operator",
+            status: "active"
+          }
+        ]
+      },
+      openingRulesJson: {
+        version: 1,
+        selectors: [
+          {
+            selectorId: "opening-rule-1",
+            signalRole: "journey",
+            signalCode: "revisit",
+            allowedMessageTypes: ["postback", "quick_reply_selection", "text"],
+            options: [
+              { rawText: "Khách hàng tái khám", matchMode: "exact" }
+            ]
+          }
+        ]
+      },
+      schedulerJson: {
+        version: 1,
+        timezone: "Asia/Ho_Chi_Minh",
+        officialDailyTime: "00:30",
+        lookbackHours: 3,
+        maxConversationsPerRun: 0,
+        maxMessagePagesPerThread: 0
+      },
+      notificationTargetsJson: {
+        version: 1,
+        telegram: [
+          { chatId: "@ops-alert", events: [] }
+        ],
+        email: [
+          { address: "ops@example.com", events: [] }
+        ]
+      },
+      notes: "sample",
+      analysisTaxonomyVersionId: "tax-2026-04",
+      analysisTaxonomyVersionCode: "tax-2026-04",
+      createdAt: "2026-04-04T09:00:00.000Z",
+      promptVersionLabel: "Prompt A12",
+      promptHash: "sha256:prompt-a12",
+      evidenceBundle: [],
+      fieldExplanations: []
+    });
+
+    expect(draft.tagMappings).toEqual([
+      { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+    ]);
+    expect(draft.openingRules).toEqual([
+      { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
+    ]);
+    expect(draft.scheduler).toEqual({
       useSystemDefaults: false,
       officialDailyTime: "00:30",
       lookbackHours: 3
     });
-    expect(payload.notificationTargetsJson).toEqual({
-      channels: [
-        { channel: "telegram", value: "@ops-alert" }
-      ]
+    expect(draft.notificationTargets).toEqual([
+      { channel: "telegram", value: "@ops-alert" },
+      { channel: "email", value: "ops@example.com" }
+    ]);
+    expect(draft.notes).toBe("sample");
+  });
+
+  it("keeps editor defaults when backend config sections are absent", () => {
+    const draft = configVersionToDraft({
+      id: "cfg-18",
+      versionNo: 18,
+      promptText: "Prompt active có rubric risk cho khách tái khám.",
+      tagMappingJson: null,
+      openingRulesJson: null,
+      schedulerJson: null,
+      notificationTargetsJson: null,
+      notes: null,
+      analysisTaxonomyVersionId: "tax-2026-04",
+      analysisTaxonomyVersionCode: "tax-2026-04",
+      createdAt: "2026-04-04T09:00:00.000Z",
+      promptVersionLabel: "Prompt A12",
+      promptHash: "sha256:prompt-a12",
+      evidenceBundle: [],
+      fieldExplanations: []
     });
+
+    expect(draft.tagMappings).toEqual([
+      { rawTag: "", role: "noise", canonicalValue: "", source: "system_default" }
+    ]);
+    expect(draft.openingRules).toEqual([
+      { buttonTitle: "", signalType: "customer_journey", canonicalValue: "" }
+    ]);
+    expect(draft.scheduler).toEqual({
+      useSystemDefaults: true,
+      officialDailyTime: "00:00",
+      lookbackHours: 2
+    });
+    expect(draft.notificationTargets).toEqual([
+      { channel: "telegram", value: "" }
+    ]);
   });
 
   it("renders prompt profile affordances for clone and compare instead of raw json textareas", () => {

@@ -5,6 +5,7 @@ import { renderOverview } from "../features/overview/render.ts";
 import { renderPageComparison } from "../features/page-comparison/render.ts";
 import { renderStaffPerformance } from "../features/staff-performance/render.ts";
 import type { BusinessFilters, RouteState } from "../core/types.ts";
+import { ensureExportWorkflowPage } from "./export-workflow.ts";
 import { parseRouteState, serializeRouteState } from "./query-state.ts";
 
 const filters: BusinessFilters = {
@@ -81,5 +82,19 @@ describe("export workflow", () => {
 
     expect(workbook.allowed).toBe(false);
     expect(workbook.reason).toContain("không có ngày nào");
+  });
+
+  it("replaces a stale export page selection with the first catalog page", () => {
+    const next = ensureExportWorkflowPage({
+      selectedPageId: "cp-101",
+      startDate: "2026-04-01",
+      endDate: "2026-04-05",
+      workbook: null
+    }, [
+      { id: "11111111-1111-4111-8111-111111111111", label: "Page Da Liễu Quận 1", pancakePageId: "pk_101", timezone: "Asia/Ho_Chi_Minh" },
+      { id: "22222222-2222-4222-8222-222222222222", label: "Page Nha Khoa Thủ Đức", pancakePageId: "pk_202", timezone: "Asia/Ho_Chi_Minh" }
+    ]);
+
+    expect(next.selectedPageId).toBe("11111111-1111-4111-8111-111111111111");
   });
 });

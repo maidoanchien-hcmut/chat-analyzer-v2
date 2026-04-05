@@ -20,7 +20,10 @@ export function createDefaultExportWorkflowState(): ExportWorkflowState {
 }
 
 export function ensureExportWorkflowPage(state: ExportWorkflowState, pages: BusinessPage[]) {
-  if (state.selectedPageId || pages.length === 0) {
+  if (pages.length === 0) {
+    return state;
+  }
+  if (state.selectedPageId && pages.some((page) => page.id === state.selectedPageId)) {
     return state;
   }
   return {

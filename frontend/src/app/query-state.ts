@@ -1,4 +1,5 @@
 import type {
+  BusinessPage,
   BusinessFilters,
   ConfigurationTab,
   InboxBucket,
@@ -126,6 +127,26 @@ export function applyBusinessFilters(current: RouteState, nextFilters: Partial<B
   return {
     ...current,
     filters
+  };
+}
+
+export function reconcileRouteStateWithCatalog(route: RouteState, pages: BusinessPage[]): RouteState {
+  const validPageIds = new Set(pages.map((page) => page.id));
+  const fallbackPageId = pages[0]?.id ?? "";
+  const pageId = validPageIds.has(route.filters.pageId) ? route.filters.pageId : fallbackPageId;
+  const comparePageIds = route.comparePageIds.filter((id) => validPageIds.has(id));
+
+  if (pageId === route.filters.pageId && comparePageIds.length === route.comparePageIds.length) {
+    return route;
+  }
+
+  return {
+    ...route,
+    filters: {
+      ...route.filters,
+      pageId
+    },
+    comparePageIds
   };
 }
 

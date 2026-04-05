@@ -4,6 +4,7 @@ import { readModelsController } from "./read_models.controller.ts";
 import { readModelsService } from "./read_models.service.ts";
 
 const restorers: Array<() => void> = [];
+const CONNECTED_PAGE_ID = "11111111-1111-4111-8111-111111111111";
 
 afterEach(() => {
   while (restorers.length > 0) {
@@ -34,12 +35,12 @@ describe("read models controller", () => {
     }));
 
     const app = new Elysia().use(readModelsController);
-    const response = await app.handle(new Request("http://localhost/read-models/overview?pageId=page-1&startDate=2026-04-01&endDate=2026-04-05&publishSnapshot=provisional&inboxBucket=new&revisit=revisit&need=dat_lich&outcome=booked&risk=high&staff=Lan"));
+    const response = await app.handle(new Request(`http://localhost/read-models/overview?pageId=${CONNECTED_PAGE_ID}&startDate=2026-04-01&endDate=2026-04-05&publishSnapshot=provisional&inboxBucket=new&revisit=revisit&need=dat_lich&outcome=booked&risk=high&staff=Lan`));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({
       overview: expect.objectContaining({
-        pageLabel: "page-1",
+        pageLabel: CONNECTED_PAGE_ID,
         snapshot: expect.objectContaining({
           coverage: "2026-04-01 -> 2026-04-05"
         })
@@ -82,7 +83,7 @@ describe("read models controller", () => {
     }));
 
     const app = new Elysia().use(readModelsController);
-    const response = await app.handle(new Request("http://localhost/read-models/thread-history?pageId=page-1&startDate=2026-04-01&endDate=2026-04-05&publishSnapshot=official&threadId=thread-1&threadDayId=thread-day-9&threadTab=ai-audit"));
+    const response = await app.handle(new Request(`http://localhost/read-models/thread-history?pageId=${CONNECTED_PAGE_ID}&startDate=2026-04-01&endDate=2026-04-05&publishSnapshot=official&threadId=thread-1&threadDayId=thread-day-9&threadTab=ai-audit`));
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toEqual({

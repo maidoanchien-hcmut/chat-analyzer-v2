@@ -21,34 +21,53 @@ export function buildCreateConfigVersionInput(input: ConfigDraftInput): CreateCo
       defaultRole: "noise",
       entries: input.tagMappings
         .filter((entry) => entry.rawTag.trim() && entry.role.trim())
-        .map((entry) => ({
-          rawTag: entry.rawTag.trim(),
-          role: entry.role.trim(),
-          canonicalValue: entry.canonicalValue.trim(),
-          source: entry.source
+        .map((entry, index) => ({
+          sourceTagId: `tag-${index + 1}`,
+          sourceTagText: entry.rawTag.trim(),
+          role: mapTagRoleToBackend(entry.role),
+          canonicalCode: entry.canonicalValue.trim() || null,
+          mappingSource: entry.source === "operator_override" ? "operator" : "auto_default",
+          status: "active"
         }))
     },
     openingRulesJson: {
       version: 1,
       selectors: input.openingRules
         .filter((entry) => entry.buttonTitle.trim() && entry.signalType.trim())
-        .map((entry) => ({
-          buttonTitle: entry.buttonTitle.trim(),
-          signalType: entry.signalType.trim(),
-          canonicalValue: entry.canonicalValue.trim()
+        .map((entry, index) => ({
+          selectorId: `opening-rule-${index + 1}`,
+          signalRole: mapOpeningSignalToBackend(entry.signalType),
+          signalCode: entry.canonicalValue.trim(),
+          allowedMessageTypes: ["postback", "quick_reply_selection", "text"],
+          options: [
+            {
+              rawText: entry.buttonTitle.trim(),
+              matchMode: "exact"
+            }
+          ]
         }))
     },
     schedulerJson: {
-      useSystemDefaults: input.scheduler.useSystemDefaults,
+      version: 1,
+      timezone: "Asia/Ho_Chi_Minh",
       officialDailyTime: input.scheduler.officialDailyTime,
-      lookbackHours: input.scheduler.lookbackHours
+      lookbackHours: input.scheduler.lookbackHours,
+      maxConversationsPerRun: 0,
+      maxMessagePagesPerThread: 0
     },
     notificationTargetsJson: {
-      channels: input.notificationTargets
-        .filter((entry) => entry.channel.trim() && entry.value.trim())
+      version: 1,
+      telegram: input.notificationTargets
+        .filter((entry) => entry.channel.trim() === "telegram" && entry.value.trim())
         .map((entry) => ({
-          channel: entry.channel.trim(),
-          value: entry.value.trim()
+          chatId: entry.value.trim(),
+          events: []
+        })),
+      email: input.notificationTargets
+        .filter((entry) => entry.channel.trim() === "email" && entry.value.trim())
+        .map((entry) => ({
+          address: entry.value.trim(),
+          events: []
         }))
     },
     notes: input.notes.trim() || null,
@@ -115,21 +134,21 @@ export function createEmptyNotificationTarget(): NotificationTargetDraft {
 function parseTagMappings(value: unknown): TagMappingDraft[] {
   const entries = readArrayField(value, "entries");
   const mapped = entries.map((entry) => ({
-    rawTag: readString(entry, "rawTag"),
-    role: readString(entry, "role"),
-    canonicalValue: readString(entry, "canonicalValue"),
-    source: (readString(entry, "source") === "operator_override" ? "operator_override" : "system_default") as "system_default" | "operator_override"
-  }));
+    rawTag: readString(entry, "sourceTagText"),
+    role: mapTagRoleFromBackend(readString(entry, "role")),
+    canonicalValue: readString(entry, "canonicalCode"),
+    source: (readString(entry, "mappingSource") === "operator" ? "operator_override" : "system_default") as "system_default" | "operator_override"
+  })).filter((entry) => entry.rawTag || entry.role !== "noise" || entry.canonicalValue || entry.source !== "system_default");
   return mapped.length > 0 ? mapped : [createEmptyTagMapping()];
 }
 
 function parseOpeningRules(value: unknown): OpeningRuleDraft[] {
   const selectors = readArrayField(value, "selectors");
   const mapped = selectors.map((entry) => ({
-    buttonTitle: readString(entry, "buttonTitle"),
-    signalType: readString(entry, "signalType"),
-    canonicalValue: readString(entry, "canonicalValue")
-  }));
+    buttonTitle: readArrayField(entry, "options").map((option) => readString(option, "rawText")).find(Boolean) ?? "",
+    signalType: mapOpeningSignalFromBackend(readString(entry, "signalRole")),
+    canonicalValue: readString(entry, "signalCode")
+  })).filter((entry) => entry.buttonTitle.trim() && entry.signalType.trim());
   return mapped.length > 0 ? mapped : [createEmptyOpeningRule()];
 }
 
@@ -138,18 +157,22 @@ function parseScheduler(value: unknown): SchedulerDraft {
     return createDefaultScheduler();
   }
   return {
-    useSystemDefaults: readBoolean(value, "useSystemDefaults", true),
+    useSystemDefaults: false,
     officialDailyTime: readString(value, "officialDailyTime") || "00:00",
     lookbackHours: readNumber(value, "lookbackHours", 2)
   };
 }
 
 function parseNotificationTargets(value: unknown): NotificationTargetDraft[] {
-  const channels = readArrayField(value, "channels");
-  const mapped = channels.map((entry) => ({
-    channel: readString(entry, "channel"),
-    value: readString(entry, "value")
+  const telegram = readArrayField(value, "telegram").map((entry) => ({
+    channel: "telegram",
+    value: readString(entry, "chatId")
   }));
+  const email = readArrayField(value, "email").map((entry) => ({
+    channel: "email",
+    value: readString(entry, "address")
+  }));
+  const mapped = [...telegram, ...email].filter((entry) => entry.value.trim());
   return mapped.length > 0 ? mapped : [createEmptyNotificationTarget()];
 }
 
@@ -183,4 +206,32 @@ function readNumber(value: unknown, key: string, fallback: number) {
   }
   const result = (value as Record<string, unknown>)[key];
   return typeof result === "number" ? result : fallback;
+}
+
+function mapTagRoleToBackend(role: string) {
+  if (role === "customer_journey") {
+    return "journey";
+  }
+  return role.trim();
+}
+
+function mapTagRoleFromBackend(role: string) {
+  if (role === "journey") {
+    return "customer_journey";
+  }
+  return role;
+}
+
+function mapOpeningSignalToBackend(signalType: string) {
+  if (signalType === "customer_journey") {
+    return "journey";
+  }
+  return signalType.trim();
+}
+
+function mapOpeningSignalFromBackend(signalRole: string) {
+  if (signalRole === "journey") {
+    return "customer_journey";
+  }
+  return signalRole;
 }
