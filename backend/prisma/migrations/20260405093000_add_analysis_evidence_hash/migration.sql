@@ -2,7 +2,7 @@ ALTER TABLE "analysis_run"
   ADD COLUMN "snapshot_identity_key" TEXT NOT NULL DEFAULT '';
 
 UPDATE "analysis_run"
-SET "snapshot_identity_key" = COALESCE(NULLIF("prompt_hash", ''), "id");
+SET "snapshot_identity_key" = COALESCE(NULLIF("prompt_hash", ''), "id"::text);
 
 ALTER TABLE "analysis_run"
   ALTER COLUMN "snapshot_identity_key" DROP DEFAULT;
@@ -14,7 +14,7 @@ ALTER TABLE "analysis_result"
   ADD COLUMN "evidence_hash" TEXT NOT NULL DEFAULT '';
 
 UPDATE "analysis_result"
-SET "evidence_hash" = COALESCE(NULLIF("prompt_hash", ''), "id");
+SET "evidence_hash" = COALESCE(NULLIF("prompt_hash", ''), "id"::text);
 
 ALTER TABLE "analysis_result"
   ALTER COLUMN "evidence_hash" DROP DEFAULT;

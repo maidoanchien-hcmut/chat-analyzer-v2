@@ -1,0 +1,17 @@
+ALTER INDEX IF EXISTS "active_publish_snapshot_connected_page_id_target_date_key_publi"
+  RENAME TO "active_publish_snapshot_connected_page_id_target_date_key_p_key";
+
+ALTER INDEX IF EXISTS "active_publish_snapshot_page_key_target_date_key_publish_channe"
+  RENAME TO "active_publish_snapshot_page_key_target_date_key_publish_ch_idx";
+
+ALTER INDEX IF EXISTS "fact_staff_thread_day_pipeline_run_id_thread_day_id_staff_key_k"
+  RENAME TO "fact_staff_thread_day_pipeline_run_id_thread_day_id_staff_k_key";
+
+ALTER INDEX IF EXISTS "fact_staff_thread_day_response_quality_code_process_risk_level_"
+  RENAME TO "fact_staff_thread_day_response_quality_code_process_risk_le_idx";
+
+ALTER INDEX IF EXISTS "fact_thread_day_primary_need_code_official_closing_outcome_code"
+  RENAME TO "fact_thread_day_primary_need_code_official_closing_outcome__idx";
+
+ALTER INDEX IF EXISTS "publish_history_connected_page_id_target_date_key_publish_chann"
+  RENAME TO "publish_history_connected_page_id_target_date_key_publish_c_idx";
