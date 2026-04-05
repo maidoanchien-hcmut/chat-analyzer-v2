@@ -92,7 +92,7 @@ class ReadModelsService {
 
   async getOverview(filters: ReadModelFilterInput) {
     const slice = await this.resolveSlice(filters);
-    const threadFacts = await readModelsRepository.listFactThreadDaysByRunIds(
+    const threadFacts = await this.listFilteredThreadFacts(
       slice.snapshots.map((item) => item.pipelineRunId),
       filters
     );
@@ -152,7 +152,7 @@ class ReadModelsService {
 
   async getExploration(filters: ReadModelFilterInput) {
     const slice = await this.resolveSlice(filters);
-    const threadFacts = await readModelsRepository.listFactThreadDaysByRunIds(
+    const threadFacts = await this.listFilteredThreadFacts(
       slice.snapshots.map((item) => item.pipelineRunId),
       filters
     );
@@ -242,11 +242,12 @@ class ReadModelsService {
   async getThreadHistory(
     filters: ReadModelFilterInput,
     requestedThreadId: string | null,
+    requestedThreadDayId: string | null,
     activeTab: "conversation" | "analysis-history" | "ai-audit" | "crm-link"
   ) {
     const slice = await this.resolveSlice(filters);
     const pipelineRunIds = slice.snapshots.map((item) => item.pipelineRunId);
-    const threadFacts = await readModelsRepository.listFactThreadDaysByRunIds(pipelineRunIds, filters);
+    const threadFacts = await this.listFilteredThreadFacts(pipelineRunIds, filters);
     const threadIds = uniqueValues(threadFacts.map((row) => row.threadId));
     const threadSummaries = await readModelsRepository.listThreadSummaries(threadIds, pipelineRunIds);
     const activeThreadId = resolveActiveThreadId(threadFacts, threadSummaries, requestedThreadId);
@@ -259,6 +260,7 @@ class ReadModelsService {
       businessTimezone: slice.businessTimezone,
       taxonomyJson: slice.snapshots[0]?.taxonomyJson ?? null,
       requestedThreadId,
+      requestedThreadDayId,
       activeTab,
       threadFacts,
       threadSummaries,
@@ -271,13 +273,14 @@ class ReadModelsService {
   }
 
   async getPageComparison(filters: ReadModelFilterInput, comparePageIds: string[]) {
+    const compareFilters = sanitizePageComparisonFilters(filters);
     const catalog = await readModelsRepository.listConnectedPagesForCatalog();
     const targetPageIds = comparePageIds.length > 0 ? comparePageIds : catalog.map((page) => page.id);
-    const slices = await Promise.all(targetPageIds.map((pageId) => this.resolveSlice({ ...filters, pageId })));
+    const slices = await Promise.all(targetPageIds.map((pageId) => this.resolveSlice({ ...compareFilters, pageId })));
     const factsByPage = await Promise.all(
-      slices.map((slice) => readModelsRepository.listFactThreadDaysByRunIds(
+      slices.map((slice) => this.listFilteredThreadFacts(
         slice.snapshots.map((item) => item.pipelineRunId),
-        { ...filters, pageId: slice.pageId, staff: "all" }
+        { ...compareFilters, pageId: slice.pageId }
       ))
     );
 
@@ -472,6 +475,31 @@ class ReadModelsService {
     const pages = await readModelsRepository.listConnectedPagesForCatalog();
     return pages.find((page) => page.id === pageId)?.businessTimezone ?? "Asia/Saigon";
   }
+
+  private async listFilteredThreadFacts(pipelineRunIds: string[], filters: ReadModelFilterInput) {
+    if (filters.staff === "all") {
+      return readModelsRepository.listFactThreadDaysByRunIds(pipelineRunIds, filters);
+    }
+
+    const [threadFacts, staffFacts] = await Promise.all([
+      readModelsRepository.listFactThreadDaysByRunIds(pipelineRunIds, filters),
+      readModelsRepository.listFactStaffThreadDaysByRunIds(pipelineRunIds, filters)
+    ]);
+    const allowedThreadDayIds = new Set(staffFacts.map((row) => row.threadDayId));
+    return threadFacts.filter((row) => allowedThreadDayIds.has(row.threadDayId));
+  }
+}
+
+function sanitizePageComparisonFilters(filters: ReadModelFilterInput): ReadModelFilterInput {
+  return {
+    ...filters,
+    inboxBucket: "all",
+    revisit: "all",
+    need: "all",
+    outcome: "all",
+    risk: "all",
+    staff: "all"
+  };
 }
 
 function buildOptions(items: Array<{ value: string; label: string }>, allLabel: string) {

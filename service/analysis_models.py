@@ -36,6 +36,14 @@ class MessageModel(BaseModel):
   is_opening_block_message: bool = False
 
 
+class StaffParticipantModel(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
+  staff_name: str
+  sender_source_id: str | None = None
+  message_count: int = 0
+
+
 class UnitBundleModel(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
@@ -61,7 +69,7 @@ class UnitBundleModel(BaseModel):
   message_count: int = 0
   first_staff_response_seconds: int | None = None
   avg_staff_response_seconds: int | None = None
-  staff_participants_json: list[str] = Field(default_factory=list)
+  staff_participants_json: list[StaffParticipantModel | str] = Field(default_factory=list)
 
 
 class StaffAssessmentModel(BaseModel):

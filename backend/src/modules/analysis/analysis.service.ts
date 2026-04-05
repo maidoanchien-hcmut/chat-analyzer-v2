@@ -46,14 +46,23 @@ export class AnalysisService {
     const envelopes = threadDays.map((threadDay) => buildUnitEnvelope(pipelineRun, threadDay));
     const analysisRun = await this.resolveAnalysisRun(pipelineRun, runtime, envelopes);
     const existingResults = await this.repository.listAnalysisResults(analysisRun.id);
-    const terminalThreadDayIds = new Set(
+    const terminalResultByThreadDayId = new Map(
       existingResults
         .filter((result) => result.resultStatus === "succeeded" || result.resultStatus === "unknown")
-        .map((result) => result.threadDayId)
+        .map((result) => [result.threadDayId, result])
     );
-    const pendingEnvelopes = envelopes.filter((item) => !terminalThreadDayIds.has(item.bundle.threadDayId));
+    const pendingEnvelopes = envelopes.filter((item) => {
+      const terminal = terminalResultByThreadDayId.get(item.bundle.threadDayId);
+      if (!terminal) {
+        return true;
+      }
+      return terminal.evidenceHash !== item.evidenceHash;
+    });
     const skippedThreadDayIds = envelopes
-      .filter((item) => terminalThreadDayIds.has(item.bundle.threadDayId))
+      .filter((item) => {
+        const terminal = terminalResultByThreadDayId.get(item.bundle.threadDayId);
+        return terminal?.evidenceHash === item.evidenceHash;
+      })
       .map((item) => item.bundle.threadDayId);
 
     if (pendingEnvelopes.length > 0) {

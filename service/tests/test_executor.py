@@ -133,6 +133,43 @@ def test_staff_assessments_only_include_present_staff():
   assert results[0].staff_assessments_json[0].staff_name == "Lan"
 
 
+def test_staff_participants_object_array_is_accepted_as_canonical_contract():
+  executor = ConversationAnalysisExecutor(build_config(), DeterministicAnalysisAdapter(build_config()))
+
+  results, _ = run(
+    executor.analyze(
+      build_runtime(),
+      [
+        build_bundle(
+          staff_participants_json=[
+            {
+              "staff_name": "Lan",
+              "sender_source_id": "staff-1",
+              "message_count": 2,
+            }
+          ],
+          messages=[
+            {
+              "id": "msg-1",
+              "inserted_at": "2026-04-05T00:00:00.000Z",
+              "sender_role": "customer",
+              "sender_name": "Khách A",
+              "message_type": "text",
+              "redacted_text": "Em muốn đặt lịch",
+              "is_meaningful_human_message": True,
+              "is_opening_block_message": False,
+            }
+          ],
+        )
+      ],
+    )
+  )
+
+  assert len(results) == 1
+  assert results[0].result_status == "succeeded"
+  assert [item.staff_name for item in results[0].staff_assessments_json] == ["Lan"]
+
+
 def test_invalid_outputs_fail_closed():
   executor = ConversationAnalysisExecutor(build_config(), InvalidAdapter())
 

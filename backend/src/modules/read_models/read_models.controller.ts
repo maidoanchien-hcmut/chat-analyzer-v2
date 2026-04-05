@@ -46,6 +46,7 @@ export const readModelsController = new Elysia({ prefix: "/read-models" })
     threadHistory: await readModelsService.getThreadHistory(
       parseFilters(query),
       readString(query.threadId) || null,
+      readString(query.threadDayId) || null,
       parseThreadTab(query.threadTab)
     )
   }), {

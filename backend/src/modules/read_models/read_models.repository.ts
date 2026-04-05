@@ -398,6 +398,7 @@ class ReadModelsRepository {
       orderBy: [{ dateKey: "asc" }, { createdAt: "asc" }],
       select: {
         pipelineRunId: true,
+        threadDayId: true,
         threadId: true,
         isNewInbox: true,
         officialRevisitLabel: true,
@@ -446,6 +447,7 @@ class ReadModelsRepository {
       orderBy: [{ dateKey: "asc" }, { createdAt: "asc" }],
       select: {
         pipelineRunId: true,
+        threadDayId: true,
         threadId: true,
         primaryNeedCode: true,
         processRiskLevelCode: true,

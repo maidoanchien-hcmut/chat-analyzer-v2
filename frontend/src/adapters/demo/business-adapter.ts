@@ -57,8 +57,8 @@ export function createBusinessAdapter(): BusinessAdapter {
     async getStaffPerformance(filters) {
       return buildStaff(filters);
     },
-    async getThreadHistory(filters, threadId, tab) {
-      return buildThreadHistory(filters, threadId, tab);
+    async getThreadHistory(filters, threadId, threadDayId, tab) {
+      return buildThreadHistory(filters, threadId, threadDayId, tab);
     },
     async getPageComparison(filters, comparePageIds) {
       return buildComparison(filters, comparePageIds);
@@ -222,11 +222,15 @@ function buildStaff(filters: BusinessFilters): StaffPerformanceViewModel {
 function buildThreadHistory(
   filters: BusinessFilters,
   threadId: string | null,
+  threadDayId: string | null,
   tab: ThreadHistoryViewModel["activeTab"]
 ): ThreadHistoryViewModel {
   const scopedThreads = threadFixtures.filter((thread) => matchesThreadFilters(thread, filters));
   const activeThread = scopedThreads.find((thread) => thread.id === threadId) ?? scopedThreads[0] ?? threadFixtures[0];
   const activeThreadId = activeThread?.id ?? "";
+  const activeThreadDayId = activeThread?.analysisHistory.find((row) => row.threadDayId === threadDayId)?.threadDayId
+    ?? activeThread?.analysisHistory[0]?.threadDayId
+    ?? null;
 
   return {
     warning: null,
@@ -238,9 +242,13 @@ function buildThreadHistory(
       badges: thread.badges
     })),
     activeThreadId,
+    activeThreadDayId,
     activeTab: tab,
     transcript: activeThread?.transcript ?? [],
-    analysisHistory: activeThread?.analysisHistory ?? [],
+    analysisHistory: (activeThread?.analysisHistory ?? []).map((row) => ({
+      ...row,
+      active: row.threadDayId === activeThreadDayId
+    })),
     audit: activeThread?.audit ?? {
       model: "gpt-5.4-mini",
       promptVersion: "Prompt A12",
@@ -437,11 +445,11 @@ const threadFixtures: ThreadFixture[] = [
     staff: "mai",
     badges: ["Inbox mới", "Risk thấp"],
     transcript: [
-      { at: "10:03", author: "Lan Anh", role: "customer", text: "Em muốn đặt lịch treatment mụn tuần này", emphasized: true },
-      { at: "10:08", author: "Mai", role: "staff", text: "Chiều thứ 5 còn 16:00, em xác nhận giúp chị nhé." }
+      { id: "m-001", at: "10:03", author: "Lan Anh", role: "customer", text: "Em muốn đặt lịch treatment mụn tuần này", emphasized: true, isFirstMeaningful: true, isSupportingEvidence: true },
+      { id: "m-002", at: "10:08", author: "Mai", role: "staff", text: "Chiều thứ 5 còn 16:00, em xác nhận giúp chị nhé.", isStaffFirstResponse: true, isSupportingEvidence: true }
     ],
     analysisHistory: [
-      { date: "2026-04-03", openingTheme: "Đặt lịch treatment", need: "Đặt lịch", outcome: "Đã chốt hẹn", mood: "Tích cực", risk: "Thấp", quality: "Tốt", aiCost: "4.100 đ" }
+      { threadDayId: "td-1001-2026-04-03", date: "2026-04-03", openingTheme: "Đặt lịch treatment", need: "Đặt lịch", outcome: "Đã chốt hẹn", mood: "Tích cực", risk: "Thấp", quality: "Tốt", aiCost: "4.100 đ", active: true }
     ],
     audit: {
       model: "gpt-5.4-mini",
@@ -478,11 +486,11 @@ const threadFixtures: ThreadFixture[] = [
     staff: "mai",
     badges: ["Inbox mới", "Risk cao"],
     transcript: [
-      { at: "09:12", author: "Phương Thảo", role: "customer", text: "Cho em hỏi giá liệu trình 6 buổi", emphasized: true },
-      { at: "09:26", author: "Mai", role: "staff", text: "Combo hiện tại là 5.900.000 đ, chị gửi em chi tiết liệu trình nhé." }
+      { id: "m-010", at: "09:12", author: "Phương Thảo", role: "customer", text: "Cho em hỏi giá liệu trình 6 buổi", emphasized: true, isFirstMeaningful: true, isSupportingEvidence: true },
+      { id: "m-011", at: "09:26", author: "Mai", role: "staff", text: "Combo hiện tại là 5.900.000 đ, chị gửi em chi tiết liệu trình nhé.", isStaffFirstResponse: true, isSupportingEvidence: true }
     ],
     analysisHistory: [
-      { date: "2026-04-03", openingTheme: "Hỏi giá dịch vụ", need: "Hỏi giá", outcome: "Đang theo dõi", mood: "Trung tính", risk: "Cao", quality: "Cần cải thiện", aiCost: "5.900 đ" }
+      { threadDayId: "td-1002-2026-04-03", date: "2026-04-03", openingTheme: "Hỏi giá dịch vụ", need: "Hỏi giá", outcome: "Đang theo dõi", mood: "Trung tính", risk: "Cao", quality: "Cần cải thiện", aiCost: "5.900 đ", active: true }
     ],
     audit: {
       model: "gpt-5.4-mini",
@@ -519,14 +527,14 @@ const threadFixtures: ThreadFixture[] = [
     staff: "linh",
     badges: ["Tái khám", "Risk trung bình"],
     transcript: [
-      { at: "08:02", author: "Bot", role: "system", text: "Khách chọn nút Khách hàng tái khám", emphasized: true },
-      { at: "08:03", author: "Bảo Trâm", role: "customer", text: "Em muốn dời lịch tái khám sang chiều mai", emphasized: true },
-      { at: "08:17", author: "Linh", role: "staff", text: "Chị giúp em kiểm tra slot chiều mai, em chờ chị chút nhé", emphasized: true },
-      { at: "08:32", author: "Linh", role: "staff", text: "Chiều mai còn 15:00 và 16:30, em chọn giúp chị nhé" }
+      { id: "m-100", at: "08:02", author: "Bot", role: "system", text: "Khách chọn nút Khách hàng tái khám", emphasized: true, isSupportingEvidence: true },
+      { id: "m-101", at: "08:03", author: "Bảo Trâm", role: "customer", text: "Em muốn dời lịch tái khám sang chiều mai", emphasized: true, isFirstMeaningful: true, isSupportingEvidence: true },
+      { id: "m-102", at: "08:17", author: "Linh", role: "staff", text: "Chị giúp em kiểm tra slot chiều mai, em chờ chị chút nhé", emphasized: true, isStaffFirstResponse: true, isSupportingEvidence: true },
+      { id: "m-103", at: "08:32", author: "Linh", role: "staff", text: "Chiều mai còn 15:00 và 16:30, em chọn giúp chị nhé" }
     ],
     analysisHistory: [
-      { date: "2026-04-03", openingTheme: "Dời lịch tái khám", need: "Đặt lịch", outcome: "Đang theo dõi", mood: "Trung tính", risk: "Trung bình", quality: "Cần cải thiện", aiCost: "6.400 đ" },
-      { date: "2026-04-01", openingTheme: "Báo tiến độ điều trị", need: "Tư vấn chuyên sâu", outcome: "Đang theo dõi", mood: "Tích cực", risk: "Thấp", quality: "Tốt", aiCost: "5.800 đ" }
+      { threadDayId: "td-1004-2026-04-03", date: "2026-04-03", openingTheme: "Dời lịch tái khám", need: "Đặt lịch", outcome: "Đang theo dõi", mood: "Trung tính", risk: "Trung bình", quality: "Cần cải thiện", aiCost: "6.400 đ", active: true },
+      { threadDayId: "td-1004-2026-04-01", date: "2026-04-01", openingTheme: "Báo tiến độ điều trị", need: "Tư vấn chuyên sâu", outcome: "Đang theo dõi", mood: "Tích cực", risk: "Thấp", quality: "Tốt", aiCost: "5.800 đ", active: false }
     ],
     audit: {
       model: "gpt-5.4-mini",
@@ -568,11 +576,11 @@ const threadFixtures: ThreadFixture[] = [
     staff: "khanh",
     badges: ["Inbox mới", "Risk cao"],
     transcript: [
-      { at: "16:12", author: "Minh Châu", role: "customer", text: "Bác sĩ còn nhận tư vấn răng sứ cuối tuần không ạ", emphasized: true },
-      { at: "16:41", author: "Khánh", role: "staff", text: "Dạ cuối tuần kín lịch rồi chị, em xin phép báo lại khi có slot trống." }
+      { id: "m-201", at: "16:12", author: "Minh Châu", role: "customer", text: "Bác sĩ còn nhận tư vấn răng sứ cuối tuần không ạ", emphasized: true, isFirstMeaningful: true, isSupportingEvidence: true },
+      { id: "m-202", at: "16:41", author: "Khánh", role: "staff", text: "Dạ cuối tuần kín lịch rồi chị, em xin phép báo lại khi có slot trống.", isStaffFirstResponse: true, isSupportingEvidence: true }
     ],
     analysisHistory: [
-      { date: "2026-04-02", openingTheme: "Tư vấn răng sứ", need: "Tư vấn chuyên sâu", outcome: "Mất cơ hội", mood: "Trung tính", risk: "Cao", quality: "Cần cải thiện", aiCost: "4.900 đ" }
+      { threadDayId: "td-1005-2026-04-02", date: "2026-04-02", openingTheme: "Tư vấn răng sứ", need: "Tư vấn chuyên sâu", outcome: "Mất cơ hội", mood: "Trung tính", risk: "Cao", quality: "Cần cải thiện", aiCost: "4.900 đ", active: true }
     ],
     audit: {
       model: "gpt-5.4-mini",

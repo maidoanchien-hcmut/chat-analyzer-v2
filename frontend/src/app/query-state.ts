@@ -33,6 +33,7 @@ export function createDefaultRouteState(): RouteState {
     },
     comparePageIds: [],
     threadId: null,
+    threadDayId: null,
     threadTab: "conversation",
     configurationTab: "page-info",
     operationPanel: "manual-run",
@@ -69,7 +70,8 @@ export function parseRouteState(search: string): RouteState {
       staff: params.get("staff") ?? defaults.filters.staff
     },
     comparePageIds: params.get("compare")?.split(",").filter(Boolean) ?? [],
-    threadId: params.get("thread"),
+    threadId: params.get("thread") || null,
+    threadDayId: params.get("threadDay") || null,
     threadTab: parseThreadTab(params.get("threadTab")) ?? defaults.threadTab,
     configurationTab: parseConfigurationTab(params.get("configTab")) ?? defaults.configurationTab,
     operationPanel: parseOperationPanel(params.get("ops")) ?? defaults.operationPanel,
@@ -99,6 +101,7 @@ export function serializeRouteState(route: RouteState) {
     params.set("compare", route.comparePageIds.join(","));
   }
   writeIfValue(params, "thread", route.threadId ?? "");
+  writeIfValue(params, "threadDay", route.threadDayId ?? "");
   params.set("threadTab", route.threadTab);
   params.set("configTab", route.configurationTab);
   params.set("ops", route.operationPanel);

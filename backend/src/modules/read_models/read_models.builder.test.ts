@@ -23,6 +23,45 @@ describe("read model mart builder", () => {
     expect(result.windowEndExclusiveAt.toISOString()).toBe("2026-04-06T00:00:00.000Z");
     expect(toDateKey(result.targetDate)).toBe(20260405);
   });
+
+  it("only assigns first response seconds to the staff who owned the first staff response", () => {
+    const source = createSource();
+    source.pipelineRun.threadDays[0] = {
+      ...source.pipelineRun.threadDays[0]!,
+      staffParticipantsJson: [
+        { staff_name: "Lan" },
+        { staff_name: "Mai" }
+      ],
+      staffMessageStatsJson: [
+        { staff_name: "Lan", message_count: 2, first_message_at: "2026-04-05T00:05:00.000Z" },
+        { staff_name: "Mai", message_count: 1, first_message_at: "2026-04-05T00:08:00.000Z" }
+      ]
+    };
+    source.pipelineRun.analysisRuns[0]!.analysisResults[0] = {
+      ...source.pipelineRun.analysisRuns[0]!.analysisResults[0]!,
+      staffAssessmentsJson: [
+        {
+          staff_name: "Lan",
+          response_quality_code: "strong",
+          issue_text: null,
+          improvement_text: null
+        },
+        {
+          staff_name: "Mai",
+          response_quality_code: "adequate",
+          issue_text: null,
+          improvement_text: null
+        }
+      ]
+    };
+
+    const result = buildMartMaterialization(source);
+    const threadOneRows = result.factStaffThreadDays.filter((row) => row.threadDayId === "thread-day-1");
+
+    expect(threadOneRows).toHaveLength(2);
+    expect(threadOneRows.find((row) => row.staffName === "Lan")?.staffFirstResponseSecondsIfOwner).toBe(180);
+    expect(threadOneRows.find((row) => row.staffName === "Mai")?.staffFirstResponseSecondsIfOwner).toBeNull();
+  });
 });
 
 function createSource() {

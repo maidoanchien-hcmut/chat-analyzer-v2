@@ -12,6 +12,7 @@ type BuildThreadHistoryViewInput = {
   businessTimezone: string;
   taxonomyJson: unknown;
   requestedThreadId: string | null;
+  requestedThreadDayId: string | null;
   activeTab: ActiveTab;
   threadFacts: ThreadFactRow[];
   threadSummaries: ThreadSummaryRow[];
@@ -24,24 +25,33 @@ export function buildThreadHistoryView(input: BuildThreadHistoryViewInput) {
     ? input.requestedThreadId
     : (threads[0]?.id ?? "");
   const threadDays = input.workspace?.threadDays ?? [];
-  const activeThreadDay = threadDays[0] ?? null;
+  const activeThreadDay = resolveActiveThreadDay(threadDays, input.requestedThreadDayId);
   const activeResult = activeThreadDay?.analysisResults[0] ?? null;
+  const supportingMessageIds = new Set(extractStrings(activeResult?.supportingMessageIdsJson));
+  const firstStaffResponseMessageId = findFirstStaffResponseMessageId(activeThreadDay);
 
   return {
     warning: input.warning,
     threads,
     activeThreadId,
+    activeThreadDayId: activeThreadDay?.id ?? null,
     activeTab: input.activeTab,
     transcript: (activeThreadDay?.messages ?? []).map((message) => ({
+      id: message.id,
       at: formatDateTime(message.insertedAt, input.businessTimezone),
       author: message.senderName?.trim() || defaultAuthorLabel(message.senderRole),
       role: normalizeMessageRole(message.senderRole),
       text: message.redactedText?.trim() || "(message redacted)",
       emphasized: message.id === activeThreadDay?.firstMeaningfulMessageId
+        || message.id === firstStaffResponseMessageId
+        || supportingMessageIds.has(message.id),
+      isFirstMeaningful: message.id === activeThreadDay?.firstMeaningfulMessageId,
+      isStaffFirstResponse: message.id === firstStaffResponseMessageId,
+      isSupportingEvidence: supportingMessageIds.has(message.id)
     })),
     analysisHistory: threadDays
       .filter((threadDay) => threadDay.analysisResults.length > 0)
-      .map((threadDay) => buildAnalysisHistoryRow(threadDay, input.taxonomyJson)),
+      .map((threadDay) => buildAnalysisHistoryRow(threadDay, input.taxonomyJson, activeThreadDay?.id ?? null)),
     audit: buildAudit(activeResult, activeThreadDay?.firstMeaningfulMessageTextRedacted),
     crmLink: buildCrmLink(input.workspace)
   };
@@ -111,10 +121,12 @@ function buildBadges(rows: ThreadFactRow[]) {
 
 function buildAnalysisHistoryRow(
   threadDay: NonNullable<NonNullable<ThreadWorkspaceRow>["threadDays"]>[number],
-  taxonomyJson: unknown
+  taxonomyJson: unknown,
+  activeThreadDayId: string | null
 ) {
   const result = threadDay.analysisResults[0]!;
   return {
+    threadDayId: threadDay.id,
     date: threadDay.pipelineRun.targetDate.toISOString().slice(0, 10),
     openingTheme: resolveBusinessLabel(taxonomyJson, "opening_theme", result.openingThemeCode),
     need: resolveBusinessLabel(taxonomyJson, "primary_need", result.primaryNeedCode),
@@ -122,7 +134,8 @@ function buildAnalysisHistoryRow(
     mood: resolveBusinessLabel(null, "customer_mood", result.customerMoodCode),
     risk: resolveBusinessLabel(null, "process_risk_level", result.processRiskLevelCode),
     quality: resolveBusinessLabel(null, "response_quality", dominantStaffQualityCode(result.staffAssessmentsJson)),
-    aiCost: formatMoney(toBigInt(result.costMicros))
+    aiCost: formatMoney(toBigInt(result.costMicros)),
+    active: threadDay.id === activeThreadDayId
   };
 }
 
@@ -266,17 +279,40 @@ function defaultAuthorLabel(role: string) {
   if (role === "customer") {
     return "Khach hang";
   }
-  if (role === "staff") {
+  if (role === "staff" || role === "staff_via_pancake") {
     return "Nhan vien";
   }
   return "System";
 }
 
 function normalizeMessageRole(role: string) {
-  if (role === "customer" || role === "staff") {
+  if (role === "customer") {
     return role;
   }
+  if (role === "staff" || role === "staff_via_pancake") {
+    return "staff";
+  }
   return "system";
+}
+
+function resolveActiveThreadDay(
+  threadDays: NonNullable<NonNullable<ThreadWorkspaceRow>["threadDays"]>,
+  requestedThreadDayId: string | null
+) {
+  if (requestedThreadDayId) {
+    const requested = threadDays.find((threadDay) => threadDay.id === requestedThreadDayId);
+    if (requested) {
+      return requested;
+    }
+  }
+  return threadDays[0] ?? null;
+}
+
+function findFirstStaffResponseMessageId(
+  threadDay: NonNullable<NonNullable<ThreadWorkspaceRow>["threadDays"]>[number] | null
+) {
+  const firstStaffMessage = threadDay?.messages.find((message) => message.senderRole === "staff" || message.senderRole === "staff_via_pancake");
+  return firstStaffMessage?.id ?? null;
 }
 
 function formatMoney(value: bigint) {

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "bun:test";
+import { ANALYSIS_OUTPUT_SCHEMA_VERSION, hashAnalysisEvidence } from "./analysis.artifacts.ts";
 import { AnalysisService } from "./analysis.service.ts";
 import type {
   AnalysisExecutionSummary,
@@ -76,6 +77,76 @@ describe("analysis service", () => {
     expect(summary.skippedThreadDayIds).toEqual(["thread-day-1"]);
   });
 
+  it("reprocesses terminal units when the persisted evidence hash is stale", async () => {
+    const repository = createRepositoryStub({
+      existingResults: [
+        {
+          analysisRunId: "analysis-run-1",
+          threadDayId: "thread-day-1",
+          evidenceHash: "stale-evidence-hash",
+          resultStatus: "succeeded"
+        }
+      ]
+    });
+    const clientCalls: ConversationAnalysisRequest[] = [];
+    const service = new AnalysisService({
+      repository: repository as never,
+      client: {
+        analyzeConversations: async (input) => {
+          clientCalls.push(input);
+          return {
+            results: input.bundles.map((bundle) => ({
+              threadDayId: bundle.threadDayId,
+              resultStatus: "succeeded",
+              promptHash: "service-effective-hash",
+              openingThemeCode: "appointment_booking",
+              openingThemeReason: "Đặt lịch",
+              customerMoodCode: "neutral",
+              primaryNeedCode: "appointment_booking",
+              primaryTopicCode: "appointment_booking",
+              journeyCode: "revisit",
+              closingOutcomeInferenceCode: "follow_up",
+              processRiskLevelCode: "low",
+              processRiskReasonText: null,
+              staffAssessmentsJson: [
+                {
+                  staff_name: "Lan",
+                  response_quality_code: "adequate",
+                  issue_text: null,
+                  improvement_text: null
+                }
+              ],
+              evidenceUsedJson: {
+                source: "service"
+              },
+              fieldExplanationsJson: {},
+              supportingMessageIdsJson: ["message-1"],
+              usageJson: {
+                provider: "deterministic_dev",
+                token_estimate: 11
+              },
+              costMicros: 17,
+              failureInfoJson: null
+            })),
+            runtimeMetadataJson: {
+              effective_prompt_hash: "service-effective-hash",
+              system_prompt_version: "service_system.v1"
+            }
+          };
+        }
+      },
+      batchSize: 10
+    });
+
+    const summary = await service.executeLoadedRun("pipeline-run-1");
+
+    expect(clientCalls).toHaveLength(1);
+    expect(clientCalls[0]?.bundles.map((bundle) => bundle.threadDayId)).toEqual(["thread-day-1", "thread-day-2"]);
+    expect(repository.updatedPipelineMetrics?.resumed).toBe(false);
+    expect(repository.updatedPipelineMetrics?.skippedThreadDayIds).toEqual([]);
+    expect(summary.skippedThreadDayIds).toEqual([]);
+  });
+
   it("stores failed units and marks the pipeline run failed when the service call errors", async () => {
     const repository = createRepositoryStub({
       existingResults: [],
@@ -118,7 +189,7 @@ function createRepositoryStub(overrides?: {
     {
       analysisRunId: "analysis-run-1",
       threadDayId: "thread-day-1",
-      evidenceHash: "evidence-1",
+      evidenceHash: buildExpectedEvidenceHash(threadDays[0]!),
       resultStatus: "succeeded"
     }
   ];
@@ -282,7 +353,13 @@ function createThreadDay(id: string, messageId: string) {
     sourceThreadJsonRedacted: {},
     firstStaffResponseSeconds: 120,
     avgStaffResponseSeconds: 120,
-    staffParticipantsJson: ["Lan"],
+    staffParticipantsJson: [
+      {
+        staff_name: "Lan",
+        sender_source_id: "staff-1",
+        message_count: 1
+      }
+    ],
     staffMessageStatsJson: [],
     thread: {
       connectedPageId: "page-1",
@@ -301,4 +378,51 @@ function createThreadDay(id: string, messageId: string) {
       }
     ]
   };
+}
+
+function buildExpectedEvidenceHash(threadDay: ReturnType<typeof createThreadDay>) {
+  const pipelineRun = createPipelineRun();
+  return hashAnalysisEvidence({
+    bundle: {
+      threadDayId: threadDay.id,
+      threadId: threadDay.threadId,
+      connectedPageId: threadDay.thread.connectedPageId,
+      pipelineRunId: pipelineRun.id,
+      runGroupId: pipelineRun.runGroupId,
+      targetDate: pipelineRun.targetDate.toISOString().slice(0, 10),
+      businessTimezone: pipelineRun.runGroup.frozenConfigVersion.connectedPage.businessTimezone,
+      customerDisplayName: threadDay.thread.customerDisplayName,
+      normalizedTagSignalsJson: threadDay.normalizedTagSignalsJson,
+      observedTagsJson: threadDay.observedTagsJson,
+      openingBlockJson: threadDay.openingBlockJson,
+      firstMeaningfulMessageId: threadDay.firstMeaningfulMessageId,
+      firstMeaningfulMessageTextRedacted: threadDay.firstMeaningfulMessageTextRedacted,
+      firstMeaningfulMessageSenderRole: threadDay.firstMeaningfulMessageSenderRole,
+      explicitRevisitSignal: threadDay.explicitRevisitSignal,
+      explicitNeedSignal: threadDay.explicitNeedSignal,
+      explicitOutcomeSignal: threadDay.explicitOutcomeSignal,
+      sourceThreadJsonRedacted: threadDay.sourceThreadJsonRedacted,
+      messageCount: threadDay.messages.length,
+      firstStaffResponseSeconds: threadDay.firstStaffResponseSeconds,
+      avgStaffResponseSeconds: threadDay.avgStaffResponseSeconds,
+      staffParticipantsJson: threadDay.staffParticipantsJson,
+      staffMessageStatsJson: threadDay.staffMessageStatsJson,
+      messages: threadDay.messages.map((message) => ({
+        id: message.id,
+        insertedAt: message.insertedAt.toISOString(),
+        senderRole: message.senderRole,
+        senderName: message.senderName,
+        messageType: message.messageType,
+        redactedText: message.redactedText,
+        isMeaningfulHumanMessage: message.isMeaningfulHumanMessage,
+        isOpeningBlockMessage: message.isOpeningBlockMessage
+      }))
+    },
+    runtime_identity: {
+      prompt_hash: pipelineRun.runGroup.frozenCompiledPromptHash,
+      prompt_version: pipelineRun.runGroup.frozenPromptVersion,
+      taxonomy_version_id: pipelineRun.runGroup.frozenTaxonomyVersionId,
+      output_schema_version: ANALYSIS_OUTPUT_SCHEMA_VERSION
+    }
+  });
 }

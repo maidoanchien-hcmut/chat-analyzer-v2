@@ -85,6 +85,54 @@ describe("read models service", () => {
     expect(staffPerformance.coachingInbox[0]?.issue).toContain("Cham");
   });
 
+  it("applies the staff filter to thread-level business views via fact_staff_thread_day membership", async () => {
+    patchValue(readModelsRepository, "listSnapshotsForPageRange", async () => [createSnapshot()]);
+    patchValue(readModelsRepository, "listConnectedPagesForCatalog", async () => [createCatalogPage()]);
+    patchValue(readModelsRepository, "listFactThreadDaysByRunIds", async () => [
+      createThreadFact({
+        threadDayId: "thread-day-1",
+        threadId: "thread-1",
+        openingThemeCode: "hoi_gia",
+        primaryNeedCode: "hoi_gia",
+        officialClosingOutcomeCode: "booked"
+      }),
+      createThreadFact({
+        threadDayId: "thread-day-2",
+        threadId: "thread-2",
+        openingThemeCode: "dat_lich",
+        primaryNeedCode: "dat_lich",
+        officialClosingOutcomeCode: "follow_up"
+      }),
+      createThreadFact({
+        threadDayId: "thread-day-3",
+        threadId: "thread-2",
+        openingThemeCode: "hoi_gia",
+        primaryNeedCode: "hoi_gia",
+        officialClosingOutcomeCode: "booked"
+      })
+    ]);
+    patchValue(readModelsRepository, "listFactStaffThreadDaysByRunIds", async () => [
+      createStaffFact({
+        threadDayId: "thread-day-2",
+        threadId: "thread-2",
+        primaryNeedCode: "dat_lich",
+        responseQualityCode: "strong",
+        processRiskLevelCode: "low"
+      }, {
+        staffName: "mai",
+        displayLabel: "Mai"
+      })
+    ]);
+
+    const overview = await readModelsService.getOverview({
+      ...baseFilters(),
+      staff: "mai"
+    });
+
+    expect(overview.metrics[0]?.value).toBe("1");
+    expect(overview.needs[0]?.label).toBe("Dat lich");
+  });
+
   it("exports only published_official snapshots in the selected range", async () => {
     patchValue(readModelsRepository, "listSnapshotsForPageRange", async () => [
       createSnapshot({
@@ -235,18 +283,78 @@ describe("read models service", () => {
               }
             }
           ]
+        },
+        {
+          id: "thread-day-2",
+          firstMeaningfulMessageId: "msg-1",
+          firstMeaningfulMessageTextRedacted: "Khach hoi gia va dat lich",
+          pipelineRun: {
+            targetDate: new Date("2026-04-03T00:00:00.000Z")
+          },
+          messages: [
+            {
+              id: "msg-1",
+              insertedAt: new Date("2026-04-03T09:05:00.000Z"),
+              senderRole: "customer",
+              senderName: "Lan Anh",
+              redactedText: "Cho em hoi gia va lich trong tuan nay"
+            },
+            {
+              id: "msg-2",
+              insertedAt: new Date("2026-04-03T09:07:00.000Z"),
+              senderRole: "staff_via_pancake",
+              senderName: "Mai",
+              redactedText: "Chieu thu 5 con slot 16h"
+            }
+          ],
+          analysisResults: [
+            {
+              openingThemeCode: "hoi_gia",
+              primaryNeedCode: "dat_lich",
+              closingOutcomeInferenceCode: "booked",
+              customerMoodCode: "positive",
+              processRiskLevelCode: "high",
+              staffAssessmentsJson: [
+                {
+                  staff_name: "mai",
+                  response_quality_code: "strong"
+                }
+              ],
+              evidenceUsedJson: {
+                opening_signal: "Khach hoi gia",
+                closing_signal: "Staff dua slot cu the"
+              },
+              fieldExplanationsJson: {
+                outcome: "Da co de xuat slot cu the trong cung nhip trao doi."
+              },
+              supportingMessageIdsJson: ["msg-1", "msg-2"],
+              costMicros: 2400n,
+              analysisRun: {
+                modelName: "gpt-5.4-mini",
+                promptVersion: "Prompt A12",
+                promptHash: "sha256:prompt-a12",
+                taxonomyVersion: {
+                  versionCode: "tax-2026-04"
+                }
+              }
+            }
+          ]
         }
       ]
     }));
 
-    const history = await readModelsService.getThreadHistory(baseFilters(), null, "ai-audit");
+    const history = await readModelsService.getThreadHistory(baseFilters(), null, "thread-day-2", "ai-audit");
 
     expect(history.threads).toHaveLength(2);
     expect(history.activeThreadId).toBe("thread-1");
+    expect(history.activeThreadDayId).toBe("thread-day-2");
     expect(history.audit.promptVersion).toBe("Prompt A12");
     expect(history.audit.supportingMessageIds).toEqual(["msg-1", "msg-2"]);
     expect(history.crmLink.customer).toContain("KH-7712");
     expect(history.analysisHistory[0]?.quality).toBe("Tot");
+    expect(history.transcript.find((message) => message.id === "msg-1")?.isFirstMeaningful).toBe(true);
+    expect(history.transcript.find((message) => message.id === "msg-1")?.isSupportingEvidence).toBe(true);
+    expect(history.transcript.find((message) => message.id === "msg-2")?.isStaffFirstResponse).toBe(true);
   });
 
   it("keeps old partial-day runs available only through run preview", async () => {
@@ -285,6 +393,81 @@ describe("read models service", () => {
     expect(preview.publishEligibility).toBe("not_publishable_old_partial");
     expect(preview.warning?.title).toContain("partial");
     expect(preview.threadFactCount).toBe(12);
+  });
+
+  it("ignores hidden one-page business filters for page comparison", async () => {
+    patchValue(readModelsRepository, "listConnectedPagesForCatalog", async () => [
+      createCatalogPage(),
+      {
+        id: "page-2",
+        pageName: "Page Nha Khoa Thu Duc",
+        pancakePageId: "pk_202",
+        businessTimezone: "Asia/Ho_Chi_Minh"
+      }
+    ]);
+    patchValue(readModelsRepository, "listSnapshotsForPageRange", async ({ pageId }) => [
+      createSnapshot({
+        pipelineRunId: `run-${pageId}`,
+        connectedPageId: pageId,
+        pageName: pageId === "page-1" ? "Page Da Lieu Quan 1" : "Page Nha Khoa Thu Duc"
+      })
+    ]);
+
+    const capturedFilters: Array<{ pageId: string; need: string; staff: string; inboxBucket: string; revisit: string; outcome: string; risk: string }> = [];
+    patchValue(readModelsRepository, "listFactThreadDaysByRunIds", async (runIds, filters) => {
+      capturedFilters.push({
+        pageId: filters.pageId,
+        need: filters.need,
+        staff: filters.staff,
+        inboxBucket: filters.inboxBucket,
+        revisit: filters.revisit,
+        outcome: filters.outcome,
+        risk: filters.risk
+      });
+      return [
+        createThreadFact({
+          pipelineRunId: runIds[0] ?? "run-page-1",
+          threadDayId: `thread-day-${filters.pageId}`,
+          threadId: `thread-${filters.pageId}`
+        })
+      ];
+    });
+    patchValue(readModelsRepository, "listFactStaffThreadDaysByRunIds", async () => {
+      throw new Error("page comparison should not query fact_staff_thread_day when hidden staff filter must be ignored");
+    });
+
+    const result = await readModelsService.getPageComparison({
+      ...baseFilters(),
+      inboxBucket: "new",
+      revisit: "revisit",
+      need: "dat_lich",
+      outcome: "booked",
+      risk: "high",
+      staff: "mai"
+    }, ["page-1", "page-2"]);
+
+    expect(result.comparedPages).toEqual(["Page Da Lieu Quan 1", "Page Nha Khoa Thu Duc"]);
+    expect(capturedFilters).toHaveLength(2);
+    expect(capturedFilters).toEqual([
+      {
+        pageId: "page-1",
+        need: "all",
+        staff: "all",
+        inboxBucket: "all",
+        revisit: "all",
+        outcome: "all",
+        risk: "all"
+      },
+      {
+        pageId: "page-2",
+        need: "all",
+        staff: "all",
+        inboxBucket: "all",
+        revisit: "all",
+        outcome: "all",
+        risk: "all"
+      }
+    ]);
   });
 });
 
@@ -350,6 +533,7 @@ function createThreadFact(
 ) {
   return {
     pipelineRunId: "run-1",
+    threadDayId: "thread-day-1",
     threadId: "thread-1",
     isNewInbox: true,
     officialRevisitLabel: "not_revisit",
@@ -386,6 +570,7 @@ function createStaffFact(
 ) {
   return {
     pipelineRunId: "run-1",
+    threadDayId: "thread-day-1",
     threadId: "thread-1",
     primaryNeedCode: "hoi_gia",
     processRiskLevelCode: "high",

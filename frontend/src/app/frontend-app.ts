@@ -18,6 +18,7 @@ import {
   derivePublishAction,
   findRunForPublish
 } from "../features/operations/state.ts";
+import { sanitizePageComparisonFilters } from "../features/page-comparison/state.ts";
 import { renderOverview } from "../features/overview/render.ts";
 import { renderPageComparison } from "../features/page-comparison/render.ts";
 import { renderStaffPerformance } from "../features/staff-performance/render.ts";
@@ -344,20 +345,23 @@ export class FrontendApp {
       return;
     }
     if (this.route.view === "thread-history") {
-      this.currentViewHtml = renderThreadHistory(await this.businessAdapter.getThreadHistory(this.route.filters, this.route.threadId, this.route.threadTab));
+      this.currentViewHtml = renderThreadHistory(
+        await this.businessAdapter.getThreadHistory(this.route.filters, this.route.threadId, this.route.threadDayId, this.route.threadTab)
+      );
       return;
     }
     if (this.route.view === "page-comparison") {
       const comparePageIds = normalizeComparePageIds(this.route.comparePageIds, this.catalog.pages);
+      const compareFilters = sanitizePageComparisonFilters(this.route.filters);
       this.currentViewHtml = renderPageComparison(
-        await this.businessAdapter.getPageComparison(this.route.filters, comparePageIds),
+        await this.businessAdapter.getPageComparison(compareFilters, comparePageIds),
         {
           pages: this.catalog.pages,
           comparePageIds,
-          slicePreset: this.route.filters.slicePreset,
-          startDate: this.route.filters.startDate,
-          endDate: this.route.filters.endDate,
-          publishSnapshot: this.route.filters.publishSnapshot
+          slicePreset: compareFilters.slicePreset,
+          startDate: compareFilters.startDate,
+          endDate: compareFilters.endDate,
+          publishSnapshot: compareFilters.publishSnapshot
         }
       );
       return;
@@ -782,7 +786,13 @@ function mergeRouteSearch(current: RouteState, rawSearch: string): RouteState {
     next.comparePageIds = params.get("compare")?.split(",").filter(Boolean) ?? [];
   }
   if (params.has("thread")) {
-    next.threadId = params.get("thread");
+    next.threadId = params.get("thread") || null;
+    if (!params.has("threadDay")) {
+      next.threadDayId = null;
+    }
+  }
+  if (params.has("threadDay")) {
+    next.threadDayId = params.get("threadDay") || null;
   }
   if (params.has("threadTab")) {
     next.threadTab = parseRouteState(`?threadTab=${params.get("threadTab") ?? current.threadTab}`).threadTab;

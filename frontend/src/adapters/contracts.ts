@@ -83,20 +83,25 @@ export type StaffPerformanceViewModel = {
 };
 
 export type ThreadMessage = {
+  id: string;
   at: string;
   author: string;
   role: "customer" | "staff" | "system";
   text: string;
   emphasized?: boolean;
+  isFirstMeaningful?: boolean;
+  isStaffFirstResponse?: boolean;
+  isSupportingEvidence?: boolean;
 };
 
 export type ThreadHistoryViewModel = {
   warning: WarningState | null;
   threads: Array<{ id: string; customer: string; snippet: string; updatedAt: string; badges: string[] }>;
   activeThreadId: string;
+  activeThreadDayId: string | null;
   activeTab: "conversation" | "analysis-history" | "ai-audit" | "crm-link";
   transcript: ThreadMessage[];
-  analysisHistory: Array<{ date: string; openingTheme: string; need: string; outcome: string; mood: string; risk: string; quality: string; aiCost: string }>;
+  analysisHistory: Array<{ threadDayId: string; date: string; openingTheme: string; need: string; outcome: string; mood: string; risk: string; quality: string; aiCost: string; active: boolean }>;
   audit: {
     model: string;
     promptVersion: string;
@@ -368,6 +373,7 @@ export interface BusinessAdapter {
   getThreadHistory(
     filters: BusinessFilters,
     threadId: string | null,
+    threadDayId: string | null,
     tab: ThreadHistoryViewModel["activeTab"]
   ): Promise<ThreadHistoryViewModel>;
   getPageComparison(filters: BusinessFilters, comparePageIds: string[]): Promise<PageComparisonViewModel>;

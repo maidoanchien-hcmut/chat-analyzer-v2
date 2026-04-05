@@ -50,10 +50,13 @@ export function createHttpBusinessAdapter(getBaseUrl: () => string): BusinessAda
       );
       return result.staffPerformance;
     },
-    async getThreadHistory(filters, threadId, tab) {
+    async getThreadHistory(filters, threadId, threadDayId, tab) {
       const params = new URLSearchParams(buildFilterEntries(filters));
       if (threadId) {
         params.set("threadId", threadId);
+      }
+      if (threadDayId) {
+        params.set("threadDayId", threadDayId);
       }
       params.set("threadTab", tab);
       const result = await requestJson<{ threadHistory: ThreadHistoryViewModel }>(

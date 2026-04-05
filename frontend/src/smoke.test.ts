@@ -137,7 +137,7 @@ describe("frontend smoke", () => {
     });
     expect(workbook.allowed).toBe(false);
 
-    const history = await adapter.getThreadHistory(filters, null, "analysis-history");
+    const history = await adapter.getThreadHistory(filters, null, null, "analysis-history");
     expect(history.threads.every((thread) => !thread.id.includes("thread_day"))).toBe(true);
     expect(history.analysisHistory.length).toBeGreaterThan(0);
 
@@ -330,17 +330,23 @@ function routeStub(method: string, pathname: string) {
           }
         ],
         activeThreadId: "thread-1",
+        activeThreadDayId: "thread-day-1",
         activeTab: "analysis-history",
         transcript: [
           {
+            id: "msg-1",
             at: "03/04/2026 09:05",
             author: "Lan Anh",
             role: "customer",
-            text: "Cho em hoi gia"
+            text: "Cho em hoi gia",
+            isFirstMeaningful: true,
+            isStaffFirstResponse: false,
+            isSupportingEvidence: true
           }
         ],
         analysisHistory: [
           {
+            threadDayId: "thread-day-1",
             date: "2026-04-03",
             openingTheme: "Hoi gia",
             need: "Dat lich",
@@ -348,7 +354,8 @@ function routeStub(method: string, pathname: string) {
             mood: "Tich cuc",
             risk: "Cao",
             quality: "Tot",
-            aiCost: "2 đ"
+            aiCost: "2 đ",
+            active: true
           }
         ],
         audit: {

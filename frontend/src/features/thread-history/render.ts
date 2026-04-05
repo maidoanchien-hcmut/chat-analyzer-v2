@@ -8,7 +8,7 @@ export function renderThreadHistory(viewModel: ThreadHistoryViewModel) {
         <h2>Danh sách thread</h2>
         <div class="thread-list">
           ${viewModel.threads.map((thread) => `
-            <button class="thread-row ${thread.id === viewModel.activeThreadId ? "thread-row-active" : ""}" data-route="?view=thread-history&thread=${escapeHtml(thread.id)}">
+            <button class="thread-row ${thread.id === viewModel.activeThreadId ? "thread-row-active" : ""}" data-route="?view=thread-history&thread=${escapeHtml(thread.id)}&threadDay=">
               <strong>${escapeHtml(thread.customer)}</strong>
               <span>${escapeHtml(thread.snippet)}</span>
               <span class="muted-copy">${escapeHtml(thread.updatedAt)}</span>
@@ -20,10 +20,10 @@ export function renderThreadHistory(viewModel: ThreadHistoryViewModel) {
       <div class="feature-stack">
         <article class="panel-card">
           <div class="tab-row">
-            <button data-route="?view=thread-history&thread=${escapeHtml(viewModel.activeThreadId)}&threadTab=conversation" class="${viewModel.activeTab === "conversation" ? "tab-active" : ""}">Hội thoại</button>
-            <button data-route="?view=thread-history&thread=${escapeHtml(viewModel.activeThreadId)}&threadTab=analysis-history" class="${viewModel.activeTab === "analysis-history" ? "tab-active" : ""}">Lịch sử phân tích</button>
-            <button data-route="?view=thread-history&thread=${escapeHtml(viewModel.activeThreadId)}&threadTab=ai-audit" class="${viewModel.activeTab === "ai-audit" ? "tab-active" : ""}">Audit AI</button>
-            <button data-route="?view=thread-history&thread=${escapeHtml(viewModel.activeThreadId)}&threadTab=crm-link" class="${viewModel.activeTab === "crm-link" ? "tab-active" : ""}">Liên kết CRM</button>
+            <button data-route="${buildThreadRoute(viewModel, "conversation")}" class="${viewModel.activeTab === "conversation" ? "tab-active" : ""}">Hội thoại</button>
+            <button data-route="${buildThreadRoute(viewModel, "analysis-history")}" class="${viewModel.activeTab === "analysis-history" ? "tab-active" : ""}">Lịch sử phân tích</button>
+            <button data-route="${buildThreadRoute(viewModel, "ai-audit")}" class="${viewModel.activeTab === "ai-audit" ? "tab-active" : ""}">Audit AI</button>
+            <button data-route="${buildThreadRoute(viewModel, "crm-link")}" class="${viewModel.activeTab === "crm-link" ? "tab-active" : ""}">Liên kết CRM</button>
           </div>
           ${renderActiveTab(viewModel)}
         </article>
@@ -36,11 +36,11 @@ function renderActiveTab(viewModel: ThreadHistoryViewModel) {
   if (viewModel.activeTab === "analysis-history") {
     return `
       <table class="data-table">
-        <thead><tr><th>Ngày</th><th>Opening</th><th>Nhu cầu</th><th>Outcome</th><th>Mood</th><th>Risk</th><th>Quality</th><th>AI cost</th></tr></thead>
+        <thead><tr><th>Ngày</th><th>Opening</th><th>Nhu cầu</th><th>Outcome</th><th>Mood</th><th>Risk</th><th>Quality</th><th>AI cost</th><th>Audit</th></tr></thead>
         <tbody>
           ${viewModel.analysisHistory.map((row) => `
-            <tr>
-              <td>${escapeHtml(row.date)}</td>
+            <tr class="${row.active ? "table-row-active" : ""}">
+              <td><button data-route="?view=thread-history&thread=${escapeHtml(viewModel.activeThreadId)}&threadDay=${escapeHtml(row.threadDayId)}&threadTab=analysis-history">${escapeHtml(row.date)}</button></td>
               <td>${escapeHtml(row.openingTheme)}</td>
               <td>${escapeHtml(row.need)}</td>
               <td>${escapeHtml(row.outcome)}</td>
@@ -48,6 +48,7 @@ function renderActiveTab(viewModel: ThreadHistoryViewModel) {
               <td>${escapeHtml(row.risk)}</td>
               <td>${escapeHtml(row.quality)}</td>
               <td>${escapeHtml(row.aiCost)}</td>
+              <td><button data-route="?view=thread-history&thread=${escapeHtml(viewModel.activeThreadId)}&threadDay=${escapeHtml(row.threadDayId)}&threadTab=ai-audit">Mở audit</button></td>
             </tr>
           `).join("")}
         </tbody>
@@ -94,9 +95,29 @@ function renderActiveTab(viewModel: ThreadHistoryViewModel) {
       ${viewModel.transcript.map((message) => `
         <article class="conversation-item ${message.emphasized ? "conversation-emphasis" : ""}">
           <div class="conversation-meta"><strong>${escapeHtml(message.author)}</strong><span>${escapeHtml(message.at)}</span></div>
+          <div class="badge-row">
+            ${message.isFirstMeaningful ? '<span class="inline-badge">Opening</span>' : ""}
+            ${message.isStaffFirstResponse ? '<span class="inline-badge">Phản hồi đầu</span>' : ""}
+            ${message.isSupportingEvidence ? '<span class="inline-badge">Evidence</span>' : ""}
+          </div>
           <p>${escapeHtml(message.text)}</p>
         </article>
       `).join("")}
     </div>
   `;
+}
+
+function buildThreadRoute(
+  viewModel: ThreadHistoryViewModel,
+  tab: ThreadHistoryViewModel["activeTab"]
+) {
+  const params = new URLSearchParams({
+    view: "thread-history",
+    thread: viewModel.activeThreadId,
+    threadTab: tab
+  });
+  if (viewModel.activeThreadDayId) {
+    params.set("threadDay", viewModel.activeThreadDayId);
+  }
+  return `?${params.toString()}`;
 }

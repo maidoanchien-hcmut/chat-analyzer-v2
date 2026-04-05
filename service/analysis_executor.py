@@ -16,6 +16,7 @@ from analysis_models import (
   RuntimeSnapshotModel,
   ServiceResultModel,
   StaffAssessmentModel,
+  StaffParticipantModel,
   UnitBundleModel,
 )
 
@@ -306,10 +307,10 @@ def failure_result_from_exception(thread_day_id: str, prompt_hash: str, error: E
 
 
 def normalize_staff_assessments(
-  staff_participants: list[str],
+  staff_participants: list[StaffParticipantModel | str],
   values: list[StaffAssessmentModel],
 ) -> list[StaffAssessmentModel]:
-  allowed_names = {(_normalize_nullable_text(name) or "") for name in staff_participants}
+  allowed_names = {staff_name for staff_name in _iter_staff_names(staff_participants)}
   normalized: list[StaffAssessmentModel] = []
   seen: set[str] = set()
   for item in values:
@@ -479,15 +480,11 @@ def _collect_explicit_signals(value: Any) -> dict[str, list[str]]:
 
 
 def _build_staff_assessments(
-  staff_participants: list[str],
+  staff_participants: list[StaffParticipantModel | str],
   staff_messages: list[Any],
   customer_messages: list[Any],
 ) -> list[StaffAssessmentModel]:
-  allowed_names = [
-    normalized_name
-    for normalized_name in (_normalize_nullable_text(name) for name in staff_participants)
-    if normalized_name is not None
-  ]
+  allowed_names = list(_iter_staff_names(staff_participants))
   if not allowed_names:
     return []
 
@@ -508,6 +505,19 @@ def _build_staff_assessments(
     )
     for staff_name in allowed_names
   ]
+
+
+def _iter_staff_names(staff_participants: list[StaffParticipantModel | str]):
+  seen: set[str] = set()
+  for participant in staff_participants:
+    if isinstance(participant, StaffParticipantModel):
+      staff_name = _normalize_nullable_text(participant.staff_name)
+    else:
+      staff_name = _normalize_nullable_text(participant)
+    if staff_name is None or staff_name in seen:
+      continue
+    seen.add(staff_name)
+    yield staff_name
 
 
 def _build_evidence(

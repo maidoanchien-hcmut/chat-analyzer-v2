@@ -56,6 +56,7 @@ export type RouteState = {
   filters: BusinessFilters;
   comparePageIds: string[];
   threadId: string | null;
+  threadDayId: string | null;
   threadTab: ThreadTab;
   configurationTab: ConfigurationTab;
   operationPanel: OperationPanel;

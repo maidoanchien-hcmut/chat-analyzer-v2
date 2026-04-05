@@ -195,6 +195,7 @@ function buildFactStaffThreadDays(input: {
     ...assessments.map((item) => item.staff_name),
     ...fallbackNames
   ]);
+  const ownerStaffName = resolveFirstResponseOwnerStaffName(staffNames, statsByName);
   const allocatedCost = allocateStaffCost(analysisResult.costMicros, staffNames.length);
 
   return staffNames.map((staffName) => {
@@ -214,7 +215,7 @@ function buildFactStaffThreadDays(input: {
       processRiskLevelCode: normalizeCode(analysisResult.processRiskLevelCode),
       responseQualityCode: normalizeCode(assessment?.response_quality_code ?? "unknown"),
       staffMessageCount: Math.max(0, stats?.message_count ?? 0),
-      staffFirstResponseSecondsIfOwner: buildStaffFirstResponseSeconds(stats, threadDay.firstStaffResponseSeconds),
+      staffFirstResponseSecondsIfOwner: buildStaffFirstResponseSeconds(staffName, ownerStaffName, threadDay.firstStaffResponseSeconds),
       aiCostAllocatedMicros: allocatedCost,
       responseQualityIssueText: normalizeNullableText(assessment?.issue_text ?? null),
       responseQualityImprovementText: normalizeNullableText(assessment?.improvement_text ?? null),
@@ -242,11 +243,11 @@ function buildRevisitLabel(explicitRevisitSignal: string | null, journeyCode: st
     : "not_revisit";
 }
 
-function buildStaffFirstResponseSeconds(stats: StaffMessageStats | null, fallback: number | null) {
-  if (!stats?.first_message_at || fallback == null) {
-    return clampNullableInt(fallback);
+function buildStaffFirstResponseSeconds(staffName: string, ownerStaffName: string | null, fallback: number | null) {
+  if (fallback == null || ownerStaffName == null) {
+    return null;
   }
-  return clampNullableInt(fallback);
+  return staffName === ownerStaffName ? clampNullableInt(fallback) : null;
 }
 
 function allocateStaffCost(totalCostMicros: bigint, staffCount: number) {
@@ -314,6 +315,24 @@ function readStaffParticipants(value: unknown) {
 
 function uniqueNames(values: string[]) {
   return [...new Set(values.map((item) => item.trim()).filter(Boolean))];
+}
+
+function resolveFirstResponseOwnerStaffName(
+  staffNames: string[],
+  statsByName: Map<string, StaffMessageStats>
+) {
+  const ranked = staffNames
+    .map((staffName) => ({
+      staffName,
+      firstMessageAt: statsByName.get(staffName)?.first_message_at ?? null
+    }))
+    .filter((item): item is { staffName: string; firstMessageAt: string } => Boolean(item.firstMessageAt))
+    .sort((left, right) => left.firstMessageAt.localeCompare(right.firstMessageAt) || left.staffName.localeCompare(right.staffName));
+
+  if (ranked.length > 0) {
+    return ranked[0]!.staffName;
+  }
+  return staffNames.length === 1 ? staffNames[0]! : null;
 }
 
 function clampNullableInt(value: number | null) {
