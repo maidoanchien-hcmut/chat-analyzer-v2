@@ -2,6 +2,7 @@ import type {
   ConnectedPageDetailViewModel,
   ControlPlaneAdapter,
   FieldExplanation,
+  HealthSummaryViewModel,
   ManualRunInput,
   PublishEligibility,
   RunDetailViewModel,
@@ -69,6 +70,43 @@ type RawRunSummary = {
   supersedes_run_id: string | null;
   historical_overwrite?: RawHistoricalOverwrite | null;
   published_at: string | null;
+};
+
+type RawRunDetail = {
+  run: RawRunSummary;
+  artifact_counts: {
+    thread_day_count: number;
+    message_count: number;
+  };
+  analysis_metrics: {
+    analysis_run_id: string;
+    status: string;
+    unit_count_planned: number;
+    unit_count_succeeded: number;
+    unit_count_unknown: number;
+    unit_count_failed: number;
+    total_cost_micros: number;
+    prompt_hash: string;
+    prompt_version: string;
+    taxonomy_version_id: string;
+    output_schema_version: string;
+    resumed: boolean;
+    skipped_thread_day_ids: string[];
+  } | null;
+  mart_metrics: {
+    materialized: boolean;
+    analysis_run_id: string;
+    fact_thread_day_count: number;
+    fact_staff_thread_day_count: number;
+    prompt_hash: string;
+    prompt_version: string;
+    config_version_id: string;
+    config_version_no: number;
+    taxonomy_version_id: string;
+    taxonomy_version_code: string;
+  } | null;
+  publish_warning: string | null;
+  error_text: string | null;
 };
 
 export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlaneAdapter {
@@ -203,15 +241,15 @@ export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlan
       return mapRunGroup(result);
     },
     async getRun(runId) {
-      const result = await requestJson<{ run: RawRunSummary; counts: { threadDayCount: number; messageCount: number } }>(
+      const result = await requestJson<RawRunDetail>(
         getBaseUrl(),
         "GET",
         `/chat-extractor/runs/${encodeURIComponent(runId)}`
       );
-      return mapRunDetail(result.run, result.counts.threadDayCount, result.counts.messageCount);
+      return mapRunDetail(result);
     },
     async publishRun(runId, input) {
-      const result = await requestJson<{ run: RawRunSummary; counts: { threadDayCount: number; messageCount: number } }>(
+      const result = await requestJson<RawRunDetail>(
         getBaseUrl(),
         "POST",
         `/chat-extractor/runs/${encodeURIComponent(runId)}/publish`,
@@ -221,7 +259,15 @@ export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlan
           expectedReplacedRunId: input.expectedReplacedRunId
         }
       );
-      return mapRunDetail(result.run, result.counts.threadDayCount, result.counts.messageCount);
+      return mapRunDetail(result);
+    },
+    async getHealthSummary() {
+      const result = await requestJson<{ healthSummary: HealthSummaryViewModel }>(
+        getBaseUrl(),
+        "GET",
+        "/read-models/health"
+      );
+      return result.healthSummary;
     }
   };
 }
@@ -345,14 +391,44 @@ function mapRunSummary(input: RawRunSummary) {
   };
 }
 
-function mapRunDetail(run: RawRunSummary, threadDayCount: number, messageCount: number): RunDetailViewModel {
+function mapRunDetail(result: RawRunDetail): RunDetailViewModel {
   return {
-    run: mapRunSummary(run),
-    threadDayCount,
-    messageCount,
-    publishWarning: run.publish_eligibility === "not_publishable_old_partial"
-      ? "Child run này chỉ là partial ngày cũ, nên operator chỉ được xem kết quả run và không có quyền publish dashboard."
-      : null
+    run: mapRunSummary(result.run),
+    threadDayCount: result.artifact_counts.thread_day_count,
+    messageCount: result.artifact_counts.message_count,
+    analysisMetrics: result.analysis_metrics
+      ? {
+        analysisRunId: result.analysis_metrics.analysis_run_id,
+        status: result.analysis_metrics.status,
+        unitCountPlanned: result.analysis_metrics.unit_count_planned,
+        unitCountSucceeded: result.analysis_metrics.unit_count_succeeded,
+        unitCountUnknown: result.analysis_metrics.unit_count_unknown,
+        unitCountFailed: result.analysis_metrics.unit_count_failed,
+        totalCostMicros: result.analysis_metrics.total_cost_micros,
+        promptHash: result.analysis_metrics.prompt_hash,
+        promptVersion: result.analysis_metrics.prompt_version,
+        taxonomyVersionId: result.analysis_metrics.taxonomy_version_id,
+        outputSchemaVersion: result.analysis_metrics.output_schema_version,
+        resumed: result.analysis_metrics.resumed,
+        skippedThreadDayIds: result.analysis_metrics.skipped_thread_day_ids
+      }
+      : null,
+    martMetrics: result.mart_metrics
+      ? {
+        materialized: result.mart_metrics.materialized,
+        analysisRunId: result.mart_metrics.analysis_run_id,
+        factThreadDayCount: result.mart_metrics.fact_thread_day_count,
+        factStaffThreadDayCount: result.mart_metrics.fact_staff_thread_day_count,
+        promptHash: result.mart_metrics.prompt_hash,
+        promptVersion: result.mart_metrics.prompt_version,
+        configVersionId: result.mart_metrics.config_version_id,
+        configVersionNo: result.mart_metrics.config_version_no,
+        taxonomyVersionId: result.mart_metrics.taxonomy_version_id,
+        taxonomyVersionCode: result.mart_metrics.taxonomy_version_code
+      }
+      : null,
+    publishWarning: result.publish_warning,
+    errorText: result.error_text
   };
 }
 

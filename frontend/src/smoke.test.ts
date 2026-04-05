@@ -1,5 +1,5 @@
-import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { createBusinessAdapter } from "./adapters/demo/business-adapter.ts";
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from "bun:test";
+import { createHttpBusinessAdapter } from "./adapters/http/business-adapter.ts";
 import { createControlPlaneAdapter } from "./adapters/http/control-plane-adapter.ts";
 import type { BusinessFilters } from "./core/types.ts";
 
@@ -19,12 +19,16 @@ beforeAll(() => {
   baseUrl = `http://127.0.0.1:${server.port}`;
 });
 
+beforeEach(() => {
+  seenRequests.length = 0;
+});
+
 afterAll(() => {
   server.stop(true);
 });
 
 describe("frontend smoke", () => {
-  it("walks the pinned http-first flows through the real frontend adapter chain", async () => {
+  it("walks the pinned http-first control-plane flows through the real frontend adapter chain", async () => {
     const adapter = createControlPlaneAdapter(() => baseUrl);
 
     const tokenPages = await adapter.listPagesFromToken("token-123");
@@ -76,9 +80,8 @@ describe("frontend smoke", () => {
 
     const runDetail = await adapter.getRun("run-201");
     expect(runDetail.threadDayCount).toBe(42);
-    expect(runDetail.run.historicalOverwrite?.replacedSnapshotLabel).toBe("Snapshot official 2026-04-03");
-    expect(runDetail.run.historicalOverwrite?.previousPromptVersion).toBe("Prompt A10");
-    expect(runDetail.run.historicalOverwrite?.nextPromptVersion).toBe("Prompt A12");
+    expect(runDetail.analysisMetrics?.analysisRunId).toBe("analysis-run-1");
+    expect(runDetail.martMetrics?.factThreadDayCount).toBe(42);
 
     const published = await adapter.publishRun("run-201", {
       publishAs: "official",
@@ -86,6 +89,9 @@ describe("frontend smoke", () => {
       expectedReplacedRunId: "run-155"
     });
     expect(published.run.publishState).toBe("Published official");
+
+    const health = await adapter.getHealthSummary();
+    expect(health.cards.some((card) => card.label === "queue")).toBe(true);
 
     expect(seenRequests).toEqual([
       "POST /chat-extractor/control-center/pages/list-from-token",
@@ -97,14 +103,18 @@ describe("frontend smoke", () => {
       "POST /chat-extractor/jobs/execute",
       "GET /chat-extractor/run-groups/rg-201",
       "GET /chat-extractor/runs/run-201",
-      "POST /chat-extractor/runs/run-201/publish"
+      "POST /chat-extractor/runs/run-201/publish",
+      "GET /read-models/health"
     ]);
   });
 
-  it("keeps export as an explicit workflow and thread list grain at thread", async () => {
-    const adapter = createBusinessAdapter();
+  it("serves business views from read-model HTTP endpoints instead of demo fixtures", async () => {
+    const adapter = createHttpBusinessAdapter(() => baseUrl);
+    const catalog = await adapter.loadCatalog();
+    expect(catalog.pages[0]?.id).toBe("cp-101");
+
     const filters: BusinessFilters = {
-      pageId: "page-a",
+      pageId: "cp-101",
       slicePreset: "yesterday",
       startDate: "2026-04-03",
       endDate: "2026-04-03",
@@ -118,10 +128,10 @@ describe("frontend smoke", () => {
     };
 
     const overview = await adapter.getOverview(filters);
-    expect(overview.warning?.title).toContain("tạm thời");
+    expect(overview.warning?.title).toContain("Tam");
 
     const workbook = await adapter.getExportWorkbook({
-      pageId: "page-a",
+      pageId: "cp-101",
       startDate: "2026-03-01",
       endDate: "2026-03-03"
     });
@@ -131,17 +141,12 @@ describe("frontend smoke", () => {
     expect(history.threads.every((thread) => !thread.id.includes("thread_day"))).toBe(true);
     expect(history.analysisHistory.length).toBeGreaterThan(0);
 
-    const filteredHistory = await adapter.getThreadHistory(
-      {
-        ...filters,
-        pageId: "page-b",
-        revisit: "revisit",
-        staff: "linh"
-      },
-      null,
-      "conversation"
-    );
-    expect(filteredHistory.threads.map((thread) => thread.id)).toEqual(["t-1004"]);
+    expect(seenRequests).toEqual([
+      "GET /read-models/catalog",
+      "GET /read-models/overview",
+      "GET /read-models/export-workbook",
+      "GET /read-models/thread-history"
+    ]);
   });
 });
 
@@ -231,16 +236,137 @@ function routeStub(method: string, pathname: string) {
   }
 
   if (method === "GET" && pathname.endsWith("/runs/run-201")) {
-    return json({
-      run: buildRun("draft"),
-      counts: { threadDayCount: 42, messageCount: 388 }
-    });
+    return json(buildRunDetail("draft"));
   }
 
   if (method === "POST" && pathname.endsWith("/runs/run-201/publish")) {
+    return json(buildRunDetail("published_official"));
+  }
+
+  if (method === "GET" && pathname.endsWith("/read-models/health")) {
     return json({
-      run: buildRun("published_official"),
-      counts: { threadDayCount: 42, messageCount: 388 }
+      healthSummary: {
+        generatedAt: "2026-04-05T10:00:00.000Z",
+        cards: [
+          { key: "backend", label: "backend", status: "ready", detail: "HTTP control-plane dang phan hoi." },
+          { key: "queue", label: "queue", status: "ready", detail: "Redis PONG." }
+        ]
+      }
+    });
+  }
+
+  if (method === "GET" && pathname.endsWith("/read-models/catalog")) {
+    return json({
+      catalog: {
+        pages: [
+          { id: "cp-101", label: "Page Da Lieu Quan 1", pancakePageId: "pk_101", timezone: "Asia/Ho_Chi_Minh" }
+        ],
+        needs: [{ value: "all", label: "Tat ca nhu cau" }],
+        outcomes: [{ value: "all", label: "Tat ca outcome" }],
+        risks: [{ value: "all", label: "Tat ca rui ro" }],
+        staff: [{ value: "all", label: "Tat ca nhan vien" }]
+      }
+    });
+  }
+
+  if (method === "GET" && pathname.endsWith("/read-models/overview")) {
+    return json({
+      overview: {
+        pageLabel: "Page Da Lieu Quan 1",
+        snapshot: {
+          kind: "published_provisional",
+          label: "Tam thoi",
+          coverage: "2026-04-03 -> 2026-04-03",
+          promptVersion: "Prompt A12",
+          configVersion: "v18",
+          taxonomyVersion: "tax-2026-04"
+        },
+        warning: {
+          title: "Tam thoi",
+          body: "Slice dang doc provisional.",
+          tone: "warning"
+        },
+        metrics: [],
+        openingNew: [],
+        openingRevisit: [],
+        needs: [],
+        outcomes: [],
+        sources: [],
+        priorities: []
+      }
+    });
+  }
+
+  if (method === "GET" && pathname.endsWith("/read-models/export-workbook")) {
+    return json({
+      workbook: {
+        allowed: false,
+        reason: "Khong co official snapshot.",
+        fileName: "export.xlsx",
+        pageId: "cp-101",
+        pageLabel: "Page Da Lieu Quan 1",
+        startDate: "2026-03-01",
+        endDate: "2026-03-03",
+        generatedAt: "2026-04-05T10:00:00.000Z",
+        promptVersion: "Khong co du lieu official",
+        configVersion: "Khong co du lieu official",
+        taxonomyVersion: "Khong co du lieu official",
+        rows: []
+      }
+    });
+  }
+
+  if (method === "GET" && pathname.endsWith("/read-models/thread-history")) {
+    return json({
+      threadHistory: {
+        warning: null,
+        threads: [
+          {
+            id: "thread-1",
+            customer: "Lan Anh",
+            snippet: "Khach hoi gia",
+            updatedAt: "2026-04-03",
+            badges: ["Inbox moi"]
+          }
+        ],
+        activeThreadId: "thread-1",
+        activeTab: "analysis-history",
+        transcript: [
+          {
+            at: "03/04/2026 09:05",
+            author: "Lan Anh",
+            role: "customer",
+            text: "Cho em hoi gia"
+          }
+        ],
+        analysisHistory: [
+          {
+            date: "2026-04-03",
+            openingTheme: "Hoi gia",
+            need: "Dat lich",
+            outcome: "Da chot hen",
+            mood: "Tich cuc",
+            risk: "Cao",
+            quality: "Tot",
+            aiCost: "2 đ"
+          }
+        ],
+        audit: {
+          model: "gpt-5.4-mini",
+          promptVersion: "Prompt A12",
+          promptHash: "sha256:prompt-a12",
+          taxonomyVersion: "tax-2026-04",
+          evidence: ["Khach hoi gia"],
+          explanations: [{ field: "outcome", explanation: "Da co slot cu the." }],
+          supportingMessageIds: ["msg-1"]
+        },
+        crmLink: {
+          customer: "CRM KH-7712",
+          method: "deterministic",
+          confidence: "0.97",
+          history: ["2026-04-03T09:00:00.000Z | deterministic -> linked -> KH-7712"]
+        }
+      }
     });
   }
 
@@ -278,11 +404,11 @@ function buildConfig(id: string) {
     promptVersionLabel: id === "cfg-18" ? "Prompt A12" : "Prompt A10",
     promptHash: id === "cfg-18" ? "sha256:prompt-a12" : "sha256:prompt-a10",
     evidenceBundle: id === "cfg-18"
-      ? ["Opening block = Khách hàng tái khám", "Khách yêu cầu dời lịch sang chiều mai"]
-      : ["Khách hỏi giá dịch vụ", "Staff báo giá nhưng chưa chốt lịch"],
+      ? ["Opening block = Khach hang tai kham", "Khach yeu cau doi lich sang chieu mai"]
+      : ["Khach hoi gia dich vu", "Staff bao gia nhung chua chot lich"],
     fieldExplanations: id === "cfg-18"
-      ? [{ field: "risk_level", explanation: "Khách có nhu cầu rõ nhưng staff phản hồi chậm." }]
-      : [{ field: "outcome", explanation: "Prompt cũ nghiêng về booked khi khách hỏi slot rõ ràng." }]
+      ? [{ field: "risk_level", explanation: "Khach co nhu cau ro nhung staff phan hoi cham." }]
+      : [{ field: "outcome", explanation: "Prompt cu nghieng ve booked khi khach hoi slot ro rang." }]
   };
 }
 
@@ -306,6 +432,45 @@ function buildRun(publishState: string) {
       export_impact: "Export .xlsx của ngày này sẽ regenerate theo snapshot mới."
     },
     published_at: publishState === "draft" ? null : "2026-04-04T10:05:00.000Z"
+  };
+}
+
+function buildRunDetail(publishState: string) {
+  return {
+    run: buildRun(publishState),
+    artifact_counts: {
+      thread_day_count: 42,
+      message_count: 388
+    },
+    analysis_metrics: {
+      analysis_run_id: "analysis-run-1",
+      status: "completed",
+      unit_count_planned: 42,
+      unit_count_succeeded: 41,
+      unit_count_unknown: 1,
+      unit_count_failed: 0,
+      total_cost_micros: 120000,
+      prompt_hash: "sha256:prompt-a12",
+      prompt_version: "Prompt A12",
+      taxonomy_version_id: "tax-1",
+      output_schema_version: "conversation-analysis.v1",
+      resumed: true,
+      skipped_thread_day_ids: ["thread-day-9"]
+    },
+    mart_metrics: {
+      materialized: true,
+      analysis_run_id: "analysis-run-1",
+      fact_thread_day_count: 42,
+      fact_staff_thread_day_count: 14,
+      prompt_hash: "sha256:prompt-a12",
+      prompt_version: "Prompt A12",
+      config_version_id: "cfg-18",
+      config_version_no: 18,
+      taxonomy_version_id: "tax-1",
+      taxonomy_version_code: "tax-2026-04"
+    },
+    publish_warning: null,
+    error_text: null
   };
 }
 

@@ -1,8 +1,10 @@
 import { AppError } from "../../core/errors.ts";
 import { formatDateInTimezone } from "../chat_extractor/chat_extractor.planner.ts";
+import { buildHealthSummary } from "./read_models.health.ts";
 import { buildMartMaterialization } from "./read_models.builder.ts";
 import { resolveBusinessLabel } from "./read_models.labels.ts";
 import { readModelsRepository } from "./read_models.repository.ts";
+import { buildThreadHistoryView, resolveActiveThreadId } from "./read_models.thread_history.ts";
 import type {
   ExportWorkbookRequest,
   ReadModelFilterInput,
@@ -235,6 +237,37 @@ class ReadModelsService {
       issueMatrix,
       coachingInbox
     };
+  }
+
+  async getThreadHistory(
+    filters: ReadModelFilterInput,
+    requestedThreadId: string | null,
+    activeTab: "conversation" | "analysis-history" | "ai-audit" | "crm-link"
+  ) {
+    const slice = await this.resolveSlice(filters);
+    const pipelineRunIds = slice.snapshots.map((item) => item.pipelineRunId);
+    const threadFacts = await readModelsRepository.listFactThreadDaysByRunIds(pipelineRunIds, filters);
+    const threadIds = uniqueValues(threadFacts.map((row) => row.threadId));
+    const threadSummaries = await readModelsRepository.listThreadSummaries(threadIds, pipelineRunIds);
+    const activeThreadId = resolveActiveThreadId(threadFacts, threadSummaries, requestedThreadId);
+    const workspace = activeThreadId
+      ? await readModelsRepository.getThreadWorkspace(activeThreadId, pipelineRunIds)
+      : null;
+
+    return buildThreadHistoryView({
+      warning: slice.warning,
+      businessTimezone: slice.businessTimezone,
+      taxonomyJson: slice.snapshots[0]?.taxonomyJson ?? null,
+      requestedThreadId,
+      activeTab,
+      threadFacts,
+      threadSummaries,
+      workspace
+    });
+  }
+
+  async getHealthSummary() {
+    return buildHealthSummary();
   }
 
   async getPageComparison(filters: ReadModelFilterInput, comparePageIds: string[]) {

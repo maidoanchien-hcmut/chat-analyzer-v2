@@ -529,6 +529,119 @@ class ReadModelsRepository {
       staffFactCount
     };
   }
+
+  async listThreadSummaries(threadIds: string[], pipelineRunIds: string[]) {
+    if (threadIds.length === 0 || pipelineRunIds.length === 0) {
+      return [];
+    }
+    return prisma.threadDay.findMany({
+      where: {
+        pipelineRunId: { in: pipelineRunIds },
+        threadId: { in: threadIds }
+      },
+      orderBy: [{ createdAt: "desc" }],
+      select: {
+        threadId: true,
+        firstMeaningfulMessageTextRedacted: true,
+        pipelineRun: {
+          select: {
+            targetDate: true
+          }
+        },
+        thread: {
+          select: {
+            customerDisplayName: true
+          }
+        }
+      }
+    });
+  }
+
+  async getThreadWorkspace(threadId: string, pipelineRunIds: string[]) {
+    return prisma.thread.findUnique({
+      where: { id: threadId },
+      select: {
+        id: true,
+        customerDisplayName: true,
+        customerLink: {
+          select: {
+            customerId: true,
+            mappingMethod: true,
+            mappingConfidenceScore: true
+          }
+        },
+        linkDecisions: {
+          orderBy: [{ createdAt: "desc" }],
+          take: 10,
+          select: {
+            decisionSource: true,
+            decisionStatus: true,
+            selectedCustomerId: true,
+            createdAt: true
+          }
+        },
+        threadDays: {
+          where: {
+            pipelineRunId: { in: pipelineRunIds }
+          },
+          orderBy: [{ createdAt: "desc" }],
+          select: {
+            id: true,
+            firstMeaningfulMessageId: true,
+            firstMeaningfulMessageTextRedacted: true,
+            pipelineRun: {
+              select: {
+                targetDate: true
+              }
+            },
+            messages: {
+              orderBy: [{ insertedAt: "asc" }, { id: "asc" }],
+              select: {
+                id: true,
+                insertedAt: true,
+                senderRole: true,
+                senderName: true,
+                redactedText: true
+              }
+            },
+            analysisResults: {
+              where: {
+                analysisRun: {
+                  pipelineRunId: { in: pipelineRunIds }
+                }
+              },
+              orderBy: [{ createdAt: "desc" }],
+              take: 1,
+              select: {
+                openingThemeCode: true,
+                primaryNeedCode: true,
+                closingOutcomeInferenceCode: true,
+                customerMoodCode: true,
+                processRiskLevelCode: true,
+                staffAssessmentsJson: true,
+                evidenceUsedJson: true,
+                fieldExplanationsJson: true,
+                supportingMessageIdsJson: true,
+                costMicros: true,
+                analysisRun: {
+                  select: {
+                    modelName: true,
+                    promptVersion: true,
+                    promptHash: true,
+                    taxonomyVersion: {
+                      select: {
+                        versionCode: true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    });
+  }
 }
 
 function parseDateOnlyUtc(value: string) {

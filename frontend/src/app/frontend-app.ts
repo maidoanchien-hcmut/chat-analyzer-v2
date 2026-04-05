@@ -1,4 +1,4 @@
-import { createBusinessAdapter } from "../adapters/demo/business-adapter.ts";
+import { createHttpBusinessAdapter } from "../adapters/http/business-adapter.ts";
 import { createControlPlaneAdapter } from "../adapters/http/control-plane-adapter.ts";
 import { DEFAULT_API_BASE_URL, FEATURE_SOURCE_MATRIX, NAV_ITEMS, STORAGE_API_BASE_URL, VIEW_TITLES } from "../core/config.ts";
 import type { AppToast, AsyncStatus, BusinessFilters, RouteState } from "../core/types.ts";
@@ -15,11 +15,8 @@ import { renderExploration } from "../features/exploration/render.ts";
 import { renderExportWorkflow } from "../features/export/render.ts";
 import { renderOperations } from "../features/operations/render.ts";
 import {
-  applyMappingQueueAction,
-  createInitialMappingQueue,
   derivePublishAction,
-  findRunForPublish,
-  nextRemapCandidate
+  findRunForPublish
 } from "../features/operations/state.ts";
 import { renderOverview } from "../features/overview/render.ts";
 import { renderPageComparison } from "../features/page-comparison/render.ts";
@@ -34,7 +31,7 @@ import type { ConfigurationState, OnboardingState, OperationsState } from "./scr
 
 export class FrontendApp {
   private readonly root: HTMLDivElement;
-  private readonly businessAdapter = createBusinessAdapter();
+  private readonly businessAdapter = createHttpBusinessAdapter(() => this.apiBaseUrl);
   private readonly controlPlaneAdapter = createControlPlaneAdapter(() => this.apiBaseUrl);
   private route = parseRouteState(window.location.search);
   private apiBaseUrl = localStorage.getItem(STORAGE_API_BASE_URL)?.trim() || DEFAULT_API_BASE_URL;
@@ -82,7 +79,8 @@ export class FrontendApp {
     publishAs: "provisional",
     confirmHistoricalOverwrite: false,
     expectedReplacedRunId: "",
-    mappingQueue: createInitialMappingQueue()
+    mappingQueue: [],
+    healthSummary: null
   };
 
   constructor(root: HTMLDivElement) {
@@ -175,27 +173,6 @@ export class FrontendApp {
       } else if (action === "add-notification-target-row") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
         this.configuration.notificationTargets = [...this.configuration.notificationTargets, createEmptyNotificationTarget()];
-      } else if (action === "approve-mapping") {
-        this.operations.mappingQueue = applyMappingQueueAction(this.operations.mappingQueue, {
-          type: "approve",
-          itemId: String(target.closest<HTMLElement>("[data-mapping-id]")?.dataset.mappingId ?? "")
-        });
-      } else if (action === "reject-mapping") {
-        this.operations.mappingQueue = applyMappingQueueAction(this.operations.mappingQueue, {
-          type: "reject",
-          itemId: String(target.closest<HTMLElement>("[data-mapping-id]")?.dataset.mappingId ?? "")
-        });
-      } else if (action === "remap-mapping") {
-        const itemId = String(target.closest<HTMLElement>("[data-mapping-id]")?.dataset.mappingId ?? "");
-        const item = this.operations.mappingQueue.find((row) => row.id === itemId);
-        if (!item) {
-          throw new Error("Không tìm thấy mapping queue item.");
-        }
-        this.operations.mappingQueue = applyMappingQueueAction(this.operations.mappingQueue, {
-          type: "remap",
-          itemId,
-          ...nextRemapCandidate(item)
-        });
       } else if (action === "clone-prompt-from-version") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
         const configVersion = this.configuration.pageDetail?.configVersions.find((item) => item.id === this.configuration.promptCloneSourceVersionId) ?? null;
@@ -389,6 +366,9 @@ export class FrontendApp {
     this.operations.activePanel = this.route.operationPanel;
     if (this.configuration.connectedPages.length === 0) {
       await this.refreshControlPages();
+    }
+    if (this.route.view === "operations") {
+      this.operations.healthSummary = await this.controlPlaneAdapter.getHealthSummary();
     }
     this.currentViewHtml = this.route.view === "operations"
       ? renderOperations(this.operations)

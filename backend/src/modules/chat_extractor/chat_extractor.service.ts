@@ -21,6 +21,7 @@ import {
   splitRequestedWindowByTargetDate,
   type PlannedChildRun
 } from "./chat_extractor.planner.ts";
+import { buildRunDiagnostics } from "./chat_extractor.run_detail.ts";
 import {
   chatExtractorRepository,
   type ConnectedPageDetailRecord,
@@ -357,7 +358,7 @@ export class ChatExtractorService {
     const counts = await chatExtractorRepository.getRunArtifactCounts(runId);
     return {
       run: serializeRunSummary(run),
-      counts
+      ...buildRunDiagnostics(run, counts)
     };
   }
 

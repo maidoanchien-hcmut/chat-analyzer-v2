@@ -42,6 +42,16 @@ export const readModelsController = new Elysia({ prefix: "/read-models" })
     query: t.Any(),
     response: t.Any()
   })
+  .get("/thread-history", async ({ query }) => ({
+    threadHistory: await readModelsService.getThreadHistory(
+      parseFilters(query),
+      readString(query.threadId) || null,
+      parseThreadTab(query.threadTab)
+    )
+  }), {
+    query: t.Any(),
+    response: t.Any()
+  })
   .get("/page-comparison", async ({ query }) => ({
     pageComparison: await readModelsService.getPageComparison(
       parseFilters(query),
@@ -49,6 +59,11 @@ export const readModelsController = new Elysia({ prefix: "/read-models" })
     )
   }), {
     query: t.Any(),
+    response: t.Any()
+  })
+  .get("/health", async () => ({
+    healthSummary: await readModelsService.getHealthSummary()
+  }), {
     response: t.Any()
   })
   .get("/export-workbook", async ({ query }) => ({
@@ -93,6 +108,14 @@ function parseComparePageIds(value: unknown) {
 
 function normalizeUnion<T extends string>(value: string, allowed: T[], fallback: T): T {
   return allowed.includes(value as T) ? value as T : fallback;
+}
+
+function parseThreadTab(value: unknown) {
+  return normalizeUnion(
+    readString(value),
+    ["conversation", "analysis-history", "ai-audit", "crm-link"],
+    "conversation"
+  );
 }
 
 function readString(value: unknown) {

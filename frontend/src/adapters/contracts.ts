@@ -260,6 +260,18 @@ export type MappingQueueItem = {
   status: MappingQueueStatus;
 };
 
+export type HealthCardViewModel = {
+  key: string;
+  label: string;
+  status: "ready" | "warning" | "danger";
+  detail: string;
+};
+
+export type HealthSummaryViewModel = {
+  generatedAt: string;
+  cards: HealthCardViewModel[];
+};
+
 export type RunGroupViewModel = {
   id: string;
   pageName: string;
@@ -275,11 +287,43 @@ export type RunGroupViewModel = {
   childRuns: RunSummaryViewModel[];
 };
 
+export type RunAnalysisMetricsViewModel = {
+  analysisRunId: string;
+  status: string;
+  unitCountPlanned: number;
+  unitCountSucceeded: number;
+  unitCountUnknown: number;
+  unitCountFailed: number;
+  totalCostMicros: number;
+  promptHash: string;
+  promptVersion: string;
+  taxonomyVersionId: string;
+  outputSchemaVersion: string;
+  resumed: boolean;
+  skippedThreadDayIds: string[];
+};
+
+export type RunMartMetricsViewModel = {
+  materialized: boolean;
+  analysisRunId: string;
+  factThreadDayCount: number;
+  factStaffThreadDayCount: number;
+  promptHash: string;
+  promptVersion: string;
+  configVersionId: string;
+  configVersionNo: number;
+  taxonomyVersionId: string;
+  taxonomyVersionCode: string;
+};
+
 export type RunDetailViewModel = {
   run: RunSummaryViewModel;
   threadDayCount: number;
   messageCount: number;
+  analysisMetrics: RunAnalysisMetricsViewModel | null;
+  martMetrics: RunMartMetricsViewModel | null;
   publishWarning: string | null;
+  errorText: string | null;
 };
 
 export type PublishRunInput = {
@@ -343,4 +387,5 @@ export interface ControlPlaneAdapter {
   getRunGroup(runGroupId: string): Promise<RunGroupViewModel>;
   getRun(runId: string): Promise<RunDetailViewModel>;
   publishRun(runId: string, input: PublishRunInput): Promise<RunDetailViewModel>;
+  getHealthSummary(): Promise<HealthSummaryViewModel>;
 }

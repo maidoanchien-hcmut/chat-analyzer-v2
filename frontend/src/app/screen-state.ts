@@ -1,6 +1,7 @@
 import type {
   ConnectedPageDetailViewModel,
   ConnectedPageSummary,
+  HealthSummaryViewModel,
   MappingQueueItem,
   OnboardingPageCandidate,
   PromptPreviewViewModel,
@@ -82,4 +83,5 @@ export type OperationsState = {
   confirmHistoricalOverwrite: boolean;
   expectedReplacedRunId: string;
   mappingQueue: MappingQueueItem[];
+  healthSummary: HealthSummaryViewModel | null;
 };

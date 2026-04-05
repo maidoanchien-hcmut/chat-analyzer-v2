@@ -124,6 +124,131 @@ describe("read models service", () => {
     expect(workbook.rows[0]?.date).toBe("2026-04-04");
   });
 
+  it("builds thread history from persisted thread workspace and local CRM state", async () => {
+    patchValue(readModelsRepository, "listSnapshotsForPageRange", async () => [createSnapshot()]);
+    patchValue(readModelsRepository, "listConnectedPagesForCatalog", async () => [createCatalogPage()]);
+    patchValue(readModelsRepository, "listFactThreadDaysByRunIds", async () => [
+      createThreadFact({
+        threadId: "thread-1",
+        processRiskLevelCode: "high",
+        officialClosingOutcomeCode: "booked",
+        firstMeaningfulMessageTextRedacted: "Khach hoi gia va dat lich"
+      }),
+      createThreadFact({
+        threadId: "thread-2",
+        isNewInbox: false,
+        officialRevisitLabel: "revisit",
+        processRiskLevelCode: "low"
+      }, "2026-04-03")
+    ]);
+    patchValue(readModelsRepository, "listThreadSummaries", async () => [
+      {
+        threadId: "thread-1",
+        firstMeaningfulMessageTextRedacted: "Khach hoi gia va dat lich",
+        pipelineRun: {
+          targetDate: new Date("2026-04-04T00:00:00.000Z")
+        },
+        thread: {
+          customerDisplayName: "Lan Anh"
+        }
+      },
+      {
+        threadId: "thread-2",
+        firstMeaningfulMessageTextRedacted: "Khach tai kham",
+        pipelineRun: {
+          targetDate: new Date("2026-04-03T00:00:00.000Z")
+        },
+        thread: {
+          customerDisplayName: "Bao Tram"
+        }
+      }
+    ]);
+    patchValue(readModelsRepository, "getThreadWorkspace", async () => ({
+      id: "thread-1",
+      customerDisplayName: "Lan Anh",
+      customerLink: {
+        customerId: "KH-7712",
+        mappingMethod: "deterministic",
+        mappingConfidenceScore: 0.97
+      },
+      linkDecisions: [
+        {
+          decisionSource: "deterministic",
+          decisionStatus: "linked",
+          selectedCustomerId: "KH-7712",
+          createdAt: new Date("2026-04-04T09:00:00.000Z")
+        }
+      ],
+      threadDays: [
+        {
+          id: "thread-day-1",
+          firstMeaningfulMessageId: "msg-1",
+          firstMeaningfulMessageTextRedacted: "Khach hoi gia va dat lich",
+          pipelineRun: {
+            targetDate: new Date("2026-04-04T00:00:00.000Z")
+          },
+          messages: [
+            {
+              id: "msg-1",
+              insertedAt: new Date("2026-04-04T09:05:00.000Z"),
+              senderRole: "customer",
+              senderName: "Lan Anh",
+              redactedText: "Cho em hoi gia va lich trong tuan nay"
+            },
+            {
+              id: "msg-2",
+              insertedAt: new Date("2026-04-04T09:07:00.000Z"),
+              senderRole: "staff",
+              senderName: "Mai",
+              redactedText: "Chieu thu 5 con slot 16h"
+            }
+          ],
+          analysisResults: [
+            {
+              openingThemeCode: "hoi_gia",
+              primaryNeedCode: "dat_lich",
+              closingOutcomeInferenceCode: "booked",
+              customerMoodCode: "positive",
+              processRiskLevelCode: "high",
+              staffAssessmentsJson: [
+                {
+                  staff_name: "mai",
+                  response_quality_code: "strong"
+                }
+              ],
+              evidenceUsedJson: {
+                opening_signal: "Khach hoi gia",
+                closing_signal: "Staff dua slot cu the"
+              },
+              fieldExplanationsJson: {
+                outcome: "Da co de xuat slot cu the trong cung nhip trao doi."
+              },
+              supportingMessageIdsJson: ["msg-1", "msg-2"],
+              costMicros: 2400n,
+              analysisRun: {
+                modelName: "gpt-5.4-mini",
+                promptVersion: "Prompt A12",
+                promptHash: "sha256:prompt-a12",
+                taxonomyVersion: {
+                  versionCode: "tax-2026-04"
+                }
+              }
+            }
+          ]
+        }
+      ]
+    }));
+
+    const history = await readModelsService.getThreadHistory(baseFilters(), null, "ai-audit");
+
+    expect(history.threads).toHaveLength(2);
+    expect(history.activeThreadId).toBe("thread-1");
+    expect(history.audit.promptVersion).toBe("Prompt A12");
+    expect(history.audit.supportingMessageIds).toEqual(["msg-1", "msg-2"]);
+    expect(history.crmLink.customer).toContain("KH-7712");
+    expect(history.analysisHistory[0]?.quality).toBe("Tot");
+  });
+
   it("keeps old partial-day runs available only through run preview", async () => {
     patchValue(readModelsRepository, "getRunDraftSummary", async () => ({
       run: {

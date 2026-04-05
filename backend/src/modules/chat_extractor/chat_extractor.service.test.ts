@@ -315,6 +315,59 @@ describe("chat_extractor service", () => {
       }
     ]);
   });
+
+  it("returns enriched run detail diagnostics for analysis and mart state", async () => {
+    const repositoryModule = await loadChatExtractorRepository();
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getRunById", async () => createPipelineRunRecord({
+      publishEligibility: "provisional_current_day_partial",
+      errorText: "analysis still retrying",
+      metricsJson: {
+        analysis: {
+          analysis_run_id: "analysis-run-1",
+          status: "completed",
+          unit_count_planned: 12,
+          unit_count_succeeded: 11,
+          unit_count_unknown: 1,
+          unit_count_failed: 0,
+          total_cost_micros: 9000,
+          prompt_hash: "sha256:prompt-a12",
+          prompt_version: "Prompt A12",
+          taxonomy_version_id: TAXONOMY_VERSION_ID,
+          output_schema_version: "conversation-analysis.v1",
+          resumed: true,
+          skipped_thread_day_ids: ["thread-day-9"]
+        },
+        semantic_mart: {
+          materialized: true,
+          analysis_run_id: "analysis-run-1",
+          fact_thread_day_count: 12,
+          fact_staff_thread_day_count: 5,
+          prompt_hash: "sha256:prompt-a12",
+          prompt_version: "Prompt A12",
+          config_version_id: CONFIG_VERSION_ID,
+          config_version_no: 7,
+          taxonomy_version_id: TAXONOMY_VERSION_ID,
+          taxonomy_version_code: "default.v1"
+        }
+      }
+    }));
+    patchRepository(repositoryModule.chatExtractorRepository, "getRunArtifactCounts", async () => ({
+      threadDayCount: 12,
+      messageCount: 91
+    }));
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService();
+    const result = await service.getRun("run-201");
+
+    expect(result.artifact_counts.thread_day_count).toBe(12);
+    expect(result.analysis_metrics?.analysis_run_id).toBe("analysis-run-1");
+    expect(result.analysis_metrics?.unit_count_succeeded).toBe(11);
+    expect(result.mart_metrics?.materialized).toBe(true);
+    expect(result.publish_warning).toContain("provisional");
+    expect(result.error_text).toContain("retrying");
+  });
 });
 
 async function loadChatExtractorTypes() {
@@ -448,4 +501,51 @@ function buildRunGroupRuns(runGroupId: string, createInput: any, pageDetail: Ret
       frozenConfigVersion: pageDetail.activeConfigVersion
     }
   }));
+}
+
+function createPipelineRunRecord(overrides?: Partial<ReturnType<typeof buildRunGroupRuns>[number]>) {
+  return {
+    id: "run-201",
+    runGroupId: "rg-201",
+    targetDate: new Date("2026-04-03T00:00:00.000Z"),
+    windowStartAt: new Date("2026-04-03T00:00:00.000Z"),
+    windowEndExclusiveAt: new Date("2026-04-04T00:00:00.000Z"),
+    requestedWindowStartAt: null,
+    requestedWindowEndExclusiveAt: null,
+    isFullDay: false,
+    runMode: "manual_range",
+    status: "loaded",
+    publishState: "draft",
+    publishEligibility: "official_full_day",
+    supersedesRunId: null,
+    supersededByRunId: null,
+    requestJson: {},
+    metricsJson: {},
+    reuseSummaryJson: {},
+    errorText: null,
+    createdAt: new Date("2026-04-03T00:00:00.000Z"),
+    startedAt: new Date("2026-04-03T00:00:00.000Z"),
+    finishedAt: new Date("2026-04-03T00:05:00.000Z"),
+    publishedAt: null,
+    runGroup: {
+      id: "rg-201",
+      runMode: "manual",
+      requestedWindowStartAt: null,
+      requestedWindowEndExclusiveAt: null,
+      requestedTargetDate: new Date("2026-04-03T00:00:00.000Z"),
+      frozenConfigVersionId: CONFIG_VERSION_ID,
+      frozenTaxonomyVersionId: TAXONOMY_VERSION_ID,
+      frozenCompiledPromptHash: "sha256:prompt-a12",
+      frozenPromptVersion: "Prompt A12",
+      publishIntent: "official",
+      status: "loaded",
+      createdBy: "operator",
+      createdAt: new Date("2026-04-03T00:00:00.000Z"),
+      startedAt: new Date("2026-04-03T00:00:00.000Z"),
+      finishedAt: new Date("2026-04-03T00:05:00.000Z"),
+      connectedPage: createConnectedPageDetail().page,
+      frozenConfigVersion: createConnectedPageDetail().activeConfigVersion
+    },
+    ...overrides
+  };
 }

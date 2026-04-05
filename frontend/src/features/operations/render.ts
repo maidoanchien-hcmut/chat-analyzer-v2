@@ -1,12 +1,14 @@
 import type { OperationsState } from "../../app/screen-state.ts";
-import { escapeHtml } from "../../shared/html.ts";
 import { prettyJson } from "../../shared/format.ts";
+import { escapeHtml } from "../../shared/html.ts";
 import { derivePublishAction, describePublishEligibility } from "./state.ts";
 
 export function renderOperations(state: OperationsState) {
   const childRuns = state.runGroup?.childRuns ?? [];
   const selectedRun = childRuns.find((run) => run.id === state.publishRunId) ?? (state.runDetail?.run.id === state.publishRunId ? state.runDetail.run : null);
   const publishAction = selectedRun ? derivePublishAction(selectedRun.publishEligibility) : null;
+  const healthCards = state.healthSummary?.cards ?? [];
+
   return `
     <section class="feature-stack">
       <article class="panel-card">
@@ -25,12 +27,19 @@ export function renderOperations(state: OperationsState) {
       </article>
       <article class="panel-card">
         <h3>Health summary</h3>
-        <div class="metric-grid compact">
-          <article class="metric-card"><span class="metric-label">backend</span><strong class="metric-value">ready</strong></article>
-          <article class="metric-card"><span class="metric-label">go-worker</span><strong class="metric-value">ready</strong></article>
-          <article class="metric-card"><span class="metric-label">AI service</span><strong class="metric-value">pending</strong></article>
-          <article class="metric-card"><span class="metric-label">queue</span><strong class="metric-value">ready</strong></article>
-        </div>
+        ${healthCards.length > 0
+          ? `
+            <div class="metric-grid compact">
+              ${healthCards.map((card) => `
+                <article class="metric-card">
+                  <span class="metric-label">${escapeHtml(card.label)}</span>
+                  <strong class="metric-value">${escapeHtml(card.status)}</strong>
+                  <span class="muted-copy">${escapeHtml(card.detail)}</span>
+                </article>
+              `).join("")}
+            </div>
+          `
+          : "<p class='muted-copy'>Chua nap health summary tu backend.</p>"}
       </article>
       <section class="two-column-grid">
         <article class="panel-card ${state.activePanel === "manual-run" ? "panel-focus" : ""}">
@@ -147,54 +156,54 @@ export function renderOperations(state: OperationsState) {
         </article>
       </section>
       <article class="panel-card ${state.activePanel === "run-detail" ? "panel-focus" : ""}">
-        <h3>Run detail và mapping queue</h3>
+        <h3>Run detail</h3>
         ${state.runDetail ? `
           <div class="meta-list">
             <span>Run: ${escapeHtml(state.runDetail.run.id)}</span>
             <span>Ngày: ${escapeHtml(state.runDetail.run.targetDate)}</span>
             <span>Thread: ${state.runDetail.threadDayCount}</span>
-            <span>Tin nhắn: ${state.runDetail.messageCount}</span>
+            <span>Tin nhắn: ${escapeHtml(state.runDetail.messageCount)}</span>
           </div>
           ${state.runDetail.publishWarning ? `<div class="banner banner-warning"><strong>Cảnh báo publish</strong><p>${escapeHtml(state.runDetail.publishWarning)}</p></div>` : ""}
-          <pre class="code-block">${escapeHtml(prettyJson(state.runDetail))}</pre>
-        ` : "<p class='muted-copy'>Run detail sẽ hiện thread counts, message counts, publish state và warning nếu run không được publish.</p>"}
-        <table class="data-table">
-          <thead><tr><th>Thread</th><th>Candidate</th><th>Confidence</th><th>Evidence</th><th>Trạng thái</th><th>Action</th></tr></thead>
-          <tbody>
-            ${state.mappingQueue.map((item) => `
-              <tr>
-                <td>${escapeHtml(item.threadLabel)}</td>
-                <td>${escapeHtml(item.candidateCustomer)}</td>
-                <td>${escapeHtml(item.confidence)}</td>
-                <td>${escapeHtml(item.evidence)}</td>
-                <td>${escapeHtml(renderMappingStatus(item.status))}</td>
-                <td>
-                  <div class="button-row">
-                    <button type="button" data-action="approve-mapping" data-mapping-id="${escapeHtml(item.id)}">Approve</button>
-                    <button type="button" data-action="reject-mapping" data-mapping-id="${escapeHtml(item.id)}">Reject</button>
-                    <button type="button" data-action="remap-mapping" data-mapping-id="${escapeHtml(item.id)}">Remap</button>
+          ${state.runDetail.errorText ? `<div class="banner banner-warning"><strong>Error detail</strong><p>${escapeHtml(state.runDetail.errorText)}</p></div>` : ""}
+          <div class="two-column-grid">
+            <article class="sub-panel">
+              <h4>Analysis</h4>
+              ${state.runDetail.analysisMetrics
+                ? `
+                  <div class="meta-list">
+                    <span>Run: ${escapeHtml(state.runDetail.analysisMetrics.analysisRunId)}</span>
+                    <span>Status: ${escapeHtml(state.runDetail.analysisMetrics.status)}</span>
+                    <span>Prompt: ${escapeHtml(state.runDetail.analysisMetrics.promptVersion)}</span>
+                    <span>Cost micros: ${escapeHtml(String(state.runDetail.analysisMetrics.totalCostMicros))}</span>
                   </div>
-                </td>
-              </tr>
-            `).join("")}
-          </tbody>
-        </table>
+                  <pre class="code-block">${escapeHtml(prettyJson(state.runDetail.analysisMetrics))}</pre>
+                `
+                : "<p class='muted-copy'>Chua co analysis metrics persisted cho run nay.</p>"}
+            </article>
+            <article class="sub-panel">
+              <h4>Semantic mart</h4>
+              ${state.runDetail.martMetrics
+                ? `
+                  <div class="meta-list">
+                    <span>Materialized: ${state.runDetail.martMetrics.materialized ? "Co" : "Khong"}</span>
+                    <span>Fact thread_day: ${escapeHtml(String(state.runDetail.martMetrics.factThreadDayCount))}</span>
+                    <span>Fact staff_thread_day: ${escapeHtml(String(state.runDetail.martMetrics.factStaffThreadDayCount))}</span>
+                    <span>Taxonomy: ${escapeHtml(state.runDetail.martMetrics.taxonomyVersionCode)}</span>
+                  </div>
+                  <pre class="code-block">${escapeHtml(prettyJson(state.runDetail.martMetrics))}</pre>
+                `
+                : "<p class='muted-copy'>Chua co semantic mart metrics cho run nay.</p>"}
+            </article>
+          </div>
+        ` : "<p class='muted-copy'>Run detail sẽ hiện ETL counts, analysis metrics, mart diagnostics và warning publish.</p>"}
+        <div class="banner banner-warning">
+          <strong>CRM mapping</strong>
+          <p>Scope hiện tại chỉ đọc local state trong thread workspace. Mapping queue action approve/reject/remap vẫn bị gate cho tới khi contract CRM được pin.</p>
+        </div>
       </article>
     </section>
   `;
-}
-
-function renderMappingStatus(status: OperationsState["mappingQueue"][number]["status"]) {
-  switch (status) {
-    case "approved":
-      return "Đã approve";
-    case "rejected":
-      return "Đã reject";
-    case "remapped":
-      return "Đã remap";
-    default:
-      return "Chờ review";
-  }
 }
 
 function renderConnectedPageSelect(
