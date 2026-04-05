@@ -118,7 +118,8 @@ function serializeRuntime(runtime: AnalysisRuntimeSnapshot) {
     generation_config_json: JSON.stringify(runtime.generationConfig),
     profile_json: JSON.stringify({
       ...runtime.profileJson,
-      prompt_hash: runtime.promptHash,
+      page_prompt_hash: runtime.pagePromptHash,
+      page_prompt_version: runtime.promptVersion,
       config_version_id: runtime.configVersionId,
       taxonomy_version_id: runtime.taxonomyVersionId,
       connected_page_id: runtime.connectedPageId

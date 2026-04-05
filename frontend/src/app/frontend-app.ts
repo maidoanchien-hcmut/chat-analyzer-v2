@@ -48,7 +48,7 @@ export class FrontendApp {
     selectedPageId: "",
     pageDetail: null,
     selectedConfigVersionId: "",
-    promptText: defaultPromptText(),
+    promptText: "",
     tagMappings: [createEmptyTagMapping()],
     openingRules: [createEmptyOpeningRule()],
     scheduler: createDefaultScheduler(),
@@ -102,7 +102,7 @@ export class FrontendApp {
       }
       this.exportWorkflow = ensureExportWorkflowPage(this.exportWorkflow, this.catalog.pages);
       await this.loadCurrentView();
-    });
+    }, { reloadView: false });
     this.render();
   }
 
@@ -376,7 +376,7 @@ export class FrontendApp {
     this.configuration.activeTab = this.route.configurationTab;
     this.operations.activePanel = this.route.operationPanel;
     if (this.configuration.connectedPages.length === 0) {
-      await this.refreshControlPages();
+      await this.refreshControlPages({ reloadView: false });
     }
     if (this.route.view === "operations") {
       this.operations.healthSummary = await this.controlPlaneAdapter.getHealthSummary();
@@ -406,26 +406,31 @@ export class FrontendApp {
       throw new Error("Cần chọn Pancake page.");
     }
     await this.withPending("register-page", async () => {
-      await this.controlPlaneAdapter.registerPage({
+      const detail = await this.controlPlaneAdapter.registerPage({
         pancakePageId,
         userAccessToken: this.onboarding.token.trim(),
         businessTimezone: this.onboarding.timezone,
         etlEnabled: this.onboarding.etlEnabled,
         analysisEnabled: this.onboarding.analysisEnabled
       });
-      await this.refreshControlPages();
+      this.applyLoadedConnectedPage(detail);
+      await this.refreshControlPages({ reloadView: false });
       this.toast = { kind: "info", message: "Đã register page qua HTTP thật." };
     });
   }
 
-  private async refreshControlPages() {
+  private async refreshControlPages(options?: { reloadView?: boolean }) {
     await this.withPending("list-connected-pages", async () => {
       const pages = await this.controlPlaneAdapter.listConnectedPages();
       this.configuration.connectedPages = pages;
       this.operations.connectedPages = pages;
-      this.configuration.selectedPageId ||= pages[0]?.id ?? "";
-      this.operations.selectedPageId ||= pages[0]?.id ?? "";
-    });
+      this.configuration.selectedPageId = pages.some((page) => page.id === this.configuration.selectedPageId)
+        ? this.configuration.selectedPageId
+        : (pages[0]?.id ?? "");
+      this.operations.selectedPageId = pages.some((page) => page.id === this.operations.selectedPageId)
+        ? this.operations.selectedPageId
+        : (pages[0]?.id ?? "");
+    }, { reloadView: options?.reloadView ?? true });
   }
 
   private async loadConnectedPage(form: HTMLFormElement) {
@@ -435,16 +440,7 @@ export class FrontendApp {
     }
     await this.withPending("get-connected-page", async () => {
       const detail = await this.controlPlaneAdapter.getConnectedPage(pageId);
-      this.configuration.selectedPageId = pageId;
-      this.configuration.pageDetail = detail;
-      this.configuration.selectedConfigVersionId = detail.activeConfigVersionId ?? detail.configVersions[0]?.id ?? "";
-      this.configuration.etlEnabled = detail.etlEnabled;
-      this.configuration.analysisEnabled = detail.analysisEnabled;
-      this.configuration.promptCloneSourcePageId = "";
-      this.configuration.promptCloneSourceVersionId = this.configuration.selectedConfigVersionId;
-      this.configuration.promptCompareLeftVersionId = detail.configVersions[0]?.id ?? "";
-      this.configuration.promptCompareRightVersionId = detail.configVersions[1]?.id ?? detail.configVersions[0]?.id ?? "";
-      this.hydrateConfig(detail.activeConfigVersion ?? detail.configVersions[0] ?? null);
+      this.applyLoadedConnectedPage(detail);
       this.toast = { kind: "info", message: `Đã tải chi tiết page ${detail.pageName}.` };
     });
   }
@@ -610,6 +606,19 @@ export class FrontendApp {
     this.configuration.notes = draft.notes;
   }
 
+  private applyLoadedConnectedPage(detail: NonNullable<ConfigurationState["pageDetail"]>) {
+    this.configuration.selectedPageId = detail.id;
+    this.configuration.pageDetail = detail;
+    this.configuration.selectedConfigVersionId = detail.activeConfigVersionId ?? detail.configVersions[0]?.id ?? "";
+    this.configuration.etlEnabled = detail.etlEnabled;
+    this.configuration.analysisEnabled = detail.analysisEnabled;
+    this.configuration.promptCloneSourcePageId = "";
+    this.configuration.promptCloneSourceVersionId = this.configuration.selectedConfigVersionId;
+    this.configuration.promptCompareLeftVersionId = detail.configVersions[0]?.id ?? "";
+    this.configuration.promptCompareRightVersionId = detail.configVersions[1]?.id ?? detail.configVersions[0]?.id ?? "";
+    this.hydrateConfig(detail.activeConfigVersion ?? detail.configVersions[0] ?? null);
+  }
+
   private syncConfigurationDraftFromForm(form: HTMLFormElement | null) {
     if (!form) {
       return;
@@ -684,12 +693,14 @@ export class FrontendApp {
     `;
   }
 
-  private async withPending(label: string, task: () => Promise<void>) {
+  private async withPending(label: string, task: () => Promise<void>, options?: { reloadView?: boolean }) {
     this.asyncStatus = { pending: true, label };
     this.render();
     try {
       await task();
-      await this.loadCurrentView();
+      if (options?.reloadView ?? true) {
+        await this.loadCurrentView();
+      }
     } finally {
       this.asyncStatus = { pending: false, label: null };
     }
@@ -725,10 +736,6 @@ function renderNoConnectedPageState() {
 function nullableText(value: string) {
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
-}
-
-function defaultPromptText() {
-  return ["Mục tiêu vận hành theo page:", "- Giữ distinction draft / provisional / official.", "- Bổ sung CTA chốt lịch rõ ràng."].join("\n");
 }
 
 function readManualRunInput(data: FormData, fallbackPageId: string) {

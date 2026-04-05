@@ -103,7 +103,7 @@ export class AnalysisService {
       configVersionId: pipelineRun.runGroup.frozenConfigVersionId,
       taxonomyVersionId: pipelineRun.runGroup.frozenTaxonomyVersionId,
       modelName: runtime.modelName,
-      promptHash: runtime.promptHash,
+      promptHash: runtime.pagePromptHash,
       promptVersion: runtime.promptVersion,
       outputSchemaVersion: runtime.outputSchemaVersion,
       runtimeProfileId: runtime.profileId,
@@ -119,7 +119,7 @@ export class AnalysisService {
       configVersionId: pipelineRun.runGroup.frozenConfigVersionId,
       taxonomyVersionId: pipelineRun.runGroup.frozenTaxonomyVersionId,
       modelName: runtime.modelName,
-      promptHash: runtime.promptHash,
+      promptHash: runtime.pagePromptHash,
       promptVersion: runtime.promptVersion,
       runtimeSnapshotJson: cloneJson({
         profile_id: runtime.profileId,
@@ -129,7 +129,8 @@ export class AnalysisService {
         output_schema_version: runtime.outputSchemaVersion,
         taxonomy_version_id: runtime.taxonomyVersionId,
         taxonomy_version_code: runtime.taxonomyVersionCode,
-        prompt_hash: runtime.promptHash,
+        page_prompt_hash: runtime.pagePromptHash,
+        page_prompt_version: runtime.promptVersion,
         page_prompt_text: runtime.pagePromptText,
         taxonomy_json: runtime.taxonomyJson,
         profile_json: runtime.profileJson
@@ -151,6 +152,7 @@ export class AnalysisService {
         runtime,
         bundles: batch.map((item) => item.bundle)
       });
+      const effectivePromptHash = readEffectivePromptHash(response.runtimeMetadataJson, runtime.pagePromptHash);
       if (Object.keys(response.runtimeMetadataJson).length > 0) {
         await this.repository.updateAnalysisRunRuntimeSnapshot(
           analysisRun.id,
@@ -158,23 +160,24 @@ export class AnalysisService {
             analysisRun.runtimeSnapshotJson,
             response.runtimeMetadataJson,
             runtime
-          )
+          ),
+          effectivePromptHash
         );
       }
       const resultMap = new Map(response.results.map((item) => [item.threadDayId, item]));
       const persistedResults = batch.map((item) => {
         const raw = resultMap.get(item.bundle.threadDayId);
         if (!raw) {
-          return buildFailureResult(analysisRun.id, runtime.promptHash, item, {
+          return buildFailureResult(analysisRun.id, effectivePromptHash, item, {
             reason: "missing_service_result"
           });
         }
-        return normalizeResult(analysisRun.id, runtime.promptHash, item, raw);
+        return normalizeResult(analysisRun.id, effectivePromptHash, item, raw);
       });
       await this.repository.upsertAnalysisResults(persistedResults);
     } catch (error) {
       await this.repository.upsertAnalysisResults(
-        batch.map((item) => buildFailureResult(analysisRun.id, runtime.promptHash, item, {
+        batch.map((item) => buildFailureResult(analysisRun.id, runtime.pagePromptHash, item, {
           reason: "service_call_failed",
           message: error instanceof Error ? error.message : String(error)
         }))
@@ -192,7 +195,7 @@ function buildRuntimeSnapshot(pipelineRun: AnalysisPipelineRunRecord): AnalysisR
     versionNo: ANALYSIS_RUNTIME_PROFILE_VERSION,
     modelName: ANALYSIS_RUNTIME_MODEL_NAME,
     outputSchemaVersion: ANALYSIS_OUTPUT_SCHEMA_VERSION,
-    promptHash: pipelineRun.runGroup.frozenCompiledPromptHash,
+    pagePromptHash: pipelineRun.runGroup.frozenCompiledPromptHash,
     promptVersion: pipelineRun.runGroup.frozenPromptVersion,
     configVersionId: pipelineRun.runGroup.frozenConfigVersionId,
     taxonomyVersionId: taxonomyVersion.id,
@@ -208,8 +211,8 @@ function buildRuntimeSnapshot(pipelineRun: AnalysisPipelineRunRecord): AnalysisR
       config_version_id: pipelineRun.runGroup.frozenConfigVersionId,
       taxonomy_version_id: taxonomyVersion.id,
       taxonomy_version_code: taxonomyVersion.versionCode,
-      prompt_hash: pipelineRun.runGroup.frozenCompiledPromptHash,
-      prompt_version: pipelineRun.runGroup.frozenPromptVersion
+      page_prompt_hash: pipelineRun.runGroup.frozenCompiledPromptHash,
+      page_prompt_version: pipelineRun.runGroup.frozenPromptVersion
     }
   };
 }
@@ -258,7 +261,7 @@ function buildUnitEnvelope(
     evidenceHash: hashAnalysisEvidence({
       bundle,
       runtime_identity: {
-        prompt_hash: pipelineRun.runGroup.frozenCompiledPromptHash,
+        page_prompt_hash: pipelineRun.runGroup.frozenCompiledPromptHash,
         prompt_version: pipelineRun.runGroup.frozenPromptVersion,
         taxonomy_version_id: pipelineRun.runGroup.frozenTaxonomyVersionId,
         output_schema_version: ANALYSIS_OUTPUT_SCHEMA_VERSION
@@ -333,13 +336,18 @@ function mergeRuntimeSnapshot(
       profile_id: runtime.profileId,
       version_no: runtime.versionNo,
       model_name: runtime.modelName,
-      prompt_hash: runtime.promptHash,
-      prompt_version: runtime.promptVersion,
+      page_prompt_hash: runtime.pagePromptHash,
+      page_prompt_version: runtime.promptVersion,
       taxonomy_version_id: runtime.taxonomyVersionId,
       taxonomy_version_code: runtime.taxonomyVersionCode,
       output_schema_version: runtime.outputSchemaVersion
     }
   };
+}
+
+function readEffectivePromptHash(runtimeMetadataJson: Record<string, unknown>, fallback: string) {
+  const value = runtimeMetadataJson.effective_prompt_hash;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 
 function buildFailureResult(

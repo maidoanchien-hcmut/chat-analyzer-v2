@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { AppError } from "../../core/errors.ts";
 import {
-  buildCompiledPromptText,
+  buildPagePromptIdentityText,
   DEFAULT_PAGE_PROMPT,
   defaultOpeningRulesConfig,
   defaultSchedulerConfig,
   defaultTagMappingConfig,
-  hashCompiledPrompt,
+  hashPagePromptIdentity,
   hashEtlConfig,
   nextPromptVersion
 } from "./chat_extractor.artifacts.ts";
@@ -75,8 +75,8 @@ type ChatExtractorServiceDependencies = {
 
 type RuntimeSnapshot = {
   configVersion: PageConfigVersionRecord;
-  compiledPromptText: string;
-  compiledPromptHash: string;
+  promptIdentityText: string;
+  promptIdentityHash: string;
   promptIdentity: PagePromptIdentityRecord | {
     id: null;
     connectedPageId: string;
@@ -223,7 +223,7 @@ export class ChatExtractorService {
         requested_target_date: body.job.targetDate,
         will_use_config_version: snapshot.configVersion.versionNo,
         will_use_prompt_version: snapshot.promptIdentity.promptVersion,
-        will_use_compiled_prompt_hash: snapshot.compiledPromptHash
+        will_use_compiled_prompt_hash: snapshot.promptIdentityHash
       },
       child_runs: plannedRuns.map((run) => serializePreviewChildRun(run, snapshot))
     };
@@ -267,7 +267,7 @@ export class ChatExtractorService {
       requestedTargetDate: body.job.targetDate ? new Date(`${body.job.targetDate}T00:00:00.000Z`) : null,
       frozenConfigVersionId: snapshot.configVersion.id,
       frozenTaxonomyVersionId: snapshot.configVersion.analysisTaxonomyVersionId,
-      frozenCompiledPromptHash: snapshot.compiledPromptHash,
+      frozenCompiledPromptHash: snapshot.promptIdentityHash,
       frozenPromptVersion: snapshot.promptIdentity.promptVersion,
       publishIntent: derivePublishIntent(plannedRuns),
       status: "queued",
@@ -409,31 +409,31 @@ export class ChatExtractorService {
       throw new AppError(400, "CHAT_EXTRACTOR_ACTIVE_CONFIG_REQUIRED", `Page ${page.page.id} chưa có active config version.`);
     }
 
-    const compiledPromptText = buildCompiledPromptText({
+    const promptIdentityText = buildPagePromptIdentityText({
       promptText: configVersion.promptText,
       taxonomyJson: configVersion.analysisTaxonomyVersion.taxonomyJson
     });
-    const compiledPromptHash = hashCompiledPrompt(compiledPromptText);
-    const existingIdentity = await chatExtractorRepository.getPromptIdentityByHash(page.page.id, compiledPromptHash);
+    const promptIdentityHash = hashPagePromptIdentity(promptIdentityText);
+    const existingIdentity = await chatExtractorRepository.getPromptIdentityByHash(page.page.id, promptIdentityHash);
     const promptIdentity = existingIdentity ?? {
       id: null,
       connectedPageId: page.page.id,
-      compiledPromptHash,
+      compiledPromptHash: promptIdentityHash,
       promptVersion: nextPromptVersion((await chatExtractorRepository.listPromptIdentities(page.page.id)).map((item) => item.promptVersion)),
-      compiledPromptText,
+      compiledPromptText: promptIdentityText,
       createdAt: null
     };
 
     if (persistPromptIdentity && promptIdentity.id === null) {
       const created = await chatExtractorRepository.createPromptIdentity({
         connectedPageId: page.page.id,
-        compiledPromptHash,
-        compiledPromptText
+        compiledPromptHash: promptIdentityHash,
+        compiledPromptText: promptIdentityText
       });
       return {
         configVersion,
-        compiledPromptText,
-        compiledPromptHash,
+        promptIdentityText,
+        promptIdentityHash,
         promptIdentity: created,
         etlConfigHash: hashEtlConfig({
           tagMapping: configVersion.tagMappingJson,
@@ -445,8 +445,8 @@ export class ChatExtractorService {
 
     return {
       configVersion,
-      compiledPromptText,
-      compiledPromptHash,
+      promptIdentityText,
+      promptIdentityHash,
       promptIdentity,
       etlConfigHash: hashEtlConfig({
         tagMapping: configVersion.tagMappingJson,
@@ -642,7 +642,7 @@ function serializePreviewChildRun(run: PlannedChildRun, snapshot: RuntimeSnapsho
     historical_overwrite_required: run.historicalOverwriteRequired,
     will_use_config_version: snapshot.configVersion.versionNo,
     will_use_prompt_version: snapshot.promptIdentity.promptVersion,
-    will_use_compiled_prompt_hash: snapshot.compiledPromptHash
+    will_use_compiled_prompt_hash: snapshot.promptIdentityHash
   };
 }
 

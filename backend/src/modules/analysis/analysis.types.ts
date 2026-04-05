@@ -4,7 +4,7 @@ export type AnalysisRuntimeSnapshot = {
   modelName: string;
   promptVersion: string;
   outputSchemaVersion: string;
-  promptHash: string;
+  pagePromptHash: string;
   configVersionId: string;
   taxonomyVersionId: string;
   taxonomyVersionCode: string;

@@ -12,12 +12,8 @@ export const DEFAULT_PAGE_PROMPT = [
   "Không suy diễn ngoài nội dung hội thoại."
 ].join(" ");
 
-export const SYSTEM_PROMPT_TEXT = [
-  "Bạn là hệ thống phân tích hội thoại cho một công ty duy nhất tại Việt Nam.",
-  "Nhiệm vụ của bạn là đọc hội thoại đã được ETL chuẩn hóa và chuẩn bị cho các bước AI downstream."
-].join(" ");
-
 export const OUTPUT_CONTRACT_VERSION = "conversation_analysis.v1";
+export const PAGE_PROMPT_IDENTITY_VERSION = "page_prompt_identity.v1";
 export const DEFAULT_ANALYSIS_TAXONOMY = {
   version: 1,
   categories: {}
@@ -49,20 +45,20 @@ export function defaultSchedulerConfig(timezone: string): SchedulerConfig {
   };
 }
 
-export function buildCompiledPromptText(input: {
+export function buildPagePromptIdentityText(input: {
   promptText: string;
   taxonomyJson: unknown;
 }) {
   return [
-    SYSTEM_PROMPT_TEXT,
+    `page_prompt_identity_version=${PAGE_PROMPT_IDENTITY_VERSION}`,
     `output_contract_version=${OUTPUT_CONTRACT_VERSION}`,
     `taxonomy=${stableStringify(input.taxonomyJson)}`,
     `page_prompt=${input.promptText.trim()}`
   ].join("\n\n");
 }
 
-export function hashCompiledPrompt(compiledPromptText: string) {
-  return hashStableValue({ compiledPromptText });
+export function hashPagePromptIdentity(promptIdentityText: string) {
+  return hashStableValue({ promptIdentityText });
 }
 
 export function hashEtlConfig(input: {

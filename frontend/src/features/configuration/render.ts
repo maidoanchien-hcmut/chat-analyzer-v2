@@ -4,6 +4,12 @@ import { escapeHtml } from "../../shared/html.ts";
 export function renderConfiguration(configuration: ConfigurationState, onboarding: OnboardingState) {
   const compareLeft = configuration.pageDetail?.configVersions.find((item) => item.id === configuration.promptCompareLeftVersionId) ?? null;
   const compareRight = configuration.pageDetail?.configVersions.find((item) => item.id === configuration.promptCompareRightVersionId) ?? null;
+  const onboardingTimezones = dedupeTimezones([
+    "Asia/Ho_Chi_Minh",
+    onboarding.timezone,
+    ...configuration.connectedPages.map((page) => page.businessTimezone),
+    configuration.pageDetail?.businessTimezone ?? null
+  ]);
 
   return `
     <section class="feature-stack">
@@ -12,6 +18,7 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
           <div>
             <p class="eyebrow">HTTP-first control-plane</p>
             <h2>Cấu hình</h2>
+            <p class="muted-copy">Giữ onboarding đủ nhanh cho lazy operator, nhưng luôn có lane riêng để operator đang vận hành mở page và chỉnh config ngay.</p>
           </div>
           <button data-action="refresh-control-pages">Tải page kết nối</button>
         </div>
@@ -23,17 +30,18 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
           <button data-route="?view=configuration&configTab=scheduler" class="${configuration.activeTab === "scheduler" ? "tab-active" : ""}">Scheduler và thông báo</button>
         </div>
       </article>
-      <section class="two-column-grid">
-        <article class="panel-card ${configuration.activeTab === "page-info" ? "panel-focus" : ""}">
+      <section class="configuration-shell">
+        <div class="configuration-sidebar">
+        <article class="panel-card panel-tight ${configuration.activeTab === "page-info" ? "panel-focus" : ""}">
           <div class="section-headline">
             <div>
-              <h3>Onboarding: list-from-token -> register</h3>
+              <h3>Onboarding nhanh</h3>
               <p class="muted-copy">Flow tối thiểu là nhập token, chọn page, activate. Sample/test là đường nâng cao, không phải điều kiện activate.</p>
             </div>
           </div>
           <form data-form="onboarding-token">
             <label><span>User access token</span><input name="token" type="password" value="${escapeHtml(onboarding.token)}" /></label>
-            <label><span>Timezone</span><input name="timezone" value="${escapeHtml(onboarding.timezone)}" /></label>
+            <label><span>Timezone</span><select name="timezone">${renderOptions(onboardingTimezones, onboarding.timezone)}</select></label>
             <label class="inline-check"><input type="checkbox" name="etlEnabled" ${onboarding.etlEnabled ? "checked" : ""} /> bật ETL</label>
             <label class="inline-check"><input type="checkbox" name="analysisEnabled" ${onboarding.analysisEnabled ? "checked" : ""} /> bật AI</label>
             <button type="submit">Tải page từ token</button>
@@ -53,8 +61,13 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
             <p>Tag taxonomy mới mặc định đi vào <code>noise</code>, opening rules là optional, prompt preview là flow tinh chỉnh riêng và không đổi publish pointer.</p>
           </div>
         </article>
-        <article class="panel-card ${configuration.activeTab === "taxonomy" || configuration.activeTab === "opening-rules" ? "panel-focus" : ""}">
-          <h3>Page context và config ownership</h3>
+        <article class="panel-card panel-tight ${configuration.activeTab === "page-info" ? "panel-focus" : ""}">
+          <div class="section-headline">
+            <div>
+              <h3>Page đang vận hành</h3>
+              <p class="muted-copy">Normal operator vào thẳng lane này để mở page đã có, tải active config và chỉnh tiếp mà không cần đi lại flow token.</p>
+            </div>
+          </div>
           <form data-form="configuration-load-page">
             <label>
               <span>Connected page</span>
@@ -63,7 +76,7 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                 ${configuration.connectedPages.map((page) => `<option value="${escapeHtml(page.id)}" ${page.id === configuration.selectedPageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`).join("")}
               </select>
             </label>
-            <button type="submit">Tải chi tiết page</button>
+            <button type="submit">Tải cấu hình page đã chọn</button>
           </form>
           ${configuration.pageDetail ? `
             <div class="meta-list">
@@ -80,8 +93,8 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
             </div>
           ` : "<p class='muted-copy'>Chi tiết page sẽ hiện sau khi chọn page.</p>"}
         </article>
-      </section>
-      <article class="panel-card ${configuration.activeTab === "taxonomy" || configuration.activeTab === "opening-rules" || configuration.activeTab === "prompt-profile" || configuration.activeTab === "scheduler" ? "panel-focus" : ""}">
+        </div>
+        <article class="panel-card configuration-main ${configuration.activeTab === "taxonomy" || configuration.activeTab === "opening-rules" || configuration.activeTab === "prompt-profile" || configuration.activeTab === "scheduler" ? "panel-focus" : ""}">
         <div class="section-headline">
           <h3>Config version owner-clean</h3>
           <div class="button-row">
@@ -169,7 +182,7 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                 </label>
                 <div class="button-row align-end"><button type="button" data-action="clone-prompt-from-page">Clone từ page khác</button></div>
               </div>
-              <label><span>Prompt text</span><textarea name="promptText" rows="8">${escapeHtml(configuration.promptText)}</textarea></label>
+              <label><span>Prompt text</span><textarea name="promptText" rows="8" placeholder="Prompt sẽ lấy từ active config của backend sau khi tải page.">${escapeHtml(configuration.promptText)}</textarea></label>
               <div class="banner banner-warning">
                 <strong>Semantics của Chạy thử</strong>
                 <p>Chạy thử chỉ tạo preview sample/inference trong workspace cấu hình, không đổi publish pointer và không đồng nghĩa publish dashboard.</p>
@@ -261,12 +274,17 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
           </div>
         ` : "<p class='muted-copy'>Prompt preview sample, evidence bundle và field explanations sẽ hiện tại đây.</p>"}
       </article>
+      </section>
     </section>
   `;
 }
 
 function renderOptions(values: string[], selectedValue: string) {
   return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
+}
+
+function dedupeTimezones(values: Array<string | null>) {
+  return [...new Set(values.map((value) => value?.trim() ?? "").filter(Boolean))];
 }
 
 function renderPromptAuditCard(

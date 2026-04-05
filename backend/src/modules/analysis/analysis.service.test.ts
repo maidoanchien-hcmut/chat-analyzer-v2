@@ -7,6 +7,80 @@ import type {
 } from "./analysis.types.ts";
 
 describe("analysis service", () => {
+  it("separates backend page prompt identity from service effective prompt metadata", async () => {
+    const repository = createRepositoryStub({
+      existingResults: [],
+      hasExistingAnalysisRun: false
+    });
+    const service = new AnalysisService({
+      repository: repository as never,
+      client: {
+        analyzeConversations: async (input) => ({
+          results: input.bundles.map((bundle) => ({
+            threadDayId: bundle.threadDayId,
+            resultStatus: "succeeded",
+            promptHash: "service-effective-hash",
+            openingThemeCode: "appointment_booking",
+            openingThemeReason: "Đặt lịch",
+            customerMoodCode: "neutral",
+            primaryNeedCode: "appointment_booking",
+            primaryTopicCode: "appointment_booking",
+            journeyCode: "revisit",
+            closingOutcomeInferenceCode: "follow_up",
+            processRiskLevelCode: "low",
+            processRiskReasonText: null,
+            staffAssessmentsJson: [],
+            evidenceUsedJson: { source: "service" },
+            fieldExplanationsJson: {},
+            supportingMessageIdsJson: [bundle.firstMeaningfulMessageId ?? "message-1"],
+            usageJson: {
+              provider: "deterministic_dev",
+              token_estimate: 9
+            },
+            costMicros: 13,
+            failureInfoJson: null
+          })),
+          runtimeMetadataJson: {
+            effective_prompt_hash: "service-effective-hash",
+            system_prompt_version: "service_system.v1"
+          }
+        })
+      },
+      batchSize: 10
+    });
+
+    const summary = await service.executeLoadedRun("pipeline-run-1");
+
+    expect(repository.createdAnalysisRunInputs).toHaveLength(1);
+    expect(repository.createdAnalysisRunInputs[0]?.promptHash).toBe("backend-page-prompt-hash");
+    expect(repository.updatedRuntimeSnapshots).toHaveLength(1);
+    expect(repository.updatedRuntimeSnapshots[0]?.runtimeSnapshotJson).toMatchObject({
+      service_runtime: {
+        effective_prompt_hash: "service-effective-hash",
+        system_prompt_version: "service_system.v1"
+      },
+      backend_runtime: {
+        profile_id: "conversation-analysis",
+        version_no: 1,
+        model_name: "service-managed",
+        page_prompt_hash: "backend-page-prompt-hash",
+        page_prompt_version: "A",
+        taxonomy_version_id: "taxonomy-version-1",
+        taxonomy_version_code: "default.v1",
+        output_schema_version: "conversation_analysis.v2"
+      }
+    });
+    expect(repository.updatedRuntimeSnapshots[0]?.runtimeSnapshotJson.backend_runtime).not.toHaveProperty("prompt_hash");
+    expect(repository.updatedAnalysisRunPromptHashes).toEqual([
+      {
+        analysisRunId: "analysis-run-1",
+        promptHash: "service-effective-hash"
+      }
+    ]);
+    expect(summary.promptHash).toBe("service-effective-hash");
+    expect(summary.promptVersion).toBe("A");
+  });
+
   it("resumes an existing analysis run and only sends pending thread days", async () => {
     const repository = createRepositoryStub();
     const clientCalls: ConversationAnalysisRequest[] = [];
@@ -181,10 +255,12 @@ describe("analysis service", () => {
 function createRepositoryStub(overrides?: {
   existingResults?: Array<{ analysisRunId: string; threadDayId: string; evidenceHash: string; resultStatus: string }>;
   summaryOverride?: Partial<AnalysisExecutionSummary>;
+  hasExistingAnalysisRun?: boolean;
 }) {
   const pipelineRun = createPipelineRun();
   const threadDays = createThreadDays();
   const analysisRun = createAnalysisRun();
+  const hasExistingAnalysisRun = overrides?.hasExistingAnalysisRun ?? true;
   const existingResults = overrides?.existingResults ?? [
     {
       analysisRunId: "analysis-run-1",
@@ -197,6 +273,8 @@ function createRepositoryStub(overrides?: {
   const repository = {
     markAnalysisRunRunningCalls: [] as string[],
     updatedRuntimeSnapshots: [] as Array<{ analysisRunId: string; runtimeSnapshotJson: Record<string, unknown> }>,
+    updatedAnalysisRunPromptHashes: [] as Array<{ analysisRunId: string; promptHash: string }>,
+    createdAnalysisRunInputs: [] as Array<{ promptHash: string; promptVersion: string; runtimeSnapshotJson: Record<string, unknown> }>,
     upsertedResults: [] as any[],
     updatedPipelineMetrics: null as AnalysisExecutionSummary | null,
     restorePipelineRunLoadedCalls: [] as string[],
@@ -208,10 +286,14 @@ function createRepositoryStub(overrides?: {
       return threadDays;
     },
     async findLatestMatchingAnalysisRun() {
-      return analysisRun;
+      return hasExistingAnalysisRun ? analysisRun : null;
     },
-    async createAnalysisRun() {
-      throw new Error("createAnalysisRun should not be called in this test");
+    async createAnalysisRun(input: { promptHash: string; promptVersion: string; runtimeSnapshotJson: Record<string, unknown> }) {
+      repository.createdAnalysisRunInputs.push(input);
+      analysisRun.promptHash = input.promptHash;
+      analysisRun.promptVersion = input.promptVersion;
+      analysisRun.runtimeSnapshotJson = input.runtimeSnapshotJson;
+      return analysisRun;
     },
     async listAnalysisResults() {
       return existingResults;
@@ -220,8 +302,17 @@ function createRepositoryStub(overrides?: {
       repository.markAnalysisRunRunningCalls.push(analysisRunId);
       return analysisRun;
     },
-    async updateAnalysisRunRuntimeSnapshot(analysisRunId: string, runtimeSnapshotJson: Record<string, unknown>) {
+    async updateAnalysisRunRuntimeSnapshot(
+      analysisRunId: string,
+      runtimeSnapshotJson: Record<string, unknown>,
+      promptHash?: string
+    ) {
       repository.updatedRuntimeSnapshots.push({ analysisRunId, runtimeSnapshotJson });
+      if (promptHash) {
+        repository.updatedAnalysisRunPromptHashes.push({ analysisRunId, promptHash });
+        analysisRun.promptHash = promptHash;
+      }
+      analysisRun.runtimeSnapshotJson = runtimeSnapshotJson;
       return analysisRun;
     },
     async upsertAnalysisResults(inputs: any[]) {
@@ -240,15 +331,11 @@ function createRepositoryStub(overrides?: {
         totalUsageJson: {
           token_estimate_total: 11
         },
-        promptHash: "backend-prompt-hash",
-        promptVersion: "A",
+        promptHash: analysisRun.promptHash,
+        promptVersion: analysisRun.promptVersion,
         taxonomyVersionId: "taxonomy-version-1",
         outputSchemaVersion: "conversation_analysis.v2",
-        runtimeSnapshotJson: {
-          service_runtime: {
-            effective_prompt_hash: "service-effective-hash"
-          }
-        },
+        runtimeSnapshotJson: analysisRun.runtimeSnapshotJson,
         resumed: false,
         skippedThreadDayIds: []
       };
@@ -279,7 +366,7 @@ function createAnalysisRun() {
     taxonomyVersionId: "taxonomy-version-1",
     snapshotIdentityKey: "snapshot-key-1",
     modelName: "service-managed",
-    promptHash: "backend-prompt-hash",
+    promptHash: "backend-page-prompt-hash",
     promptVersion: "A",
     runtimeSnapshotJson: {},
     outputSchemaVersion: "conversation_analysis.v2",
@@ -307,7 +394,7 @@ function createPipelineRun() {
       id: "run-group-1",
       frozenConfigVersionId: "config-version-1",
       frozenTaxonomyVersionId: "taxonomy-version-1",
-      frozenCompiledPromptHash: "backend-prompt-hash",
+      frozenCompiledPromptHash: "backend-page-prompt-hash",
       frozenPromptVersion: "A",
       frozenConfigVersion: {
         id: "config-version-1",
@@ -418,8 +505,8 @@ function buildExpectedEvidenceHash(threadDay: ReturnType<typeof createThreadDay>
         isOpeningBlockMessage: message.isOpeningBlockMessage
       }))
     },
-    runtime_identity: {
-      prompt_hash: pipelineRun.runGroup.frozenCompiledPromptHash,
+      runtime_identity: {
+      page_prompt_hash: pipelineRun.runGroup.frozenCompiledPromptHash,
       prompt_version: pipelineRun.runGroup.frozenPromptVersion,
       taxonomy_version_id: pipelineRun.runGroup.frozenTaxonomyVersionId,
       output_schema_version: ANALYSIS_OUTPUT_SCHEMA_VERSION

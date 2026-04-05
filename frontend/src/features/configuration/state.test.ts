@@ -209,6 +209,32 @@ describe("configuration workflow", () => {
     expect(html).toContain("Field explanations");
     expect(html).toContain("risk_level");
   });
+
+  it("renders onboarding timezone as a select and shows a dedicated lane for normal operators", () => {
+    const configuration = createConfigurationState();
+    const onboarding = createOnboardingState();
+
+    const html = renderConfiguration(configuration, onboarding);
+
+    expect(html).toContain("<select name=\"timezone\"");
+    expect(html).not.toContain("<input name=\"timezone\"");
+    expect(html).toContain("Page đang vận hành");
+    expect(html).toContain("Tải cấu hình page đã chọn");
+  });
+
+  it("renders prompt editor empty until a backend config is loaded", () => {
+    const configuration = {
+      ...createConfigurationState(),
+      pageDetail: null,
+      promptText: ""
+    };
+    const onboarding = createOnboardingState();
+
+    const html = renderConfiguration(configuration, onboarding);
+
+    expect(html).toContain("placeholder=\"Prompt sẽ lấy từ active config của backend sau khi tải page.\"");
+    expect(html).not.toContain("Giữ distinction draft / provisional / official.");
+  });
 });
 
 function createConfigurationState(): ConfigurationState {
