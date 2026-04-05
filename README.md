@@ -66,7 +66,9 @@ Extraction endpoints hiện hành:
 - `GET /read-models/overview`
 - `GET /read-models/exploration`
 - `GET /read-models/staff-performance`
+- `GET /read-models/thread-history`
 - `GET /read-models/page-comparison`
+- `GET /read-models/health`
 - `GET /read-models/export-workbook`
 
 Schema extraction seam hiện dùng:
@@ -97,15 +99,17 @@ Frontend đã được rewrite thành app TypeScript thuần owner-clean theo `d
 
 - đúng 7 view: `Tổng quan`, `Khám phá dữ liệu`, `Hiệu quả nhân viên`, `Lịch sử hội thoại`, `So sánh trang`, `Vận hành`, `Cấu hình`
 - app shell + query-state + filter bar mới; business filters persist giữa các view business
-- export `.xlsx` theo source-of-truth mới đã được chốt là workflow riêng; code frontend hiện vẫn chưa đồng bộ và đang được theo dõi trong review/debt docs
+- export `.xlsx` theo source-of-truth mới đã được chốt là workflow riêng
 - adapter matrix rõ ràng:
-  - business views dùng `demo/hybrid`
+  - business views dùng `http-first`
   - `Vận hành`, `Cấu hình`, onboarding dùng `http-first`
+  - sample `prompt preview` vẫn là fallback cục bộ, không phải business runtime path
 - contract legacy `main.ts/render.ts/api.ts/types.ts/utils.ts` cũ không còn là runtime path
 - smoke tests khóa các flow pinned:
   - `list-from-token -> register`
   - `create config version -> activate`
   - `preview -> execute -> get run detail -> publish`
+  - `catalog/overview/thread-history/export` qua `/read-models/*`
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\frontend
@@ -137,4 +141,5 @@ uv run python main.py
 ## Ghi chú
 
 - Backend runtime hiện có seam `analysis` + `read-models` owner-clean; business dashboard/export không còn được phép đọc trực tiếp ODS/raw tables.
+- Frontend business runtime mặc định đọc cùng source publish thật qua backend HTTP; `demo/business-adapter.ts` chỉ còn cho test/offline helper.
 - Repo này là dev environment; backward compatibility dữ liệu cũ không phải mục tiêu.

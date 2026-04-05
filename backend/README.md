@@ -52,12 +52,20 @@ Schema extraction hiện theo owner-clean seam:
 - `GET /read-models/overview`
 - `GET /read-models/exploration`
 - `GET /read-models/staff-performance`
+- `GET /read-models/thread-history`
 - `GET /read-models/page-comparison`
+- `GET /read-models/health`
 - `GET /read-models/export-workbook`
 
 Run group freeze `page_config_version`, taxonomy version, và compiled prompt identity; `pipeline_run` chỉ giữ coverage/request/metrics/publish state. `go-worker` nhận manifest versioned từ backend và load ODS vào `thread/thread_day/message`.
 
 Backend runtime hiện mount cả seam `analysis` và `read-models` mới. Sau khi `etl_and_ai` hoàn tất, backend sẽ materialize semantic mart per `pipeline_run`; dashboard/export phải resolve active snapshot qua `active_publish_snapshot`, không suy bằng `latest run`.
+
+`read-models` hiện còn owner luôn các payload:
+
+- thread workspace 4 tab (`thread-history`)
+- health summary cho `backend/database/queue/AI service/go-worker`
+- publish-facing preview/export metadata từ snapshot đã resolve
 
 Prisma local flow:
 
