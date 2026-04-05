@@ -2,7 +2,7 @@
 
 Monorepo cho ứng dụng `chat-analyzer` trong dev environment:
 
-- `backend/`: owner của extraction control-plane, Prisma schema, manifest generation, publish semantics, và ODS persistence.
+- `backend/`: owner của extraction control-plane, analysis orchestration, semantic mart/publish semantics, read APIs, và ODS persistence.
 - `frontend/`: shell vận hành tối giản bằng HTML/CSS/TypeScript thuần, chỉ bám contract extraction mới của backend.
 - `service/`: AI service gRPC bằng Python; hiện contract nội bộ đã đổi sang `pipeline_run/thread_day`.
 - `docs/`: source-of-truth thiết kế và implementation plan.
@@ -58,6 +58,16 @@ Extraction endpoints hiện hành:
 - `POST /chat-extractor/runs/:id/publish`
 - `GET /chat-extractor/run-groups/:id`
 - `GET /chat-extractor/runs/:id`
+- `POST /analysis/runs/:id/execute`
+- `GET /analysis/runs/:id`
+- `GET /read-models/catalog`
+- `POST /read-models/runs/:id/materialize`
+- `GET /read-models/runs/:id/preview`
+- `GET /read-models/overview`
+- `GET /read-models/exploration`
+- `GET /read-models/staff-performance`
+- `GET /read-models/page-comparison`
+- `GET /read-models/export-workbook`
 
 Schema extraction seam hiện dùng:
 
@@ -71,6 +81,15 @@ Schema extraction seam hiện dùng:
 - `thread_day`
 - `message`
 - `thread_customer_link`
+- `analysis_run`
+- `analysis_result`
+- `dim_date`
+- `dim_page`
+- `dim_staff`
+- `fact_thread_day`
+- `fact_staff_thread_day`
+- `active_publish_snapshot`
+- `publish_history`
 
 ## Frontend
 
@@ -117,5 +136,5 @@ uv run python main.py
 
 ## Ghi chú
 
-- Backend runtime hiện chỉ giữ extraction control-plane; các route `analysis` và `read_models` legacy đã bị gỡ khỏi runtime path.
+- Backend runtime hiện có seam `analysis` + `read-models` owner-clean; business dashboard/export không còn được phép đọc trực tiếp ODS/raw tables.
 - Repo này là dev environment; backward compatibility dữ liệu cũ không phải mục tiêu.

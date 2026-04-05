@@ -21,6 +21,15 @@ Schema extraction hiện theo owner-clean seam:
 - `thread_day`
 - `message`
 - `thread_customer_link`
+- `analysis_run`
+- `analysis_result`
+- `dim_date`
+- `dim_page`
+- `dim_staff`
+- `fact_thread_day`
+- `fact_staff_thread_day`
+- `active_publish_snapshot`
+- `publish_history`
 
 `chat-extractor` là owner của control-plane và manual execution. Các endpoint local hiện có:
 
@@ -35,10 +44,20 @@ Schema extraction hiện theo owner-clean seam:
 - `POST /chat-extractor/runs/:id/publish`
 - `GET /chat-extractor/run-groups/:id`
 - `GET /chat-extractor/runs/:id`
+- `POST /analysis/runs/:id/execute`
+- `GET /analysis/runs/:id`
+- `GET /read-models/catalog`
+- `POST /read-models/runs/:id/materialize`
+- `GET /read-models/runs/:id/preview`
+- `GET /read-models/overview`
+- `GET /read-models/exploration`
+- `GET /read-models/staff-performance`
+- `GET /read-models/page-comparison`
+- `GET /read-models/export-workbook`
 
 Run group freeze `page_config_version`, taxonomy version, và compiled prompt identity; `pipeline_run` chỉ giữ coverage/request/metrics/publish state. `go-worker` nhận manifest versioned từ backend và load ODS vào `thread/thread_day/message`.
 
-Backend runtime hiện chỉ mount extraction control-plane và run APIs. Các route `analysis` và `read_models` cũ đã bị loại khỏi runtime path để tránh giữ seam HTTP legacy không còn khớp với schema mới.
+Backend runtime hiện mount cả seam `analysis` và `read-models` mới. Sau khi `etl_and_ai` hoàn tất, backend sẽ materialize semantic mart per `pipeline_run`; dashboard/export phải resolve active snapshot qua `active_publish_snapshot`, không suy bằng `latest run`.
 
 Prisma local flow:
 
