@@ -22,6 +22,10 @@ model ConnectedPage {
   configVersions         PageConfigVersion[] @relation("ConnectedPageConfigVersions")
   promptIdentities       PagePromptIdentity[]
   threads                Thread[]
+  pageDimension          DimPage?
+  staffDimensions        DimStaff[]
+  activePublishSnapshots ActivePublishSnapshot[]
+  publishHistory         PublishHistory[]
 
   @@index([etlEnabled, updatedAt(sort: Desc)])
   @@index([analysisEnabled, updatedAt(sort: Desc)])
@@ -53,6 +57,10 @@ model AnalysisTaxonomyVersion {
   configVersions  PageConfigVersion[]
   frozenRunGroups PipelineRunGroup[]
   analysisRuns    AnalysisRun[]
+  factThreadDays  FactThreadDay[]
+  factStaffThreadDays FactStaffThreadDay[]
+  activePublishSnapshots ActivePublishSnapshot[]
+  publishHistory PublishHistory[]
 
   @@index([isActive, createdAt(sort: Desc)])
   @@map("analysis_taxonomy_version")
@@ -75,6 +83,10 @@ model PageConfigVersion {
   activeForPages            ConnectedPage[]         @relation("ConnectedPageActiveConfigVersion")
   runGroups                 PipelineRunGroup[]
   analysisRuns              AnalysisRun[]
+  factThreadDays            FactThreadDay[]
+  factStaffThreadDays       FactStaffThreadDay[]
+  activePublishSnapshots    ActivePublishSnapshot[]
+  publishHistory            PublishHistory[]
 
   @@unique([connectedPageId, versionNo])
   @@index([connectedPageId, createdAt(sort: Desc)])
@@ -135,6 +147,10 @@ model PipelineRun {
   runGroup                      PipelineRunGroup @relation(fields: [runGroupId], references: [id], onDelete: Cascade, onUpdate: Cascade)
   threadDays                    ThreadDay[]
   analysisRuns                  AnalysisRun[]
+  factThreadDays                FactThreadDay[]
+  factStaffThreadDays           FactStaffThreadDay[]
+  activePublishSnapshots        ActivePublishSnapshot[]
+  publishHistory                PublishHistory[]
   supersedesRun                 PipelineRun?     @relation("PipelineRunSupersedesRun", fields: [supersedesRunId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   supersededByRun               PipelineRun?     @relation("PipelineRunSupersededByRun", fields: [supersededByRunId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   supersededChildren            PipelineRun[]    @relation("PipelineRunSupersedesRun")
@@ -307,6 +323,8 @@ model AnalysisRun {
   configVersion       PageConfigVersion       @relation(fields: [configVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   taxonomyVersion     AnalysisTaxonomyVersion @relation(fields: [taxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   analysisResults     AnalysisResult[]
+  factThreadDays      FactThreadDay[]
+  factStaffThreadDays FactStaffThreadDay[]
 
   @@unique([pipelineRunId, snapshotIdentityKey])
   @@index([pipelineRunId, createdAt(sort: Desc)])
@@ -346,4 +364,200 @@ model AnalysisResult {
   @@index([threadDayId])
   @@index([resultStatus, createdAt(sort: Desc)])
   @@map("analysis_result")
+}
+
+model DimDate {
+  dateKey                Int                     @id @map("date_key")
+  fullDate               DateTime                @unique @map("full_date") @db.Date
+  dayOfWeek              Int                     @map("day_of_week")
+  monthNo                Int                     @map("month_no")
+  yearNo                 Int                     @map("year_no")
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  factThreadDays         FactThreadDay[]
+  factStaffThreadDays    FactStaffThreadDay[]
+  activePublishSnapshots ActivePublishSnapshot[]
+  publishHistory         PublishHistory[]
+
+  @@index([fullDate])
+  @@map("dim_date")
+}
+
+model DimPage {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  connectedPageId        String                  @unique @map("connected_page_id") @db.Uuid
+  pageName               String                  @map("page_name")
+  pancakePageId          String                  @map("pancake_page_id")
+  businessTimezone       String                  @map("business_timezone")
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  connectedPage          ConnectedPage           @relation(fields: [connectedPageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  factThreadDays         FactThreadDay[]
+  factStaffThreadDays    FactStaffThreadDay[]
+  activePublishSnapshots ActivePublishSnapshot[]
+  publishHistory         PublishHistory[]
+
+  @@index([pageName])
+  @@map("dim_page")
+}
+
+model DimStaff {
+  id                 String               @id @default(uuid()) @db.Uuid
+  connectedPageId    String               @map("connected_page_id") @db.Uuid
+  staffName          String               @map("staff_name")
+  displayLabel       String               @map("display_label")
+  createdAt          DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  connectedPage      ConnectedPage        @relation(fields: [connectedPageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  factStaffThreadDays FactStaffThreadDay[]
+
+  @@unique([connectedPageId, staffName])
+  @@index([connectedPageId, displayLabel])
+  @@map("dim_staff")
+}
+
+model FactThreadDay {
+  id                               String                  @id @default(uuid()) @db.Uuid
+  pipelineRunId                    String                  @map("pipeline_run_id") @db.Uuid
+  analysisRunId                    String                  @map("analysis_run_id") @db.Uuid
+  configVersionId                  String                  @map("config_version_id") @db.Uuid
+  taxonomyVersionId                String                  @map("taxonomy_version_id") @db.Uuid
+  dateKey                          Int                     @map("date_key")
+  pageKey                          String                  @map("page_key") @db.Uuid
+  threadDayId                      String                  @map("thread_day_id") @db.Uuid
+  threadId                         String                  @map("thread_id") @db.Uuid
+  isNewInbox                       Boolean                 @map("is_new_inbox")
+  officialRevisitLabel             String                  @map("official_revisit_label")
+  openingThemeCode                 String                  @map("opening_theme_code")
+  primaryNeedCode                  String                  @map("primary_need_code")
+  primaryTopicCode                 String                  @map("primary_topic_code")
+  officialClosingOutcomeCode       String                  @map("official_closing_outcome_code")
+  customerMoodCode                 String                  @map("customer_mood_code")
+  processRiskLevelCode             String                  @map("process_risk_level_code")
+  entrySourceType                  String?                 @map("entry_source_type")
+  entryPostId                      String?                 @map("entry_post_id")
+  entryAdId                        String?                 @map("entry_ad_id")
+  threadCount                      Int                     @default(1) @map("thread_count")
+  messageCount                     Int                     @default(0) @map("message_count")
+  firstStaffResponseSeconds        Int?                    @map("first_staff_response_seconds")
+  avgStaffResponseSeconds          Int?                    @map("avg_staff_response_seconds")
+  aiCostMicros                     BigInt                  @default(0) @map("ai_cost_micros")
+  promptHash                       String                  @map("prompt_hash")
+  promptVersion                    String                  @map("prompt_version")
+  modelName                        String                  @map("model_name")
+  outputSchemaVersion              String                  @map("output_schema_version")
+  taxonomyVersionCode              String                  @map("taxonomy_version_code")
+  analysisExplanationJson          Json                    @default("{}") @map("analysis_explanation_json")
+  firstMeaningfulMessageTextRedacted String?               @map("first_meaningful_message_text_redacted")
+  createdAt                        DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  pipelineRun                      PipelineRun             @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  analysisRun                      AnalysisRun             @relation(fields: [analysisRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  configVersion                    PageConfigVersion       @relation(fields: [configVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  taxonomyVersion                  AnalysisTaxonomyVersion @relation(fields: [taxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  date                             DimDate                @relation(fields: [dateKey], references: [dateKey], onDelete: Restrict, onUpdate: Cascade)
+  page                             DimPage                @relation(fields: [pageKey], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([pipelineRunId, threadDayId])
+  @@index([pageKey, dateKey])
+  @@index([analysisRunId])
+  @@index([officialRevisitLabel, openingThemeCode])
+  @@index([primaryNeedCode, officialClosingOutcomeCode])
+  @@map("fact_thread_day")
+}
+
+model FactStaffThreadDay {
+  id                                String                  @id @default(uuid()) @db.Uuid
+  pipelineRunId                     String                  @map("pipeline_run_id") @db.Uuid
+  analysisRunId                     String                  @map("analysis_run_id") @db.Uuid
+  configVersionId                   String                  @map("config_version_id") @db.Uuid
+  taxonomyVersionId                 String                  @map("taxonomy_version_id") @db.Uuid
+  dateKey                           Int                     @map("date_key")
+  pageKey                           String                  @map("page_key") @db.Uuid
+  staffKey                          String                  @map("staff_key") @db.Uuid
+  threadDayId                       String                  @map("thread_day_id") @db.Uuid
+  threadId                          String                  @map("thread_id") @db.Uuid
+  primaryNeedCode                   String                  @map("primary_need_code")
+  processRiskLevelCode              String                  @map("process_risk_level_code")
+  responseQualityCode               String                  @map("response_quality_code")
+  staffMessageCount                 Int                     @default(0) @map("staff_message_count")
+  staffFirstResponseSecondsIfOwner  Int?                    @map("staff_first_response_seconds_if_owner")
+  aiCostAllocatedMicros             BigInt                  @default(0) @map("ai_cost_allocated_micros")
+  responseQualityIssueText          String?                 @map("response_quality_issue_text")
+  responseQualityImprovementText    String?                 @map("response_quality_improvement_text")
+  promptHash                        String                  @map("prompt_hash")
+  promptVersion                     String                  @map("prompt_version")
+  modelName                         String                  @map("model_name")
+  outputSchemaVersion               String                  @map("output_schema_version")
+  taxonomyVersionCode               String                  @map("taxonomy_version_code")
+  createdAt                         DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  pipelineRun                       PipelineRun             @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  analysisRun                       AnalysisRun             @relation(fields: [analysisRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  configVersion                     PageConfigVersion       @relation(fields: [configVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  taxonomyVersion                   AnalysisTaxonomyVersion @relation(fields: [taxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  date                              DimDate                 @relation(fields: [dateKey], references: [dateKey], onDelete: Restrict, onUpdate: Cascade)
+  page                              DimPage                 @relation(fields: [pageKey], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  staff                             DimStaff                @relation(fields: [staffKey], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([pipelineRunId, threadDayId, staffKey])
+  @@index([pageKey, dateKey, staffKey])
+  @@index([responseQualityCode, processRiskLevelCode])
+  @@map("fact_staff_thread_day")
+}
+
+model ActivePublishSnapshot {
+  id                   String                  @id @default(uuid()) @db.Uuid
+  connectedPageId      String                  @map("connected_page_id") @db.Uuid
+  pageKey              String                  @map("page_key") @db.Uuid
+  targetDateKey        Int                     @map("target_date_key")
+  publishChannel       String                  @map("publish_channel")
+  pipelineRunId        String                  @unique @map("pipeline_run_id") @db.Uuid
+  configVersionId      String                  @map("config_version_id") @db.Uuid
+  taxonomyVersionId    String                  @map("taxonomy_version_id") @db.Uuid
+  promptHash           String                  @map("prompt_hash")
+  promptVersion        String                  @map("prompt_version")
+  taxonomyVersionCode  String                  @map("taxonomy_version_code")
+  windowStartAt        DateTime                @map("window_start_at") @db.Timestamptz(6)
+  windowEndExclusiveAt DateTime                @map("window_end_exclusive_at") @db.Timestamptz(6)
+  isFullDay            Boolean                 @map("is_full_day")
+  publishedAt          DateTime                @map("published_at") @db.Timestamptz(6)
+  createdAt            DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  connectedPage        ConnectedPage           @relation(fields: [connectedPageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  page                 DimPage                 @relation(fields: [pageKey], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  targetDate           DimDate                 @relation(fields: [targetDateKey], references: [dateKey], onDelete: Restrict, onUpdate: Cascade)
+  pipelineRun          PipelineRun             @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  configVersion        PageConfigVersion       @relation(fields: [configVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  taxonomyVersion      AnalysisTaxonomyVersion @relation(fields: [taxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([connectedPageId, targetDateKey, publishChannel])
+  @@index([pageKey, targetDateKey, publishChannel])
+  @@map("active_publish_snapshot")
+}
+
+model PublishHistory {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  connectedPageId        String                  @map("connected_page_id") @db.Uuid
+  pageKey                String                  @map("page_key") @db.Uuid
+  targetDateKey          Int                     @map("target_date_key")
+  publishChannel         String                  @map("publish_channel")
+  pipelineRunId          String                  @map("pipeline_run_id") @db.Uuid
+  configVersionId        String                  @map("config_version_id") @db.Uuid
+  taxonomyVersionId      String                  @map("taxonomy_version_id") @db.Uuid
+  promptHash             String                  @map("prompt_hash")
+  promptVersion          String                  @map("prompt_version")
+  taxonomyVersionCode    String                  @map("taxonomy_version_code")
+  windowStartAt          DateTime                @map("window_start_at") @db.Timestamptz(6)
+  windowEndExclusiveAt   DateTime                @map("window_end_exclusive_at") @db.Timestamptz(6)
+  isFullDay              Boolean                 @map("is_full_day")
+  publishedAt            DateTime                @map("published_at") @db.Timestamptz(6)
+  replacedRunIdsJson     Json                    @default("[]") @map("replaced_run_ids_json")
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  connectedPage          ConnectedPage           @relation(fields: [connectedPageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  page                   DimPage                 @relation(fields: [pageKey], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  targetDate             DimDate                 @relation(fields: [targetDateKey], references: [dateKey], onDelete: Restrict, onUpdate: Cascade)
+  pipelineRun            PipelineRun             @relation(fields: [pipelineRunId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  configVersion          PageConfigVersion       @relation(fields: [configVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+  taxonomyVersion        AnalysisTaxonomyVersion @relation(fields: [taxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@index([connectedPageId, targetDateKey, publishChannel, publishedAt(sort: Desc)])
+  @@index([pipelineRunId, publishedAt(sort: Desc)])
+  @@map("publish_history")
 }

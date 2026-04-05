@@ -7,6 +7,7 @@ import { prisma } from "./infra/prisma.ts";
 import { redisManager } from "./infra/redis.ts";
 import { analysisController } from "./modules/analysis/analysis.controller.ts";
 import { chatExtractorController } from "./modules/chat_extractor/chat_extractor.controller.ts";
+import { readModelsController } from "./modules/read_models/read_models.controller.ts";
 
 export const app = new Elysia()
   .use(
@@ -36,6 +37,7 @@ export const app = new Elysia()
   })
   .use(analysisController)
   .use(chatExtractorController)
+  .use(readModelsController)
   .onError(({ code, error, set }) => {
     if (isAppError(error)) {
       set.status = error.status;

@@ -1,4 +1,5 @@
 import { Prisma } from "@prisma/client";
+import { AppError } from "../../core/errors.ts";
 import { prisma } from "../../infra/prisma.ts";
 import {
   DEFAULT_ANALYSIS_TAXONOMY,
@@ -567,26 +568,79 @@ class ChatExtractorRepository {
   }
 
   async findPublishedRunsForDate(connectedPageId: string, targetDate: string) {
-    const rows = await prisma.pipelineRun.findMany({
+    const targetDateKey = Number(targetDate.replace(/-/g, ""));
+    const rows = await prisma.activePublishSnapshot.findMany({
       where: {
-        targetDate: parseDateOnlyUtc(targetDate),
-        publishState: {
-          in: ["published_provisional", "published_official"]
-        },
-        runGroup: {
-          frozenConfigVersion: {
-            connectedPageId
-          }
-        }
+        connectedPageId,
+        targetDateKey
       },
-      include: pipelineRunInclude()
+      include: {
+        pipelineRun: {
+          include: pipelineRunInclude()
+        }
+      }
     });
-    return rows.map(mapPipelineRun);
+    return rows.map((row) => mapPipelineRun(row.pipelineRun));
   }
 
   async publishRun(input: PublishRunInput) {
     return prisma.$transaction(async (tx) => {
       const publishState = input.publishAs === "official" ? "published_official" : "published_provisional";
+      const run = await tx.pipelineRun.findUnique({
+        where: { id: input.runId },
+        select: {
+          id: true,
+          targetDate: true,
+          windowStartAt: true,
+          windowEndExclusiveAt: true,
+          isFullDay: true,
+          runGroup: {
+            select: {
+              frozenConfigVersionId: true,
+              frozenTaxonomyVersionId: true,
+              frozenCompiledPromptHash: true,
+              frozenPromptVersion: true,
+              frozenConfigVersion: {
+                select: {
+                  versionNo: true,
+                  connectedPage: {
+                    select: {
+                      id: true
+                    }
+                  },
+                  analysisTaxonomyVersion: {
+                    select: {
+                      versionCode: true
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      });
+      if (!run) {
+        throw new AppError(404, "CHAT_EXTRACTOR_RUN_NOT_FOUND", `Run ${input.runId} không tồn tại.`);
+      }
+
+      const [factThreadDayCount, pageDimension] = await Promise.all([
+        tx.factThreadDay.count({
+          where: { pipelineRunId: input.runId }
+        }),
+        tx.dimPage.findUnique({
+          where: {
+            connectedPageId: run.runGroup.frozenConfigVersion.connectedPage.id
+          },
+          select: {
+            id: true
+          }
+        })
+      ]);
+      if (factThreadDayCount === 0 || !pageDimension) {
+        throw new AppError(409, "CHAT_EXTRACTOR_MART_NOT_READY", "Run chưa có semantic mart materialized nên không được publish.");
+      }
+
+      const targetDateKey = Number(run.targetDate.toISOString().slice(0, 10).replace(/-/g, ""));
 
       if (input.supersedeRunIds.length > 0) {
         await tx.pipelineRun.updateMany({
@@ -600,6 +654,13 @@ class ChatExtractorRepository {
             supersededByRunId: input.runId
           }
         });
+        await tx.activePublishSnapshot.deleteMany({
+          where: {
+            pipelineRunId: {
+              in: input.supersedeRunIds
+            }
+          }
+        });
       }
 
       await tx.pipelineRun.update({
@@ -611,6 +672,65 @@ class ChatExtractorRepository {
           publishState,
           publishedAt: input.publishedAt,
           supersedesRunId: input.expectedReplacedRunId
+        }
+      });
+
+      await tx.activePublishSnapshot.upsert({
+        where: {
+          connectedPageId_targetDateKey_publishChannel: {
+            connectedPageId: run.runGroup.frozenConfigVersion.connectedPage.id,
+            targetDateKey,
+            publishChannel: input.publishAs
+          }
+        },
+        update: {
+          pageKey: pageDimension.id,
+          pipelineRunId: input.runId,
+          configVersionId: run.runGroup.frozenConfigVersionId,
+          taxonomyVersionId: run.runGroup.frozenTaxonomyVersionId,
+          promptHash: run.runGroup.frozenCompiledPromptHash,
+          promptVersion: run.runGroup.frozenPromptVersion,
+          taxonomyVersionCode: run.runGroup.frozenConfigVersion.analysisTaxonomyVersion.versionCode,
+          windowStartAt: run.windowStartAt,
+          windowEndExclusiveAt: run.windowEndExclusiveAt,
+          isFullDay: run.isFullDay,
+          publishedAt: input.publishedAt
+        },
+        create: {
+          connectedPageId: run.runGroup.frozenConfigVersion.connectedPage.id,
+          pageKey: pageDimension.id,
+          targetDateKey,
+          publishChannel: input.publishAs,
+          pipelineRunId: input.runId,
+          configVersionId: run.runGroup.frozenConfigVersionId,
+          taxonomyVersionId: run.runGroup.frozenTaxonomyVersionId,
+          promptHash: run.runGroup.frozenCompiledPromptHash,
+          promptVersion: run.runGroup.frozenPromptVersion,
+          taxonomyVersionCode: run.runGroup.frozenConfigVersion.analysisTaxonomyVersion.versionCode,
+          windowStartAt: run.windowStartAt,
+          windowEndExclusiveAt: run.windowEndExclusiveAt,
+          isFullDay: run.isFullDay,
+          publishedAt: input.publishedAt
+        }
+      });
+
+      await tx.publishHistory.create({
+        data: {
+          connectedPageId: run.runGroup.frozenConfigVersion.connectedPage.id,
+          pageKey: pageDimension.id,
+          targetDateKey,
+          publishChannel: input.publishAs,
+          pipelineRunId: input.runId,
+          configVersionId: run.runGroup.frozenConfigVersionId,
+          taxonomyVersionId: run.runGroup.frozenTaxonomyVersionId,
+          promptHash: run.runGroup.frozenCompiledPromptHash,
+          promptVersion: run.runGroup.frozenPromptVersion,
+          taxonomyVersionCode: run.runGroup.frozenConfigVersion.analysisTaxonomyVersion.versionCode,
+          windowStartAt: run.windowStartAt,
+          windowEndExclusiveAt: run.windowEndExclusiveAt,
+          isFullDay: run.isFullDay,
+          publishedAt: input.publishedAt,
+          replacedRunIdsJson: input.supersedeRunIds as Prisma.InputJsonValue
         }
       });
     });

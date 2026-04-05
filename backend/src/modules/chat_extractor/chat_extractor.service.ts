@@ -516,8 +516,15 @@ async function fetchPancakePages(userAccessToken: string): Promise<ListedPage[]>
 }
 
 async function runAnalysisLoadedRun(pipelineRunId: string) {
-  const module = await import("../analysis/analysis.service.ts");
-  return module.analysisService.executeLoadedRun(pipelineRunId);
+  const [analysisModule, readModelsModule] = await Promise.all([
+    import("../analysis/analysis.service.ts"),
+    import("../read_models/read_models.service.ts")
+  ]);
+  const summary = await analysisModule.analysisService.executeLoadedRun(pipelineRunId);
+  if (summary.status === "completed") {
+    await readModelsModule.readModelsService.materializeRun(pipelineRunId);
+  }
+  return summary;
 }
 
 async function runWorkerManifest(manifest: WorkerManifest): Promise<WorkerExecution> {
