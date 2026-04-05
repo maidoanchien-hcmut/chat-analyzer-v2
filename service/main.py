@@ -9,23 +9,27 @@ import grpc
 
 import conversation_analysis_pb2 as conversation_analysis_pb2
 import conversation_analysis_pb2_grpc as conversation_analysis_pb2_grpc
-from analysis_runtime import ConversationAnalysisEngine, MessageModel, RuntimeSnapshotModel, UnitBundleModel
+from analysis_executor import ConversationAnalysisExecutor, DeterministicAnalysisAdapter
+from analysis_models import MessageModel, RuntimeSnapshotModel, UnitBundleModel
 from config import load_config
 
 
 class ConversationAnalysisServiceServicer(conversation_analysis_pb2_grpc.ConversationAnalysisServiceServicer):
-  def __init__(self, engine: ConversationAnalysisEngine):
-    self.engine = engine
+  def __init__(self, executor: ConversationAnalysisExecutor):
+    self.executor = executor
 
   def AnalyzeConversation(self, request, context):
     runtime = RuntimeSnapshotModel(
       profile_id=request.runtime.profile_id,
       version_no=request.runtime.version_no,
       model_name=request.runtime.model_name,
+      prompt_version=request.runtime.prompt_version,
       output_schema_version=request.runtime.output_schema_version,
-      prompt_template=request.runtime.prompt_template,
+      taxonomy_version=request.runtime.taxonomy_version,
+      page_prompt_text=request.runtime.page_prompt_text,
+      taxonomy_json=_parse_json(request.runtime.taxonomy_json, {}),
       generation_config=_parse_json(request.runtime.generation_config_json, {}),
-      profile_json=_parse_json(request.runtime.profile_json, None),
+      profile_json=_parse_json(request.runtime.profile_json, {}),
     )
     bundles = [
       UnitBundleModel(
@@ -56,10 +60,18 @@ class ConversationAnalysisServiceServicer(conversation_analysis_pb2_grpc.Convers
           )
           for message in bundle.messages
         ],
+        first_meaningful_message_text_redacted=bundle.first_meaningful_message_text_redacted or None,
+        explicit_revisit_signal=bundle.explicit_revisit_signal or None,
+        explicit_need_signal=bundle.explicit_need_signal or None,
+        explicit_outcome_signal=bundle.explicit_outcome_signal or None,
+        message_count=bundle.message_count,
+        first_staff_response_seconds=bundle.first_staff_response_seconds or None,
+        avg_staff_response_seconds=bundle.avg_staff_response_seconds or None,
+        staff_participants_json=_parse_json(bundle.staff_participants_json, []),
       )
       for bundle in request.bundles
     ]
-    results = asyncio.run(self.engine.analyze(runtime, bundles))
+    results, metadata = asyncio.run(self.executor.analyze(runtime, bundles))
     return conversation_analysis_pb2.AnalyzeConversationResponse(
       results=[
         conversation_analysis_pb2.AnalysisResult(
@@ -75,7 +87,7 @@ class ConversationAnalysisServiceServicer(conversation_analysis_pb2_grpc.Convers
           closing_outcome_inference_code=result.closing_outcome_inference_code,
           process_risk_level_code=result.process_risk_level_code,
           process_risk_reason_text=result.process_risk_reason_text or "",
-          staff_assessments_json=json.dumps(result.staff_assessments_json, ensure_ascii=False),
+          staff_assessments_json=json.dumps([item.model_dump() for item in result.staff_assessments_json], ensure_ascii=False),
           evidence_used_json=json.dumps(result.evidence_used_json, ensure_ascii=False),
           field_explanations_json=json.dumps(result.field_explanations_json, ensure_ascii=False),
           supporting_message_ids_json=json.dumps(result.supporting_message_ids_json, ensure_ascii=False),
@@ -84,7 +96,8 @@ class ConversationAnalysisServiceServicer(conversation_analysis_pb2_grpc.Convers
           failure_info_json="" if result.failure_info_json is None else json.dumps(result.failure_info_json, ensure_ascii=False),
         )
         for result in results
-      ]
+      ],
+      runtime_metadata_json=json.dumps(metadata.model_dump(), ensure_ascii=False),
     )
 
 
@@ -101,8 +114,12 @@ def serve() -> None:
       ("grpc.max_receive_message_length", config.grpc_max_message_length),
     ],
   )
+  executor = ConversationAnalysisExecutor(
+    config=config,
+    adapter=DeterministicAnalysisAdapter(config),
+  )
   conversation_analysis_pb2_grpc.add_ConversationAnalysisServiceServicer_to_server(
-    ConversationAnalysisServiceServicer(ConversationAnalysisEngine(config)),
+    ConversationAnalysisServiceServicer(executor),
     server,
   )
   bind_address = f"{config.grpc_host}:{config.grpc_port}"

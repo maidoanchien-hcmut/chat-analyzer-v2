@@ -9,5 +9,9 @@ dependencies = [
     "grpcio>=1.80.0",
     "grpcio-tools>=1.80.0",
     "pydantic>=2.12.5",
+    "pytest>=8.4.2",
     "uvicorn>=0.42.0",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]

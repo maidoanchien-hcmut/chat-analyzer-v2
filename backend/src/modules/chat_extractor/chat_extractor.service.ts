@@ -31,6 +31,8 @@ import {
 } from "./chat_extractor.repository.ts";
 import type {
   ExecuteJobBody,
+  ManualJobBody,
+  OfficialDailyJobBody,
   PreviewJobBody,
   PublishAs,
   PublishEligibility,
@@ -58,6 +60,16 @@ export type WorkerExecution = {
 type ChatExtractorServiceDependencies = {
   listPagesFromToken: (userAccessToken: string) => Promise<ListedPage[]>;
   runWorker: (manifest: WorkerManifest) => Promise<WorkerExecution>;
+  runAnalysis: (pipelineRunId: string) => Promise<{
+    pipelineRunId: string;
+    analysisRunId: string;
+    status: string;
+    unitCountPlanned: number;
+    unitCountSucceeded: number;
+    unitCountUnknown: number;
+    unitCountFailed: number;
+    totalCostMicros: number;
+  }>;
 };
 
 type RuntimeSnapshot = {
@@ -78,10 +90,12 @@ type RuntimeSnapshot = {
 export class ChatExtractorService {
   private readonly listPagesFromTokenImpl: ChatExtractorServiceDependencies["listPagesFromToken"];
   private readonly runWorkerImpl: ChatExtractorServiceDependencies["runWorker"];
+  private readonly runAnalysisImpl: ChatExtractorServiceDependencies["runAnalysis"];
 
   constructor(deps: Partial<ChatExtractorServiceDependencies> = {}) {
     this.listPagesFromTokenImpl = deps.listPagesFromToken ?? fetchPancakePages;
     this.runWorkerImpl = deps.runWorker ?? runWorkerManifest;
+    this.runAnalysisImpl = deps.runAnalysis ?? runAnalysisLoadedRun;
   }
 
   async listPagesFromToken(userAccessToken: string) {
@@ -261,6 +275,16 @@ export class ChatExtractorService {
     });
 
     const executions: WorkerExecution[] = [];
+    const analysisExecutions: Array<{
+      pipelineRunId: string;
+      analysisRunId: string;
+      status: string;
+      unitCountPlanned: number;
+      unitCountSucceeded: number;
+      unitCountUnknown: number;
+      unitCountFailed: number;
+      totalCostMicros: number;
+    }> = [];
     let executionError: unknown = null;
     try {
       for (const run of runRows) {
@@ -283,6 +307,9 @@ export class ChatExtractorService {
           const execution = await this.runWorkerImpl(manifest);
           assertWorkerExecutionSucceeded(execution);
           executions.push(execution);
+          if (body.job.processingMode === "etl_and_ai" && page.page.analysisEnabled) {
+            analysisExecutions.push(await this.runAnalysisImpl(run.id));
+          }
         } catch (error) {
           await chatExtractorRepository.abortRunGroupExecution(
             runGroupId,
@@ -306,7 +333,8 @@ export class ChatExtractorService {
     return {
       run_group: serializeRunGroup(runs),
       child_runs: runs.map((run) => serializeRunSummary(run)),
-      executions
+      executions,
+      analysis_executions: analysisExecutions
     };
   }
 
@@ -433,14 +461,16 @@ export class ChatExtractorService {
     businessTimezone: string
   ): PlannedChildRun[] {
     if (kind === "official_daily") {
-      return [buildFullDayRun(job.targetDate, businessTimezone)];
+      const officialJob = job as OfficialDailyJobBody;
+      return [buildFullDayRun(officialJob.targetDate, businessTimezone)];
     }
 
-    return job.targetDate
-      ? [buildFullDayRun(job.targetDate, businessTimezone)]
+    const manualJob = job as ManualJobBody;
+    return typeof manualJob.targetDate === "string"
+      ? [buildFullDayRun(manualJob.targetDate, businessTimezone)]
       : splitRequestedWindowByTargetDate(
-          job.requestedWindowStartAt!,
-          job.requestedWindowEndExclusiveAt!,
+          manualJob.requestedWindowStartAt!,
+          manualJob.requestedWindowEndExclusiveAt!,
           businessTimezone
         );
   }
@@ -483,6 +513,11 @@ async function fetchPancakePages(userAccessToken: string): Promise<ListedPage[]>
     });
   }
   return parseListPagesResponse(raw);
+}
+
+async function runAnalysisLoadedRun(pipelineRunId: string) {
+  const module = await import("../analysis/analysis.service.ts");
+  return module.analysisService.executeLoadedRun(pipelineRunId);
 }
 
 async function runWorkerManifest(manifest: WorkerManifest): Promise<WorkerExecution> {

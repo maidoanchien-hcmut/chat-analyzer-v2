@@ -287,6 +287,7 @@ model AnalysisRun {
   pipelineRunId       String                  @map("pipeline_run_id") @db.Uuid
   configVersionId     String                  @map("config_version_id") @db.Uuid
   taxonomyVersionId   String                  @map("taxonomy_version_id") @db.Uuid
+  snapshotIdentityKey String                  @map("snapshot_identity_key")
   modelName           String                  @map("model_name")
   promptHash          String                  @map("prompt_hash")
   promptVersion       String                  @map("prompt_version")
@@ -307,6 +308,7 @@ model AnalysisRun {
   taxonomyVersion     AnalysisTaxonomyVersion @relation(fields: [taxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
   analysisResults     AnalysisResult[]
 
+  @@unique([pipelineRunId, snapshotIdentityKey])
   @@index([pipelineRunId, createdAt(sort: Desc)])
   @@index([status, createdAt(sort: Desc)])
   @@map("analysis_run")
@@ -316,6 +318,7 @@ model AnalysisResult {
   id                             String      @id @default(uuid()) @db.Uuid
   analysisRunId                  String      @map("analysis_run_id") @db.Uuid
   threadDayId                    String      @map("thread_day_id") @db.Uuid
+  evidenceHash                   String      @map("evidence_hash")
   resultStatus                   String      @map("result_status")
   promptHash                     String      @map("prompt_hash")
   openingThemeCode               String      @map("opening_theme_code")
@@ -339,6 +342,7 @@ model AnalysisResult {
   threadDay                      ThreadDay   @relation(fields: [threadDayId], references: [id], onDelete: Cascade, onUpdate: Cascade)
 
   @@unique([analysisRunId, threadDayId])
+  @@index([analysisRunId, evidenceHash])
   @@index([threadDayId])
   @@index([resultStatus, createdAt(sort: Desc)])
   @@map("analysis_result")

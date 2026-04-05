@@ -8,12 +8,16 @@ Contract gRPC nằm ở [conversation_analysis.proto](D:/Code/chat-analyzer-v2/p
 - `thread_id`
 - `pipeline_run_id`
 - `opening_block_json`
+- `first_meaningful_message_text_redacted`
+- `explicit_revisit_signal`
+- `explicit_need_signal`
+- `explicit_outcome_signal`
 - `source_thread_json_redacted`
 - `journey_code`
 - `closing_outcome_inference_code`
 - `staff_assessments_json`
 
-Service hiện chạy heuristic runtime đơn giản để giữ contract ổn định trong dev environment; module này chưa phải runtime phân tích production-ready.
+Service hiện dùng runtime owner-clean theo cấu trúc `pydantic models -> executor -> transport`, với `system prompt` thuộc ownership của `service/`. Adapter mặc định vẫn là deterministic dev runtime vì provider/model thật chưa được pin trong repo, nhưng transport và validation đã fail-closed thay vì heuristic shim cũ.
 
 Chạy local:
 
@@ -21,4 +25,11 @@ Chạy local:
 cd D:\Code\chat-analyzer-v2\service
 uv sync
 uv run python main.py
+```
+
+Chạy test:
+
+```powershell
+cd D:\Code\chat-analyzer-v2\service
+uv run pytest
 ```

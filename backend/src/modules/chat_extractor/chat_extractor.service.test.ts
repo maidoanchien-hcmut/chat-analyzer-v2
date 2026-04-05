@@ -245,6 +245,76 @@ describe("chat_extractor service", () => {
     expect(abortedExecutions[0]?.errorText).toContain("worker stderr");
     expect(refreshedRunGroupIds).toEqual([capturedCreateRunGroupInput.runGroupId]);
   });
+
+  it("runs analysis after ETL when processing_mode is etl_and_ai and analysis is enabled", async () => {
+    const { executeJobBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    const pageDetail = createConnectedPageDetail({
+      analysisEnabled: true
+    });
+    const promptIdentity = createPromptIdentity();
+    let capturedCreateRunGroupInput: any;
+    const analysisCalls: string[] = [];
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => pageDetail);
+    patchRepository(repositoryModule.chatExtractorRepository, "getPromptIdentityByHash", async () => promptIdentity);
+    patchRepository(repositoryModule.chatExtractorRepository, "createRunGroupWithRuns", async (input: unknown) => {
+      capturedCreateRunGroupInput = input;
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "markRunExecutionStarted", async () => {});
+    patchRepository(repositoryModule.chatExtractorRepository, "refreshRunGroupStatus", async () => {});
+    patchRepository(repositoryModule.chatExtractorRepository, "listRunGroupRuns", async (runGroupId: string) => {
+      return buildRunGroupRuns(runGroupId, capturedCreateRunGroupInput, pageDetail);
+    });
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      runWorker: async (manifest) => ({
+        pipelineRunId: manifest.pipeline_run_id,
+        exitCode: 0,
+        ok: true,
+        stdout: "",
+        stderr: ""
+      }),
+      runAnalysis: async (pipelineRunId) => {
+        analysisCalls.push(pipelineRunId);
+        return {
+          pipelineRunId,
+          analysisRunId: `analysis-${pipelineRunId}`,
+          status: "completed",
+          unitCountPlanned: 1,
+          unitCountSucceeded: 1,
+          unitCountUnknown: 0,
+          unitCountFailed: 0,
+          totalCostMicros: 99
+        };
+      }
+    });
+    const parsed = executeJobBodySchema.parse({
+      kind: "official_daily",
+      connected_page_id: CONNECTED_PAGE_ID,
+      job: {
+        processing_mode: "etl_and_ai",
+        target_date: "2026-04-03"
+      }
+    });
+
+    const result = await service.executeJobRequest(parsed as never);
+
+    expect(analysisCalls).toEqual([capturedCreateRunGroupInput.childRuns[0].id]);
+    expect(result.analysis_executions).toEqual([
+      {
+        pipelineRunId: capturedCreateRunGroupInput.childRuns[0].id,
+        analysisRunId: `analysis-${capturedCreateRunGroupInput.childRuns[0].id}`,
+        status: "completed",
+        unitCountPlanned: 1,
+        unitCountSucceeded: 1,
+        unitCountUnknown: 0,
+        unitCountFailed: 0,
+        totalCostMicros: 99
+      }
+    ]);
+  });
 });
 
 async function loadChatExtractorTypes() {

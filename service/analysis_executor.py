@@ -5,90 +5,21 @@ import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any
-
-from pydantic import BaseModel, Field
+from typing import Any, Protocol
 
 from config import ServiceConfig
+from analysis_models import (
+  AdapterResultModel,
+  AnalysisOutputModel,
+  InvalidServiceResultError,
+  RuntimeMetadataModel,
+  RuntimeSnapshotModel,
+  ServiceResultModel,
+  StaffAssessmentModel,
+  UnitBundleModel,
+)
 
-
-class RuntimeSnapshotModel(BaseModel):
-  profile_id: str
-  version_no: int
-  model_name: str
-  output_schema_version: str
-  prompt_template: str = ""
-  generation_config: dict[str, Any] = Field(default_factory=dict)
-  profile_json: Any = None
-
-
-class MessageModel(BaseModel):
-  id: str
-  inserted_at: str
-  sender_role: str
-  sender_name: str | None = None
-  message_type: str
-  redacted_text: str | None = None
-  is_meaningful_human_message: bool = False
-  is_opening_block_message: bool = False
-
-
-class UnitBundleModel(BaseModel):
-  thread_day_id: str
-  thread_id: str
-  connected_page_id: str
-  pipeline_run_id: str
-  run_group_id: str
-  target_date: str
-  business_timezone: str
-  customer_display_name: str | None = None
-  normalized_tag_signals_json: Any = None
-  observed_tags_json: Any = None
-  opening_block_json: Any = None
-  first_meaningful_message_id: str | None = None
-  first_meaningful_message_sender_role: str | None = None
-  source_thread_json_redacted: Any = None
-  messages: list[MessageModel] = Field(default_factory=list)
-
-
-class AnalysisOutputModel(BaseModel):
-  opening_theme_code: str = "unknown"
-  opening_theme_reason: str | None = None
-  customer_mood_code: str = "unknown"
-  primary_need_code: str = "unknown"
-  primary_topic_code: str = "unknown"
-  journey_code: str = "unknown"
-  closing_outcome_inference_code: str = "unknown"
-  process_risk_level_code: str = "unknown"
-  process_risk_reason_text: str | None = None
-  staff_assessments_json: list[dict[str, Any]] = Field(default_factory=list)
-  evidence_used_json: dict[str, Any] = Field(default_factory=dict)
-  field_explanations_json: dict[str, Any] = Field(default_factory=dict)
-  supporting_message_ids_json: list[str] = Field(default_factory=list)
-
-
-class ServiceResultModel(BaseModel):
-  thread_day_id: str
-  result_status: str
-  prompt_hash: str
-  opening_theme_code: str
-  opening_theme_reason: str | None = None
-  customer_mood_code: str
-  primary_need_code: str
-  primary_topic_code: str
-  journey_code: str
-  closing_outcome_inference_code: str
-  process_risk_level_code: str
-  process_risk_reason_text: str | None = None
-  staff_assessments_json: list[dict[str, Any]] = Field(default_factory=list)
-  evidence_used_json: dict[str, Any] = Field(default_factory=dict)
-  field_explanations_json: dict[str, Any] = Field(default_factory=dict)
-  supporting_message_ids_json: list[str] = Field(default_factory=list)
-  usage_json: dict[str, Any] = Field(default_factory=dict)
-  cost_micros: int = 0
-  failure_info_json: dict[str, Any] | None = None
-
-
+SYSTEM_PROMPT_VERSION = "service_system.v1"
 SYSTEM_PROMPT_CONVERSATION_ANALYSIS = """Bạn là AI nhà phân tích hội thoại sales/cskh của hệ thống chat-analyzer cho một công ty duy nhất.
 
 Vai trò cố định:
@@ -105,24 +36,32 @@ Trọng tâm đánh giá:
 Nguyên tắc bắt buộc:
 - Output phải ngắn gọn, rõ nghĩa, dùng được cho vận hành.
 - Khi thiếu dữ liệu hoặc quy trình page chưa đủ rõ, trả về "unknown" thay vì suy đoán.
-- Tôn trọng boundary ngày và snapshot; không trộn ngữ cảnh ngoài unit được cung cấp."""
+- Tôn trọng boundary ngày và snapshot; không trộn ngữ cảnh ngoài unit được cung cấp.
+- `journey_code` và `primary_need_code` là hai trục khác nhau; `revisit` không bao giờ là primary need."""
 
 
-@dataclass(slots=True)
-class ConversationAnalysisEngine:
-  config: ServiceConfig
-
-  async def analyze(self, runtime: RuntimeSnapshotModel, bundles: list[UnitBundleModel]) -> list[ServiceResultModel]:
-    effective_runtime = _with_system_prompt(runtime)
-    prompt_hash = _build_prompt_hash(effective_runtime)
-    return [self._build_heuristic_result(effective_runtime, bundle, prompt_hash) for bundle in bundles]
-
-  def _build_heuristic_result(
+class AnalysisAdapter(Protocol):
+  async def analyze_bundle(
     self,
     runtime: RuntimeSnapshotModel,
     bundle: UnitBundleModel,
     prompt_hash: str,
-  ) -> ServiceResultModel:
+    effective_prompt_text: str,
+  ) -> AdapterResultModel:
+    ...
+
+
+@dataclass(slots=True)
+class DeterministicAnalysisAdapter:
+  config: ServiceConfig
+
+  async def analyze_bundle(
+    self,
+    runtime: RuntimeSnapshotModel,
+    bundle: UnitBundleModel,
+    prompt_hash: str,
+    effective_prompt_text: str,
+  ) -> AdapterResultModel:
     analysis_messages = [message for message in bundle.messages if not message.is_opening_block_message]
     transcript = "\n".join(
       [message.redacted_text.strip() for message in analysis_messages if message.redacted_text and message.redacted_text.strip()]
@@ -133,11 +72,16 @@ class ConversationAnalysisEngine:
     customer_messages = [message for message in analysis_messages if message.sender_role == "customer"]
 
     primary_need_code = (
-      _normalize_code(_first_signal_value(tag_signals, "need"))
+      _normalize_code(bundle.explicit_need_signal)
+      or _normalize_code(_first_signal_value(tag_signals, "need"))
       or _keyword_match(transcript, ["đặt lịch", "lịch hẹn"], "appointment_booking")
       or _keyword_match(transcript, ["tư vấn", "consult"], "consultation")
       or "unknown"
     )
+    if primary_need_code == "revisit":
+      primary_need_code = "unknown"
+
+    journey_code = _resolve_journey_code(opening_signals, tag_signals, transcript, bundle.explicit_revisit_signal)
     opening_theme_reason = _first_opening_reason(bundle)
     process_risk_level_code = (
       "high"
@@ -154,15 +98,16 @@ class ConversationAnalysisEngine:
       or "neutral",
       primary_need_code=primary_need_code,
       primary_topic_code=primary_need_code,
-      journey_code=_resolve_journey_code(opening_signals, tag_signals, transcript),
-      closing_outcome_inference_code=_keyword_match(transcript, ["đã đặt lịch", "hẹn lúc"], "appointment_booked")
+      journey_code=journey_code,
+      closing_outcome_inference_code=_normalize_code(bundle.explicit_outcome_signal)
+      or _keyword_match(transcript, ["đã đặt lịch", "hẹn lúc"], "appointment_booked")
       or _keyword_match(transcript, ["để em gọi", "liên hệ sau"], "follow_up")
       or "unknown",
       process_risk_level_code=process_risk_level_code,
       process_risk_reason_text="Khách có nhắn nhưng chưa thấy nhân viên phản hồi trong snapshot ngày."
       if process_risk_level_code == "high"
       else None,
-      staff_assessments_json=_build_staff_assessments(staff_messages, customer_messages),
+      staff_assessments_json=_build_staff_assessments(bundle.staff_participants_json, staff_messages, customer_messages),
       evidence_used_json=_build_evidence(bundle, opening_signals, tag_signals, staff_messages),
       field_explanations_json=_build_field_explanations(
         opening_theme_reason,
@@ -173,42 +118,77 @@ class ConversationAnalysisEngine:
       ),
       supporting_message_ids_json=_build_supporting_message_ids(analysis_messages),
     )
-    normalized = _normalize_output(output)
 
-    return ServiceResultModel(
-      thread_day_id=bundle.thread_day_id,
-      result_status="succeeded" if bundle.messages else "unknown",
-      prompt_hash=prompt_hash,
-      opening_theme_code=normalized.opening_theme_code,
-      opening_theme_reason=normalized.opening_theme_reason,
-      customer_mood_code=normalized.customer_mood_code,
-      primary_need_code=normalized.primary_need_code,
-      primary_topic_code=normalized.primary_topic_code,
-      journey_code=normalized.journey_code,
-      closing_outcome_inference_code=normalized.closing_outcome_inference_code,
-      process_risk_level_code=normalized.process_risk_level_code,
-      process_risk_reason_text=normalized.process_risk_reason_text,
-      staff_assessments_json=normalized.staff_assessments_json,
-      evidence_used_json=normalized.evidence_used_json,
-      field_explanations_json=normalized.field_explanations_json,
-      supporting_message_ids_json=normalized.supporting_message_ids_json,
+    status = "succeeded" if analysis_messages else "unknown"
+    failure_info = None if analysis_messages else {"reason": "empty_transcript"}
+
+    return AdapterResultModel(
+      status=status,
+      output=output,
       usage_json={
         "provider": self.config.runtime_mode,
         "model_name": runtime.model_name,
-        "token_estimate": _estimate_token_count(analysis_messages)
+        "token_estimate": _estimate_token_count(analysis_messages),
       },
       cost_micros=0,
-      failure_info_json=None if bundle.messages else {"reason": "empty_transcript"}
+      failure_info_json=failure_info,
     )
 
 
-def _build_prompt_hash(runtime: RuntimeSnapshotModel) -> str:
+@dataclass(slots=True)
+class ConversationAnalysisExecutor:
+  config: ServiceConfig
+  adapter: AnalysisAdapter
+
+  async def analyze(
+    self,
+    runtime: RuntimeSnapshotModel,
+    bundles: list[UnitBundleModel],
+  ) -> tuple[list[ServiceResultModel], RuntimeMetadataModel]:
+    effective_prompt_text = build_effective_prompt_text(runtime)
+    prompt_hash = build_prompt_hash(runtime, effective_prompt_text)
+    metadata = RuntimeMetadataModel(
+      runtime_mode=self.config.runtime_mode,
+      system_prompt_version=SYSTEM_PROMPT_VERSION,
+      effective_prompt_hash=prompt_hash,
+      effective_prompt_text=effective_prompt_text,
+      output_schema_version=runtime.output_schema_version,
+      profile_id=runtime.profile_id,
+      version_no=runtime.version_no,
+      taxonomy_version=runtime.taxonomy_version,
+    )
+    results = []
+    for bundle in bundles:
+      try:
+        adapter_result = await self.adapter.analyze_bundle(runtime, bundle, prompt_hash, effective_prompt_text)
+        normalized = normalize_adapter_result(bundle, prompt_hash, adapter_result)
+      except Exception as error:
+        normalized = failure_result_from_exception(bundle.thread_day_id, prompt_hash, error)
+      results.append(normalized)
+    return results, metadata
+
+
+def build_effective_prompt_text(runtime: RuntimeSnapshotModel) -> str:
+  page_prompt = runtime.page_prompt_text.strip() or "Không có quy trình vận hành riêng cho page; chỉ áp dụng quy tắc hệ thống."
+  taxonomy_text = json.dumps(runtime.taxonomy_json, ensure_ascii=False, sort_keys=True)
+  return "\n\n".join([
+    SYSTEM_PROMPT_CONVERSATION_ANALYSIS,
+    f"[PROMPT_VERSION]\n{runtime.prompt_version}",
+    f"[TAXONOMY_VERSION]\n{runtime.taxonomy_version}",
+    f"[OUTPUT_SCHEMA_VERSION]\n{runtime.output_schema_version}",
+    f"[TAXONOMY_JSON]\n{taxonomy_text}",
+    f"[PAGE_OPERATIONAL_RULES]\n{page_prompt}",
+  ])
+
+
+def build_prompt_hash(runtime: RuntimeSnapshotModel, effective_prompt_text: str) -> str:
   payload = json.dumps(
     {
-      "prompt_template": runtime.prompt_template,
-      "output_schema_version": runtime.output_schema_version,
+      "effective_prompt_text": effective_prompt_text,
       "model_name": runtime.model_name,
       "generation_config": runtime.generation_config,
+      "profile_id": runtime.profile_id,
+      "version_no": runtime.version_no,
     },
     ensure_ascii=False,
     sort_keys=True,
@@ -216,21 +196,24 @@ def _build_prompt_hash(runtime: RuntimeSnapshotModel) -> str:
   return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
-def _with_system_prompt(runtime: RuntimeSnapshotModel) -> RuntimeSnapshotModel:
-  page_rules = runtime.prompt_template.strip()
-  if page_rules:
-    merged = f"{SYSTEM_PROMPT_CONVERSATION_ANALYSIS}\n\n[PAGE_OPERATIONAL_RULES]\n{page_rules}"
-  else:
-    merged = (
-      f"{SYSTEM_PROMPT_CONVERSATION_ANALYSIS}\n\n"
-      "[PAGE_OPERATIONAL_RULES]\n"
-      "Không có quy trình vận hành riêng cho page; chỉ áp dụng quy tắc hệ thống."
-    )
-  return runtime.model_copy(update={"prompt_template": merged})
+def normalize_adapter_result(
+  bundle: UnitBundleModel,
+  prompt_hash: str,
+  adapter_result: AdapterResultModel,
+) -> ServiceResultModel:
+  output = adapter_result.output
+  normalized_staff = normalize_staff_assessments(bundle.staff_participants_json, output.staff_assessments_json)
+  primary_need_code = _normalize_code(output.primary_need_code) or "unknown"
+  journey_code = _normalize_code(output.journey_code) or "unknown"
+  if primary_need_code == "revisit":
+    raise InvalidServiceResultError("primary_need_code cannot be revisit")
+  if adapter_result.status == "failed" and adapter_result.failure_info_json is None:
+    raise InvalidServiceResultError("failed result missing failure_info_json")
 
-
-def _normalize_output(output: AnalysisOutputModel) -> AnalysisOutputModel:
-  return AnalysisOutputModel(
+  return ServiceResultModel(
+    thread_day_id=bundle.thread_day_id,
+    result_status=adapter_result.status,
+    prompt_hash=prompt_hash,
     opening_theme_code=_normalize_code(output.opening_theme_code) or "unknown",
     opening_theme_reason=_normalize_nullable_text(output.opening_theme_reason),
     customer_mood_code=_normalize_enum(
@@ -245,10 +228,10 @@ def _normalize_output(output: AnalysisOutputModel) -> AnalysisOutputModel:
         "binh_thuong": "neutral",
       },
     ),
-    primary_need_code=_normalize_code(output.primary_need_code) or "unknown",
+    primary_need_code=primary_need_code,
     primary_topic_code=_normalize_code(output.primary_topic_code) or "unknown",
     journey_code=_normalize_enum(
-      output.journey_code,
+      journey_code,
       {"new_to_clinic", "revisit"},
       "unknown",
       aliases={
@@ -287,25 +270,58 @@ def _normalize_output(output: AnalysisOutputModel) -> AnalysisOutputModel:
       },
     ),
     process_risk_reason_text=_normalize_nullable_text(output.process_risk_reason_text),
-    staff_assessments_json=_normalize_staff_assessments(output.staff_assessments_json),
+    staff_assessments_json=normalized_staff,
     evidence_used_json=_normalize_json_object(output.evidence_used_json),
     field_explanations_json=_normalize_json_object(output.field_explanations_json),
     supporting_message_ids_json=_normalize_string_list(output.supporting_message_ids_json),
+    usage_json=_normalize_json_object(adapter_result.usage_json),
+    cost_micros=max(0, adapter_result.cost_micros),
+    failure_info_json=adapter_result.failure_info_json,
   )
 
 
-def _normalize_staff_assessments(value: Any) -> list[dict[str, Any]]:
-  if not isinstance(value, list):
-    return []
-  normalized: list[dict[str, Any]] = []
-  for raw_item in value:
-    if not isinstance(raw_item, dict):
+def failure_result_from_exception(thread_day_id: str, prompt_hash: str, error: Exception) -> ServiceResultModel:
+  return ServiceResultModel(
+    thread_day_id=thread_day_id,
+    result_status="failed",
+    prompt_hash=prompt_hash,
+    opening_theme_code="unknown",
+    customer_mood_code="unknown",
+    primary_need_code="unknown",
+    primary_topic_code="unknown",
+    journey_code="unknown",
+    closing_outcome_inference_code="unknown",
+    process_risk_level_code="unknown",
+    staff_assessments_json=[],
+    evidence_used_json={},
+    field_explanations_json={},
+    supporting_message_ids_json=[],
+    usage_json={},
+    cost_micros=0,
+    failure_info_json={
+      "reason": "invalid_output",
+      "error": str(error),
+    },
+  )
+
+
+def normalize_staff_assessments(
+  staff_participants: list[str],
+  values: list[StaffAssessmentModel],
+) -> list[StaffAssessmentModel]:
+  allowed_names = {(_normalize_nullable_text(name) or "") for name in staff_participants}
+  normalized: list[StaffAssessmentModel] = []
+  seen: set[str] = set()
+  for item in values:
+    staff_name = _normalize_nullable_text(item.staff_name)
+    if staff_name is None or staff_name not in allowed_names or staff_name in seen:
       continue
+    seen.add(staff_name)
     normalized.append(
-      {
-        "staff_name": _normalize_nullable_text(raw_item.get("staff_name")),
-        "response_quality_code": _normalize_enum(
-          str(raw_item.get("response_quality_code", "")),
+      StaffAssessmentModel(
+        staff_name=staff_name,
+        response_quality_code=_normalize_enum(
+          item.response_quality_code,
           {"strong", "adequate", "needs_attention"},
           "unknown",
           aliases={
@@ -314,9 +330,9 @@ def _normalize_staff_assessments(value: Any) -> list[dict[str, Any]]:
             "can_cai_thien": "needs_attention",
           },
         ),
-        "issue_text": _normalize_nullable_text(raw_item.get("issue_text")),
-        "improvement_text": _normalize_nullable_text(raw_item.get("improvement_text")),
-      }
+        issue_text=_normalize_nullable_text(item.issue_text),
+        improvement_text=_normalize_nullable_text(item.improvement_text),
+      )
     )
   return normalized
 
@@ -390,7 +406,15 @@ def _first_signal_value(mapping: dict[str, Any], key: str) -> str | None:
   return None
 
 
-def _resolve_journey_code(opening_signals: dict[str, Any], tag_signals: dict[str, Any], transcript: str) -> str:
+def _resolve_journey_code(
+  opening_signals: dict[str, Any],
+  tag_signals: dict[str, Any],
+  transcript: str,
+  explicit_revisit_signal: str | None,
+) -> str:
+  journey_signal = _normalize_code(explicit_revisit_signal)
+  if journey_signal in {"revisit", "tai_kham", "khach_tai_kham"}:
+    return "revisit"
   journey_signal = _normalize_code(_first_signal_value(opening_signals, "journey") or _first_signal_value(tag_signals, "journey"))
   if journey_signal in {"revisit", "tai_kham", "khach_tai_kham"}:
     return "revisit"
@@ -422,6 +446,8 @@ def _first_opening_reason(bundle: UnitBundleModel) -> str | None:
       signal_code = signal.get("signal_code")
       if isinstance(signal_code, str) and signal_code.strip():
         return signal_code.strip()
+  if bundle.first_meaningful_message_text_redacted and bundle.first_meaningful_message_text_redacted.strip():
+    return bundle.first_meaningful_message_text_redacted.strip()
   for message in bundle.messages:
     if message.is_meaningful_human_message and message.redacted_text and message.redacted_text.strip():
       return message.redacted_text.strip()
@@ -452,17 +478,17 @@ def _collect_explicit_signals(value: Any) -> dict[str, list[str]]:
   return buckets
 
 
-def _build_staff_assessments(staff_messages: list[MessageModel], customer_messages: list[MessageModel]) -> list[dict[str, Any]]:
-  staff_names = []
-  seen = set()
-  for message in staff_messages:
-    staff_name = _normalize_nullable_text(message.sender_name) or "Nhân viên chưa rõ tên"
-    if staff_name in seen:
-      continue
-    seen.add(staff_name)
-    staff_names.append(staff_name)
-
-  if not staff_names:
+def _build_staff_assessments(
+  staff_participants: list[str],
+  staff_messages: list[Any],
+  customer_messages: list[Any],
+) -> list[StaffAssessmentModel]:
+  allowed_names = [
+    normalized_name
+    for normalized_name in (_normalize_nullable_text(name) for name in staff_participants)
+    if normalized_name is not None
+  ]
+  if not allowed_names:
     return []
 
   response_quality_code = "adequate" if customer_messages else "unknown"
@@ -474,13 +500,13 @@ def _build_staff_assessments(staff_messages: list[MessageModel], customer_messag
     improvement_text = "Cần đảm bảo có phản hồi đầu tiên từ nhân viên trong ngày để tránh rơi lead."
 
   return [
-    {
-      "staff_name": staff_name,
-      "response_quality_code": response_quality_code,
-      "issue_text": issue_text,
-      "improvement_text": improvement_text,
-    }
-    for staff_name in staff_names
+    StaffAssessmentModel(
+      staff_name=staff_name,
+      response_quality_code=response_quality_code,
+      issue_text=issue_text,
+      improvement_text=improvement_text,
+    )
+    for staff_name in allowed_names
   ]
 
 
@@ -488,13 +514,14 @@ def _build_evidence(
   bundle: UnitBundleModel,
   opening_signals: dict[str, Any],
   tag_signals: dict[str, Any],
-  staff_messages: list[MessageModel],
+  staff_messages: list[Any],
 ) -> dict[str, Any]:
   return {
     "opening_signals": opening_signals,
     "normalized_tag_signals": tag_signals,
     "first_meaningful_message_id": bundle.first_meaningful_message_id,
     "first_meaningful_message_sender_role": bundle.first_meaningful_message_sender_role,
+    "first_meaningful_message_text_redacted": bundle.first_meaningful_message_text_redacted,
     "staff_names": sorted(
       {
         _normalize_nullable_text(message.sender_name) or "Nhân viên chưa rõ tên"
@@ -508,17 +535,17 @@ def _build_field_explanations(
   opening_theme_reason: str | None,
   primary_need_code: str,
   process_risk_level_code: str,
-  staff_messages: list[MessageModel],
-  customer_messages: list[MessageModel],
+  staff_messages: list[Any],
+  customer_messages: list[Any],
 ) -> dict[str, Any]:
   return {
     "opening_theme_code": "Lấy từ opening block nếu có explicit signal, fallback về first meaningful message.",
-    "primary_need_code": f"Heuristic theo tag signal hoặc keyword; current value = {primary_need_code}.",
-    "journey_code": "Ưu tiên explicit opening/tag journey signal, fallback keyword transcript.",
+    "primary_need_code": f"Ưu tiên explicit need signal/tag signal, fallback keyword; current value = {primary_need_code}.",
+    "journey_code": "Ưu tiên explicit revisit/journey signal, fallback keyword transcript.",
     "process_risk_level_code": (
       "Đẩy lên high khi có khách nhắn mà chưa thấy nhân viên phản hồi trong slice."
       if process_risk_level_code == "high"
-      else "Heuristic nhẹ dựa trên transcript và sự hiện diện của phản hồi nhân viên."
+      else "Suy luận nhẹ dựa trên transcript và sự hiện diện của phản hồi nhân viên."
     ),
     "staff_assessments_json": (
       "Chỉ sinh assessment cho staff thực sự xuất hiện trong thread_day."
@@ -530,7 +557,7 @@ def _build_field_explanations(
   }
 
 
-def _build_supporting_message_ids(messages: list[MessageModel]) -> list[str]:
+def _build_supporting_message_ids(messages: list[Any]) -> list[str]:
   candidates = []
   for message in messages:
     if not message.id:
@@ -542,6 +569,6 @@ def _build_supporting_message_ids(messages: list[MessageModel]) -> list[str]:
   return candidates
 
 
-def _estimate_token_count(messages: list[MessageModel]) -> int:
+def _estimate_token_count(messages: list[Any]) -> int:
   text_length = sum(len(message.redacted_text or "") for message in messages)
   return max(1, round(text_length / 4)) if text_length > 0 else 0
