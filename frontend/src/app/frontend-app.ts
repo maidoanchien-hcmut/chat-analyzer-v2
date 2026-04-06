@@ -34,7 +34,7 @@ import { exportBusinessWorkbook } from "../shared/export.ts";
 import { escapeHtml } from "../shared/html.ts";
 import { createDefaultExportWorkflowState, ensureExportWorkflowPage, readExportRequest, type ExportWorkflowState } from "./export-workflow.ts";
 import { applyBusinessFilters, parseRouteState, reconcileRouteStateWithCatalog, serializeRouteState } from "./query-state.ts";
-import type { ConfigurationState, OnboardingState, OperationsState } from "./screen-state.ts";
+import type { ConfigurationState, OperationsState } from "./screen-state.ts";
 
 export class FrontendApp {
   private readonly root: HTMLDivElement;
@@ -47,43 +47,41 @@ export class FrontendApp {
   private catalog: Awaited<ReturnType<typeof this.businessAdapter.loadCatalog>> | null = null;
   private currentViewHtml = "";
   private exportWorkflow: ExportWorkflowState = createDefaultExportWorkflowState();
-  private onboarding: OnboardingState = {
-    token: "",
-    tokenPages: [],
-    selectedPancakePageId: "",
-    timezone: "Asia/Ho_Chi_Minh",
-    etlEnabled: true,
-    analysisEnabled: false,
-    sampleConversationLimit: 12,
-    sampleMessagePageLimit: 2
-  };
   private configuration: ConfigurationState = {
     activeTab: "page-info",
     connectedPages: [],
-    selectedPageId: "",
     pageDetail: null,
-    selectedConfigVersionId: "",
-    promptText: "",
-    tagMappings: [createEmptyTagMapping()],
-    openingRules: [createEmptyOpeningRule()],
-    scheduler: createDefaultScheduler(),
-    notificationTargets: [createEmptyNotificationTarget()],
-    notes: "",
-    activateAfterCreate: true,
-    etlEnabled: true,
-    analysisEnabled: false,
+    workspace: {
+      token: "",
+      tokenPages: [],
+      selectedPancakePageId: "",
+      businessTimezone: "Asia/Ho_Chi_Minh",
+      selectedPageId: "",
+      selectedConfigVersionId: "",
+      etlEnabled: true,
+      analysisEnabled: false,
+      sampleConversationLimit: 12,
+      sampleMessagePageLimit: 2,
+      promptText: "",
+      tagMappings: [createEmptyTagMapping()],
+      openingRules: [createEmptyOpeningRule()],
+      scheduler: createDefaultScheduler(),
+      notificationTargets: [createEmptyNotificationTarget()],
+      notes: "",
+      activateAfterCreate: true,
+      promptCloneSourceVersionId: "",
+      promptCloneSourcePageId: "",
+      promptCompareLeftVersionId: "",
+      promptCompareRightVersionId: "",
+      selectedPromptSampleConversationId: ""
+    },
     onboardingSamplePreview: null,
     promptWorkspaceSamplePreview: null,
     promptWorkspaceSampleFingerprint: null,
     promptWorkspaceSampleStaleReason: null,
-    selectedPromptSampleConversationId: "",
     promptPreviewComparison: null,
     promptPreviewComparisonFingerprint: null,
-    promptPreviewComparisonStaleReason: null,
-    promptCloneSourceVersionId: "",
-    promptCloneSourcePageId: "",
-    promptCompareLeftVersionId: "",
-    promptCompareRightVersionId: ""
+    promptPreviewComparisonStaleReason: null
   };
   private operations: OperationsState = {
     activePanel: "manual-run",
@@ -113,6 +111,7 @@ export class FrontendApp {
   async init() {
     this.root.addEventListener("click", (event) => void this.onClick(event));
     this.root.addEventListener("submit", (event) => void this.onSubmit(event));
+    this.root.addEventListener("input", (event) => this.onInput(event));
     this.root.addEventListener("change", (event) => void this.onChange(event));
     window.addEventListener("popstate", () => void this.restoreFromLocation());
     await this.withPending("load-shell", async () => {
@@ -172,7 +171,7 @@ export class FrontendApp {
         this.hydrateConfig(this.configuration.pageDetail.activeConfigVersion);
         this.toast = { kind: "info", message: "Đã nạp active config." };
       } else if (action === "load-onboarding-sample") {
-        await this.loadOnboardingSamplePreview();
+        await this.loadOnboardingSamplePreview(target.closest("form"));
       } else if (action === "load-prompt-workspace-sample") {
         await this.loadPromptWorkspaceSamplePreview(target.closest("form"));
       } else if (action === "run-prompt-preview") {
@@ -195,34 +194,36 @@ export class FrontendApp {
         this.toast = { kind: "info", message: "Đã tạo file .xlsx business-facing từ workflow export riêng." };
       } else if (action === "add-tag-mapping-row") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
-        this.configuration.tagMappings = [...this.configuration.tagMappings, createEmptyTagMapping()];
+        this.configuration.workspace.tagMappings = [...this.configuration.workspace.tagMappings, createEmptyTagMapping()];
         this.refreshPromptPreviewFreshness();
       } else if (action === "add-opening-rule-row") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
-        this.configuration.openingRules = [...this.configuration.openingRules, createEmptyOpeningRule()];
+        this.configuration.workspace.openingRules = [...this.configuration.workspace.openingRules, createEmptyOpeningRule()];
         this.refreshPromptPreviewFreshness();
       } else if (action === "add-notification-target-row") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
-        this.configuration.notificationTargets = [...this.configuration.notificationTargets, createEmptyNotificationTarget()];
+        this.configuration.workspace.notificationTargets = [...this.configuration.workspace.notificationTargets, createEmptyNotificationTarget()];
       } else if (action === "clone-prompt-from-version") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
-        const configVersion = this.configuration.pageDetail?.configVersions.find((item) => item.id === this.configuration.promptCloneSourceVersionId) ?? null;
+        const configVersion = this.configuration.pageDetail?.configVersions.find(
+          (item) => item.id === this.configuration.workspace.promptCloneSourceVersionId
+        ) ?? null;
         if (!configVersion) {
           throw new Error("Cần chọn prompt version để clone.");
         }
-        this.configuration.promptText = configVersion.promptText;
+        this.configuration.workspace.promptText = configVersion.promptText;
         this.refreshPromptPreviewFreshness();
         this.toast = { kind: "info", message: `Đã clone prompt từ v${configVersion.versionNo}.` };
       } else if (action === "clone-prompt-from-page") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
-        if (!this.configuration.promptCloneSourcePageId) {
+        if (!this.configuration.workspace.promptCloneSourcePageId) {
           throw new Error("Cần chọn page nguồn để clone prompt.");
         }
-        const sourcePage = await this.controlPlaneAdapter.getConnectedPage(this.configuration.promptCloneSourcePageId);
+        const sourcePage = await this.controlPlaneAdapter.getConnectedPage(this.configuration.workspace.promptCloneSourcePageId);
         if (!sourcePage.activeConfigVersion) {
           throw new Error("Page nguồn chưa có active config để clone.");
         }
-        this.configuration.promptText = sourcePage.activeConfigVersion.promptText;
+        this.configuration.workspace.promptText = sourcePage.activeConfigVersion.promptText;
         this.refreshPromptPreviewFreshness();
         this.toast = { kind: "info", message: `Đã clone prompt từ page ${sourcePage.pageName}.` };
       }
@@ -321,6 +322,13 @@ export class FrontendApp {
         });
         window.history.replaceState({}, "", `?${serializeRouteState(this.route)}`);
         await this.loadCurrentView();
+      } else if (
+        form.dataset.form === "onboarding-token"
+        || form.dataset.form === "onboarding-register"
+        || form.dataset.form === "configuration-load-page"
+        || form.dataset.form === "configuration-create"
+      ) {
+        this.syncConfigurationDraftFromForm(form);
       } else if (form.dataset.form === "page-comparison-filters") {
         if (!this.catalog) {
           return;
@@ -338,12 +346,6 @@ export class FrontendApp {
         });
         window.history.replaceState({}, "", `?${serializeRouteState(this.route)}`);
         await this.loadCurrentView();
-      } else if (form.dataset.form === "onboarding-token") {
-        this.syncOnboardingTokenDraft(form);
-      } else if (form.dataset.form === "onboarding-register") {
-        this.syncOnboardingSelectionDraft(form);
-      } else if (form.dataset.form === "configuration-create") {
-        this.syncConfigurationDraftFromForm(form);
       } else if (form.dataset.form === "operations-publish") {
         const data = new FormData(form);
         this.operations.publishRunId = String(data.get("publishRunId") ?? this.operations.publishRunId).trim();
@@ -362,6 +364,23 @@ export class FrontendApp {
       this.toast = { kind: "error", message: error instanceof Error ? error.message : String(error) };
       this.render();
     }
+  }
+
+  private onInput(event: Event) {
+    const form = (event.target as HTMLElement | null)?.closest<HTMLFormElement>("form");
+    if (!form?.dataset.form) {
+      return;
+    }
+    if (
+      form.dataset.form !== "onboarding-token"
+      && form.dataset.form !== "onboarding-register"
+      && form.dataset.form !== "configuration-load-page"
+      && form.dataset.form !== "configuration-create"
+    ) {
+      return;
+    }
+    this.syncConfigurationDraftFromForm(form);
+    this.render();
   }
 
   private async loadCurrentView() {
@@ -416,34 +435,35 @@ export class FrontendApp {
     }
     this.currentViewHtml = this.route.view === "operations"
       ? renderOperations(this.operations)
-      : renderConfiguration(this.configuration, this.onboarding);
+      : renderConfiguration(this.configuration);
   }
 
   private async listFromToken(form: HTMLFormElement) {
-    this.syncOnboardingTokenDraft(form);
+    this.syncConfigurationDraftFromForm(form);
+    const workspace = this.configuration.workspace;
     await this.withPending("list-from-token", async () => {
-      this.onboarding.tokenPages = await this.controlPlaneAdapter.listPagesFromToken(this.onboarding.token.trim());
-      this.onboarding.selectedPancakePageId = this.onboarding.tokenPages[0]?.pageId ?? "";
+      workspace.tokenPages = await this.controlPlaneAdapter.listPagesFromToken(workspace.token.trim());
+      workspace.selectedPancakePageId = workspace.tokenPages[0]?.pageId ?? "";
       this.configuration.onboardingSamplePreview = null;
-      this.configuration.scheduler.timezone = this.onboarding.timezone || this.configuration.scheduler.timezone;
-      this.toast = { kind: "info", message: `Đã tải ${this.onboarding.tokenPages.length} page từ token.` };
+      this.configuration.workspace.scheduler.timezone = workspace.businessTimezone || this.configuration.workspace.scheduler.timezone;
+      this.toast = { kind: "info", message: `Đã tải ${workspace.tokenPages.length} page từ token.` };
     });
   }
 
   private async registerPage(form: HTMLFormElement) {
-    this.syncOnboardingTokenDraft(this.root.querySelector<HTMLFormElement>("[data-form='onboarding-token']"));
-    this.syncOnboardingSelectionDraft(form);
-    const pancakePageId = this.onboarding.selectedPancakePageId.trim();
+    this.syncConfigurationDraftFromForm(form);
+    const workspace = this.configuration.workspace;
+    const pancakePageId = workspace.selectedPancakePageId.trim();
     if (!pancakePageId) {
       throw new Error("Cần chọn Pancake page.");
     }
     await this.withPending("register-page", async () => {
       const detail = await this.controlPlaneAdapter.registerPage({
         pancakePageId,
-        userAccessToken: this.onboarding.token.trim(),
-        businessTimezone: this.onboarding.timezone,
-        etlEnabled: this.onboarding.etlEnabled,
-        analysisEnabled: this.onboarding.analysisEnabled
+        userAccessToken: workspace.token.trim(),
+        businessTimezone: workspace.businessTimezone,
+        etlEnabled: workspace.etlEnabled,
+        analysisEnabled: workspace.analysisEnabled
       });
       this.applyLoadedConnectedPage(detail);
       this.configuration.onboardingSamplePreview = null;
@@ -457,8 +477,8 @@ export class FrontendApp {
       const pages = await this.controlPlaneAdapter.listConnectedPages();
       this.configuration.connectedPages = pages;
       this.operations.connectedPages = pages;
-      this.configuration.selectedPageId = pages.some((page) => page.id === this.configuration.selectedPageId)
-        ? this.configuration.selectedPageId
+      this.configuration.workspace.selectedPageId = pages.some((page) => page.id === this.configuration.workspace.selectedPageId)
+        ? this.configuration.workspace.selectedPageId
         : (pages[0]?.id ?? "");
       this.operations.selectedPageId = pages.some((page) => page.id === this.operations.selectedPageId)
         ? this.operations.selectedPageId
@@ -467,7 +487,8 @@ export class FrontendApp {
   }
 
   private async loadConnectedPage(form: HTMLFormElement) {
-    const pageId = String(new FormData(form).get("selectedPageId") ?? this.configuration.selectedPageId).trim();
+    this.syncConfigurationDraftFromForm(form);
+    const pageId = this.configuration.workspace.selectedPageId.trim();
     if (!pageId) {
       throw new Error("Cần chọn connected page.");
     }
@@ -479,43 +500,44 @@ export class FrontendApp {
   }
 
   private async createConfigVersion(form: HTMLFormElement) {
-    if (!this.configuration.selectedPageId) {
+    this.syncConfigurationDraftFromForm(form);
+    const workspace = this.configuration.workspace;
+    if (!workspace.selectedPageId) {
       throw new Error("Cần chọn connected page trước khi tạo config version.");
     }
-    this.syncConfigurationDraftFromForm(form);
     await this.withPending("create-config-version", async () => {
       await this.controlPlaneAdapter.createConfigVersion(
-        this.configuration.selectedPageId,
+        workspace.selectedPageId,
         buildCreateConfigVersionInput({
-          promptText: this.configuration.promptText,
-          tagMappings: this.configuration.tagMappings,
-          openingRules: this.configuration.openingRules,
-          scheduler: this.configuration.scheduler,
-          notificationTargets: this.configuration.notificationTargets,
-          notes: this.configuration.notes,
-          activate: this.configuration.activateAfterCreate,
-          etlEnabled: this.configuration.etlEnabled,
-          analysisEnabled: this.configuration.analysisEnabled
+          promptText: workspace.promptText,
+          tagMappings: workspace.tagMappings,
+          openingRules: workspace.openingRules,
+          scheduler: workspace.scheduler,
+          notificationTargets: workspace.notificationTargets,
+          notes: workspace.notes,
+          activate: workspace.activateAfterCreate,
+          etlEnabled: workspace.etlEnabled,
+          analysisEnabled: workspace.analysisEnabled
         })
       );
-      const detail = await this.controlPlaneAdapter.getConnectedPage(this.configuration.selectedPageId);
+      const detail = await this.controlPlaneAdapter.getConnectedPage(workspace.selectedPageId);
       this.configuration.pageDetail = detail;
-      this.configuration.selectedConfigVersionId = detail.activeConfigVersionId ?? detail.configVersions[0]?.id ?? "";
+      this.configuration.workspace.selectedConfigVersionId = detail.activeConfigVersionId ?? detail.configVersions[0]?.id ?? "";
       this.hydrateConfig(detail.activeConfigVersion ?? detail.configVersions[0] ?? null);
       this.toast = { kind: "info", message: "Đã tạo config version mới." };
     });
   }
 
   private async activateConfigVersion() {
-    const selectedConfigVersionId = this.root.querySelector<HTMLSelectElement>("[data-form='configuration-create'] select[name='selectedConfigVersionId']")?.value
-      ?? this.configuration.selectedConfigVersionId;
-    if (!this.configuration.selectedPageId || !selectedConfigVersionId) {
+    const workspace = this.configuration.workspace;
+    const selectedConfigVersionId = workspace.selectedConfigVersionId;
+    if (!workspace.selectedPageId || !selectedConfigVersionId) {
       throw new Error("Cần chọn page và config version.");
     }
     await this.withPending("activate-config-version", async () => {
-      this.configuration.selectedConfigVersionId = selectedConfigVersionId;
+      this.configuration.workspace.selectedConfigVersionId = selectedConfigVersionId;
       this.configuration.pageDetail = await this.controlPlaneAdapter.activateConfigVersion(
-        this.configuration.selectedPageId,
+        workspace.selectedPageId,
         selectedConfigVersionId
       );
       this.hydrateConfig(this.configuration.pageDetail.activeConfigVersion ?? null);
@@ -629,31 +651,30 @@ export class FrontendApp {
     });
   }
 
-  private async loadOnboardingSamplePreview() {
-    this.syncOnboardingTokenDraft(this.root.querySelector<HTMLFormElement>("[data-form='onboarding-token']"));
-    this.syncOnboardingSelectionDraft(this.root.querySelector<HTMLFormElement>("[data-form='onboarding-register']"));
-    this.syncConfigurationDraftFromForm(this.root.querySelector<HTMLFormElement>("[data-form='configuration-create']"));
+  private async loadOnboardingSamplePreview(form: HTMLFormElement | null) {
+    this.syncConfigurationDraftFromForm(form);
+    const workspace = this.configuration.workspace;
 
-    if (!this.onboarding.token.trim()) {
+    if (!workspace.token.trim()) {
       throw new Error("Cần nhập user access token trước khi lấy sample.");
     }
-    if (!this.onboarding.selectedPancakePageId.trim()) {
+    if (!workspace.selectedPancakePageId.trim()) {
       throw new Error("Cần chọn Pancake page trước khi lấy sample.");
     }
 
     await this.withPending("load-onboarding-sample", async () => {
-      const selectedPage = this.onboarding.tokenPages.find((page) => page.pageId === this.onboarding.selectedPancakePageId);
+      const selectedPage = workspace.tokenPages.find((page) => page.pageId === workspace.selectedPancakePageId);
       this.configuration.onboardingSamplePreview = await this.controlPlaneAdapter.previewOnboardingSample(
         buildOnboardingSamplePreviewInput({
-          pancakePageId: this.onboarding.selectedPancakePageId,
-          userAccessToken: this.onboarding.token.trim(),
-          pageName: selectedPage?.pageName ?? this.onboarding.selectedPancakePageId,
-          businessTimezone: this.onboarding.timezone,
-          tagMappings: this.configuration.tagMappings,
-          openingRules: this.configuration.openingRules,
-          scheduler: this.configuration.scheduler,
-          sampleConversationLimit: this.onboarding.sampleConversationLimit,
-          sampleMessagePageLimit: this.onboarding.sampleMessagePageLimit
+          pancakePageId: workspace.selectedPancakePageId,
+          userAccessToken: workspace.token.trim(),
+          pageName: selectedPage?.pageName ?? workspace.selectedPancakePageId,
+          businessTimezone: workspace.businessTimezone,
+          tagMappings: workspace.tagMappings,
+          openingRules: workspace.openingRules,
+          scheduler: workspace.scheduler,
+          sampleConversationLimit: workspace.sampleConversationLimit,
+          sampleMessagePageLimit: workspace.sampleMessagePageLimit
         })
       );
       this.toast = { kind: "info", message: "Đã nạp sample dữ liệu thật cho workspace cấu hình." };
@@ -661,69 +682,40 @@ export class FrontendApp {
   }
 
   private hydrateConfig(configVersion: NonNullable<ConfigurationState["pageDetail"]>["activeConfigVersion"] | NonNullable<ConfigurationState["pageDetail"]>["configVersions"][number] | null) {
-    const fallbackTimezone = this.configuration.pageDetail?.businessTimezone ?? this.onboarding.timezone;
+    const workspace = this.configuration.workspace;
+    const fallbackTimezone = this.configuration.pageDetail?.businessTimezone ?? workspace.businessTimezone;
     const draft = configVersionToDraft(configVersion, fallbackTimezone);
-    this.configuration.promptText = draft.promptText;
-    this.configuration.tagMappings = draft.tagMappings;
-    this.configuration.openingRules = draft.openingRules;
-    this.configuration.scheduler = draft.scheduler;
-    this.configuration.notificationTargets = draft.notificationTargets;
-    this.configuration.notes = draft.notes;
+    workspace.promptText = draft.promptText;
+    workspace.tagMappings = draft.tagMappings;
+    workspace.openingRules = draft.openingRules;
+    workspace.scheduler = draft.scheduler;
+    workspace.notificationTargets = draft.notificationTargets;
+    workspace.notes = draft.notes;
     this.refreshPromptPreviewFreshness();
   }
 
   private applyLoadedConnectedPage(detail: NonNullable<ConfigurationState["pageDetail"]>) {
-    this.configuration.selectedPageId = detail.id;
+    const workspace = this.configuration.workspace;
+    workspace.selectedPageId = detail.id;
+    workspace.selectedPancakePageId = detail.pancakePageId;
+    workspace.businessTimezone = detail.businessTimezone;
     this.configuration.pageDetail = detail;
     this.configuration.onboardingSamplePreview = null;
     this.configuration.promptWorkspaceSamplePreview = null;
     this.configuration.promptWorkspaceSampleFingerprint = null;
     this.configuration.promptWorkspaceSampleStaleReason = null;
-    this.configuration.selectedPromptSampleConversationId = "";
+    workspace.selectedPromptSampleConversationId = "";
     this.configuration.promptPreviewComparison = null;
     this.configuration.promptPreviewComparisonFingerprint = null;
     this.configuration.promptPreviewComparisonStaleReason = null;
-    this.configuration.selectedConfigVersionId = detail.activeConfigVersionId ?? detail.configVersions[0]?.id ?? "";
-    this.configuration.etlEnabled = detail.etlEnabled;
-    this.configuration.analysisEnabled = detail.analysisEnabled;
-    this.configuration.promptCloneSourcePageId = "";
-    this.configuration.promptCloneSourceVersionId = this.configuration.selectedConfigVersionId;
-    this.configuration.promptCompareLeftVersionId = detail.configVersions[0]?.id ?? "";
-    this.configuration.promptCompareRightVersionId = detail.configVersions[1]?.id ?? detail.configVersions[0]?.id ?? "";
+    workspace.selectedConfigVersionId = detail.activeConfigVersionId ?? detail.configVersions[0]?.id ?? "";
+    workspace.etlEnabled = detail.etlEnabled;
+    workspace.analysisEnabled = detail.analysisEnabled;
+    workspace.promptCloneSourcePageId = "";
+    workspace.promptCloneSourceVersionId = workspace.selectedConfigVersionId;
+    workspace.promptCompareLeftVersionId = detail.configVersions[0]?.id ?? "";
+    workspace.promptCompareRightVersionId = detail.configVersions[1]?.id ?? detail.configVersions[0]?.id ?? "";
     this.hydrateConfig(detail.activeConfigVersion ?? detail.configVersions[0] ?? null);
-  }
-
-  private syncOnboardingTokenDraft(form: HTMLFormElement | null) {
-    if (!form) {
-      return;
-    }
-    const data = new FormData(form);
-    this.onboarding.token = String(data.get("token") ?? this.onboarding.token);
-    this.onboarding.timezone = String(data.get("timezone") ?? this.onboarding.timezone).trim() || "Asia/Ho_Chi_Minh";
-    this.onboarding.etlEnabled = data.get("etlEnabled") !== null;
-    this.onboarding.analysisEnabled = data.get("analysisEnabled") !== null;
-  }
-
-  private syncOnboardingSelectionDraft(form: HTMLFormElement | null) {
-    if (!form) {
-      return;
-    }
-    const data = new FormData(form);
-    this.onboarding.selectedPancakePageId = String(data.get("pancakePageId") ?? this.onboarding.selectedPancakePageId).trim();
-    this.onboarding.sampleConversationLimit = readBoundedIntegerField(
-      data,
-      "sampleConversationLimit",
-      this.onboarding.sampleConversationLimit,
-      1,
-      100
-    );
-    this.onboarding.sampleMessagePageLimit = readBoundedIntegerField(
-      data,
-      "sampleMessagePageLimit",
-      this.onboarding.sampleMessagePageLimit,
-      1,
-      20
-    );
   }
 
   private syncConfigurationDraftFromForm(form: HTMLFormElement | null) {
@@ -731,37 +723,77 @@ export class FrontendApp {
       return;
     }
     const data = new FormData(form);
-    this.configuration.selectedConfigVersionId = String(data.get("selectedConfigVersionId") ?? this.configuration.selectedConfigVersionId).trim();
-    this.configuration.promptText = String(data.get("promptText") ?? this.configuration.promptText);
-    this.configuration.promptCloneSourceVersionId = String(data.get("promptCloneSourceVersionId") ?? this.configuration.promptCloneSourceVersionId).trim();
-    this.configuration.promptCloneSourcePageId = String(data.get("promptCloneSourcePageId") ?? this.configuration.promptCloneSourcePageId).trim();
-    this.configuration.promptCompareLeftVersionId = String(data.get("promptCompareLeftVersionId") ?? this.configuration.promptCompareLeftVersionId).trim();
-    this.configuration.promptCompareRightVersionId = String(data.get("promptCompareRightVersionId") ?? this.configuration.promptCompareRightVersionId).trim();
-    this.configuration.selectedPromptSampleConversationId = String(
-      data.get("selectedPromptSampleConversationId") ?? this.configuration.selectedPromptSampleConversationId
+    const workspace = this.configuration.workspace;
+    if (form.dataset.form === "onboarding-token") {
+      workspace.token = String(data.get("token") ?? workspace.token);
+      workspace.businessTimezone = String(data.get("businessTimezone") ?? workspace.businessTimezone).trim() || "Asia/Ho_Chi_Minh";
+      workspace.etlEnabled = data.get("etlEnabled") !== null;
+      workspace.analysisEnabled = data.get("analysisEnabled") !== null;
+      if (workspace.scheduler.useSystemDefaults) {
+        workspace.scheduler = {
+          ...workspace.scheduler,
+          timezone: workspace.businessTimezone
+        };
+      }
+      return;
+    }
+    if (form.dataset.form === "onboarding-register") {
+      workspace.selectedPancakePageId = String(data.get("pancakePageId") ?? workspace.selectedPancakePageId).trim();
+      workspace.sampleConversationLimit = readBoundedIntegerField(
+        data,
+        "sampleConversationLimit",
+        workspace.sampleConversationLimit,
+        1,
+        100
+      );
+      workspace.sampleMessagePageLimit = readBoundedIntegerField(
+        data,
+        "sampleMessagePageLimit",
+        workspace.sampleMessagePageLimit,
+        1,
+        20
+      );
+      return;
+    }
+    if (form.dataset.form === "configuration-load-page") {
+      workspace.selectedPageId = String(data.get("selectedPageId") ?? workspace.selectedPageId).trim();
+      return;
+    }
+    if (form.dataset.form !== "configuration-create") {
+      return;
+    }
+
+    workspace.selectedConfigVersionId = String(data.get("selectedConfigVersionId") ?? workspace.selectedConfigVersionId).trim();
+    workspace.promptText = String(data.get("promptText") ?? workspace.promptText);
+    workspace.promptCloneSourceVersionId = String(data.get("promptCloneSourceVersionId") ?? workspace.promptCloneSourceVersionId).trim();
+    workspace.promptCloneSourcePageId = String(data.get("promptCloneSourcePageId") ?? workspace.promptCloneSourcePageId).trim();
+    workspace.promptCompareLeftVersionId = String(data.get("promptCompareLeftVersionId") ?? workspace.promptCompareLeftVersionId).trim();
+    workspace.promptCompareRightVersionId = String(data.get("promptCompareRightVersionId") ?? workspace.promptCompareRightVersionId).trim();
+    workspace.selectedPromptSampleConversationId = String(
+      data.get("selectedPromptSampleConversationId") ?? workspace.selectedPromptSampleConversationId
     ).trim();
-    this.configuration.notes = String(data.get("notes") ?? this.configuration.notes);
-    this.configuration.activateAfterCreate = data.get("activateAfterCreate") !== null;
-    this.configuration.etlEnabled = data.get("etlEnabled") !== null;
-    this.configuration.analysisEnabled = data.get("analysisEnabled") !== null;
-    this.configuration.tagMappings = zipTagMappings(
+    workspace.notes = String(data.get("notes") ?? workspace.notes);
+    workspace.activateAfterCreate = data.get("activateAfterCreate") !== null;
+    workspace.etlEnabled = data.get("etlEnabled") !== null;
+    workspace.analysisEnabled = data.get("analysisEnabled") !== null;
+    workspace.tagMappings = zipTagMappings(
       data.getAll("tagRawTag"),
       data.getAll("tagRole"),
       data.getAll("tagCanonicalValue"),
       data.getAll("tagSource")
     );
-    this.configuration.openingRules = zipOpeningRules(
+    workspace.openingRules = zipOpeningRules(
       data.getAll("openingButtonTitle"),
       data.getAll("openingSignalType"),
       data.getAll("openingCanonicalValue")
     );
-    this.configuration.scheduler = {
+    workspace.scheduler = {
       useSystemDefaults: data.get("schedulerUseSystemDefaults") !== null,
-      timezone: String(data.get("schedulerTimezone") ?? this.configuration.scheduler.timezone).trim() || this.onboarding.timezone,
-      officialDailyTime: String(data.get("schedulerOfficialDailyTime") ?? this.configuration.scheduler.officialDailyTime).trim() || "00:00",
-      lookbackHours: Number(String(data.get("schedulerLookbackHours") ?? this.configuration.scheduler.lookbackHours).trim() || "2")
+      timezone: String(data.get("schedulerTimezone") ?? workspace.scheduler.timezone).trim() || workspace.businessTimezone,
+      officialDailyTime: String(data.get("schedulerOfficialDailyTime") ?? workspace.scheduler.officialDailyTime).trim() || "00:00",
+      lookbackHours: Number(String(data.get("schedulerLookbackHours") ?? workspace.scheduler.lookbackHours).trim() || "2")
     };
-    this.configuration.notificationTargets = zipNotificationTargets(
+    workspace.notificationTargets = zipNotificationTargets(
       data.getAll("notificationChannel"),
       data.getAll("notificationValue")
     );
@@ -771,6 +803,7 @@ export class FrontendApp {
   private async loadPromptWorkspaceSamplePreview(form: HTMLFormElement | null) {
     this.syncConfigurationDraftFromForm(form);
     const pageDetail = this.configuration.pageDetail;
+    const workspace = this.configuration.workspace;
     if (!pageDetail) {
       throw new Error("Cần tải connected page trước khi lấy sample prompt workspace.");
     }
@@ -779,17 +812,17 @@ export class FrontendApp {
       this.configuration.promptWorkspaceSamplePreview = await this.controlPlaneAdapter.previewPromptWorkspaceSample(
         pageDetail.id,
         buildPromptWorkspaceSampleInput({
-          tagMappings: this.configuration.tagMappings,
-          openingRules: this.configuration.openingRules,
-          scheduler: this.configuration.scheduler,
+          tagMappings: workspace.tagMappings,
+          openingRules: workspace.openingRules,
+          scheduler: workspace.scheduler,
           businessTimezone: pageDetail.businessTimezone,
-          sampleConversationLimit: this.onboarding.sampleConversationLimit,
-          sampleMessagePageLimit: this.onboarding.sampleMessagePageLimit
+          sampleConversationLimit: workspace.sampleConversationLimit,
+          sampleMessagePageLimit: workspace.sampleMessagePageLimit
         })
       );
       this.configuration.promptWorkspaceSampleFingerprint = this.buildCurrentPromptWorkspaceSampleFingerprint();
       this.configuration.promptWorkspaceSampleStaleReason = null;
-      this.configuration.selectedPromptSampleConversationId =
+      this.configuration.workspace.selectedPromptSampleConversationId =
         this.configuration.promptWorkspaceSamplePreview.conversations[0]?.conversationId ?? "";
       this.configuration.promptPreviewComparison = null;
       this.configuration.promptPreviewComparisonFingerprint = null;
@@ -802,6 +835,7 @@ export class FrontendApp {
     this.syncConfigurationDraftFromForm(form);
     const pageDetail = this.configuration.pageDetail;
     const samplePreview = this.configuration.promptWorkspaceSamplePreview;
+    const workspace = this.configuration.workspace;
     if (!pageDetail) {
       throw new Error("Cần tải connected page trước khi chạy thử prompt.");
     }
@@ -816,9 +850,9 @@ export class FrontendApp {
       this.configuration.promptPreviewComparison = await this.controlPlaneAdapter.previewPromptArtifacts(
         pageDetail.id,
         buildPromptPreviewArtifactInput({
-          promptText: this.configuration.promptText,
+          promptText: workspace.promptText,
           samplePreview,
-          selectedConversationId: this.configuration.selectedPromptSampleConversationId
+          selectedConversationId: workspace.selectedPromptSampleConversationId
         })
       );
       this.configuration.promptPreviewComparisonFingerprint = this.buildCurrentPromptPreviewComparisonFingerprint();
@@ -829,32 +863,34 @@ export class FrontendApp {
 
   private buildCurrentPromptWorkspaceSampleFingerprint() {
     const pageDetail = this.configuration.pageDetail;
+    const workspace = this.configuration.workspace;
     if (!pageDetail) {
       return null;
     }
     return buildPromptWorkspaceSampleFingerprint({
-      tagMappings: this.configuration.tagMappings,
-      openingRules: this.configuration.openingRules,
-      scheduler: this.configuration.scheduler,
+      tagMappings: workspace.tagMappings,
+      openingRules: workspace.openingRules,
+      scheduler: workspace.scheduler,
       businessTimezone: pageDetail.businessTimezone,
-      sampleConversationLimit: this.onboarding.sampleConversationLimit,
-      sampleMessagePageLimit: this.onboarding.sampleMessagePageLimit
+      sampleConversationLimit: workspace.sampleConversationLimit,
+      sampleMessagePageLimit: workspace.sampleMessagePageLimit
     });
   }
 
   private buildCurrentPromptPreviewComparisonFingerprint() {
     const samplePreview = this.configuration.promptWorkspaceSamplePreview;
+    const workspace = this.configuration.workspace;
     if (!samplePreview) {
       return null;
     }
-    const selectedConversationId = this.configuration.selectedPromptSampleConversationId
+    const selectedConversationId = workspace.selectedPromptSampleConversationId
       || samplePreview.conversations[0]?.conversationId
       || "";
     if (!selectedConversationId) {
       return null;
     }
     return buildPromptPreviewComparisonFingerprint({
-      promptText: this.configuration.promptText,
+      promptText: workspace.promptText,
       samplePreview,
       selectedConversationId
     });

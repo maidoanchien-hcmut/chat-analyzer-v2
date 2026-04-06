@@ -37,23 +37,17 @@ export type NotificationTargetDraft = {
   value: string;
 };
 
-export type OnboardingState = {
+export type ConfigurationWorkspaceDraft = {
   token: string;
   tokenPages: OnboardingPageCandidate[];
   selectedPancakePageId: string;
-  timezone: string;
+  businessTimezone: string;
+  selectedPageId: string;
+  selectedConfigVersionId: string;
   etlEnabled: boolean;
   analysisEnabled: boolean;
   sampleConversationLimit: number;
   sampleMessagePageLimit: number;
-};
-
-export type ConfigurationState = {
-  activeTab: "page-info" | "taxonomy" | "opening-rules" | "prompt-profile" | "scheduler";
-  connectedPages: ConnectedPageSummary[];
-  selectedPageId: string;
-  pageDetail: ConnectedPageDetailViewModel | null;
-  selectedConfigVersionId: string;
   promptText: string;
   tagMappings: TagMappingDraft[];
   openingRules: OpeningRuleDraft[];
@@ -61,20 +55,25 @@ export type ConfigurationState = {
   notificationTargets: NotificationTargetDraft[];
   notes: string;
   activateAfterCreate: boolean;
-  etlEnabled: boolean;
-  analysisEnabled: boolean;
-  onboardingSamplePreview: OnboardingSamplePreviewViewModel | null;
-  promptWorkspaceSamplePreview: PromptWorkspaceSampleViewModel | null;
-  promptWorkspaceSampleFingerprint: string | null;
-  promptWorkspaceSampleStaleReason: string | null;
-  selectedPromptSampleConversationId: string;
-  promptPreviewComparison: PromptPreviewComparisonViewModel | null;
-  promptPreviewComparisonFingerprint: string | null;
-  promptPreviewComparisonStaleReason: string | null;
   promptCloneSourceVersionId: string;
   promptCloneSourcePageId: string;
   promptCompareLeftVersionId: string;
   promptCompareRightVersionId: string;
+  selectedPromptSampleConversationId: string;
+};
+
+export type ConfigurationState = {
+  activeTab: "page-info" | "taxonomy" | "opening-rules" | "prompt-profile" | "scheduler";
+  connectedPages: ConnectedPageSummary[];
+  pageDetail: ConnectedPageDetailViewModel | null;
+  workspace: ConfigurationWorkspaceDraft;
+  onboardingSamplePreview: OnboardingSamplePreviewViewModel | null;
+  promptWorkspaceSamplePreview: PromptWorkspaceSampleViewModel | null;
+  promptWorkspaceSampleFingerprint: string | null;
+  promptWorkspaceSampleStaleReason: string | null;
+  promptPreviewComparison: PromptPreviewComparisonViewModel | null;
+  promptPreviewComparisonFingerprint: string | null;
+  promptPreviewComparisonStaleReason: string | null;
 };
 
 export type OperationsState = {

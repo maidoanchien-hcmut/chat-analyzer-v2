@@ -1,19 +1,20 @@
-import type { ConfigurationState, OnboardingState } from "../../app/screen-state.ts";
+import type { ConfigurationState } from "../../app/screen-state.ts";
 import { escapeHtml } from "../../shared/html.ts";
 
-export function renderConfiguration(configuration: ConfigurationState, onboarding: OnboardingState) {
-  const compareLeft = configuration.pageDetail?.configVersions.find((item) => item.id === configuration.promptCompareLeftVersionId) ?? null;
-  const compareRight = configuration.pageDetail?.configVersions.find((item) => item.id === configuration.promptCompareRightVersionId) ?? null;
+export function renderConfiguration(configuration: ConfigurationState) {
+  const draft = configuration.workspace;
+  const compareLeft = configuration.pageDetail?.configVersions.find((item) => item.id === draft.promptCompareLeftVersionId) ?? null;
+  const compareRight = configuration.pageDetail?.configVersions.find((item) => item.id === draft.promptCompareRightVersionId) ?? null;
   const selectedPromptSampleConversation = configuration.promptWorkspaceSamplePreview?.conversations.find(
-    (item) => item.conversationId === configuration.selectedPromptSampleConversationId
+    (item) => item.conversationId === draft.selectedPromptSampleConversationId
   ) ?? configuration.promptWorkspaceSamplePreview?.conversations[0] ?? null;
   const onboardingTimezones = dedupeTimezones([
     "Asia/Ho_Chi_Minh",
     "Asia/Saigon",
     "Asia/Bangkok",
     "UTC",
-    onboarding.timezone,
-    configuration.scheduler.timezone,
+    draft.businessTimezone,
+    draft.scheduler.timezone,
     ...configuration.connectedPages.map((page) => page.businessTimezone),
     configuration.pageDetail?.businessTimezone ?? null
   ]);
@@ -49,14 +50,14 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
           <form data-form="onboarding-token">
             <label>
               <span>User access token</span>
-              <textarea name="token" rows="3" spellcheck="false" autocomplete="off" placeholder="Dán user access token Pancake ở đây.">${escapeHtml(onboarding.token)}</textarea>
+              <textarea name="token" rows="3" spellcheck="false" autocomplete="off" placeholder="Dán user access token Pancake ở đây.">${escapeHtml(draft.token)}</textarea>
             </label>
             <label>
               <span>Business timezone</span>
-              <select name="timezone">${renderOptions(onboardingTimezones, onboarding.timezone)}</select>
+              <select name="businessTimezone">${renderOptions(onboardingTimezones, draft.businessTimezone)}</select>
             </label>
-            <label class="inline-check"><input type="checkbox" name="etlEnabled" ${onboarding.etlEnabled ? "checked" : ""} /> bật ETL</label>
-            <label class="inline-check"><input type="checkbox" name="analysisEnabled" ${onboarding.analysisEnabled ? "checked" : ""} /> bật AI</label>
+            <label class="inline-check"><input type="checkbox" name="etlEnabled" ${draft.etlEnabled ? "checked" : ""} /> bật ETL</label>
+            <label class="inline-check"><input type="checkbox" name="analysisEnabled" ${draft.analysisEnabled ? "checked" : ""} /> bật AI</label>
             <button type="submit">Tải page từ token</button>
           </form>
           <form data-form="onboarding-register">
@@ -64,12 +65,12 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
               <span>Pancake page</span>
               <select name="pancakePageId">
                 <option value="">Chọn page</option>
-                ${onboarding.tokenPages.map((page) => `<option value="${escapeHtml(page.pageId)}" ${page.pageId === onboarding.selectedPancakePageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`).join("")}
+                ${draft.tokenPages.map((page) => `<option value="${escapeHtml(page.pageId)}" ${page.pageId === draft.selectedPancakePageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`).join("")}
               </select>
             </label>
             <div class="two-column-grid">
-              <label><span>Số hội thoại sample</span><input name="sampleConversationLimit" type="number" min="1" max="100" step="1" inputmode="numeric" value="${onboarding.sampleConversationLimit}" /></label>
-              <label><span>Số trang tin nhắn / thread</span><input name="sampleMessagePageLimit" type="number" min="1" max="20" step="1" inputmode="numeric" value="${onboarding.sampleMessagePageLimit}" /></label>
+              <label><span>Số hội thoại sample</span><input name="sampleConversationLimit" type="number" min="1" max="100" step="1" inputmode="numeric" value="${draft.sampleConversationLimit}" /></label>
+              <label><span>Số trang tin nhắn / thread</span><input name="sampleMessagePageLimit" type="number" min="1" max="20" step="1" inputmode="numeric" value="${draft.sampleMessagePageLimit}" /></label>
             </div>
             <button type="button" data-action="load-onboarding-sample">Lấy sample dữ liệu thật</button>
             <button type="submit">Register và activate mặc định</button>
@@ -91,7 +92,7 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
               <span>Connected page</span>
               <select name="selectedPageId">
                 <option value="">Chọn page</option>
-                ${configuration.connectedPages.map((page) => `<option value="${escapeHtml(page.id)}" ${page.id === configuration.selectedPageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`).join("")}
+                ${configuration.connectedPages.map((page) => `<option value="${escapeHtml(page.id)}" ${page.id === draft.selectedPageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`).join("")}
               </select>
             </label>
             <button type="submit">Tải cấu hình page đã chọn</button>
@@ -125,7 +126,7 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
           <label><span>Config version</span>
             <select name="selectedConfigVersionId">
               <option value="">Chọn config version</option>
-              ${configuration.pageDetail?.configVersions.map((configVersion) => `<option value="${escapeHtml(configVersion.id)}" ${configVersion.id === configuration.selectedConfigVersionId ? "selected" : ""}>v${configVersion.versionNo}</option>`).join("") ?? ""}
+              ${configuration.pageDetail?.configVersions.map((configVersion) => `<option value="${escapeHtml(configVersion.id)}" ${configVersion.id === draft.selectedConfigVersionId ? "selected" : ""}>v${configVersion.versionNo}</option>`).join("") ?? ""}
             </select>
           </label>
 
@@ -139,9 +140,9 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                 <button type="button" data-action="add-tag-mapping-row">Thêm dòng tag</button>
               </div>
               <table class="data-table">
-                <thead><tr><th>Tag thô</th><th>Loại signal</th><th>Giá trị canonical</th><th>Nguồn gốc</th></tr></thead>
+                  <thead><tr><th>Tag thô</th><th>Loại signal</th><th>Giá trị canonical</th><th>Nguồn gốc</th></tr></thead>
                 <tbody>
-                  ${configuration.tagMappings.map((entry) => `
+                  ${draft.tagMappings.map((entry) => `
                     <tr>
                       <td><input name="tagRawTag" value="${escapeHtml(entry.rawTag)}" /></td>
                       <td><select name="tagRole">${renderOptions(["noise", "customer_journey", "need", "outcome", "branch", "staff"], entry.role)}</select></td>
@@ -162,9 +163,9 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                 <button type="button" data-action="add-opening-rule-row">Thêm rule</button>
               </div>
               <table class="data-table">
-                <thead><tr><th>Button title</th><th>Signal type</th><th>Giá trị canonical</th></tr></thead>
+                  <thead><tr><th>Button title</th><th>Signal type</th><th>Giá trị canonical</th></tr></thead>
                 <tbody>
-                  ${configuration.openingRules.map((entry) => `
+                  ${draft.openingRules.map((entry) => `
                     <tr>
                       <td><input name="openingButtonTitle" value="${escapeHtml(entry.buttonTitle)}" /></td>
                       <td><select name="openingSignalType">${renderOptions(["customer_journey", "need", "outcome"], entry.signalType)}</select></td>
@@ -187,7 +188,7 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                   <span>Clone từ version cũ</span>
                   <select name="promptCloneSourceVersionId">
                     <option value="">Chọn version</option>
-                    ${configuration.pageDetail?.configVersions.map((configVersion) => `<option value="${escapeHtml(configVersion.id)}" ${configVersion.id === configuration.promptCloneSourceVersionId ? "selected" : ""}>v${configVersion.versionNo}</option>`).join("") ?? ""}
+                    ${configuration.pageDetail?.configVersions.map((configVersion) => `<option value="${escapeHtml(configVersion.id)}" ${configVersion.id === draft.promptCloneSourceVersionId ? "selected" : ""}>v${configVersion.versionNo}</option>`).join("") ?? ""}
                   </select>
                 </label>
                 <div class="button-row align-end"><button type="button" data-action="clone-prompt-from-version">Clone từ version cũ</button></div>
@@ -195,12 +196,12 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                   <span>Clone từ page khác</span>
                   <select name="promptCloneSourcePageId">
                     <option value="">Chọn page</option>
-                    ${configuration.connectedPages.map((page) => `<option value="${escapeHtml(page.id)}" ${page.id === configuration.promptCloneSourcePageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`).join("")}
+                    ${configuration.connectedPages.map((page) => `<option value="${escapeHtml(page.id)}" ${page.id === draft.promptCloneSourcePageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`).join("")}
                   </select>
                 </label>
                 <div class="button-row align-end"><button type="button" data-action="clone-prompt-from-page">Clone từ page khác</button></div>
               </div>
-              <label><span>Prompt text</span><textarea name="promptText" rows="8" placeholder="Prompt sẽ lấy từ active config của backend sau khi tải page.">${escapeHtml(configuration.promptText)}</textarea></label>
+              <label><span>Prompt text</span><textarea name="promptText" rows="8" placeholder="Prompt sẽ lấy từ active config của backend sau khi tải page.">${escapeHtml(draft.promptText)}</textarea></label>
               <div class="banner banner-warning">
                 <strong>Semantics của sample workspace</strong>
                 <p>Sample chỉ lấy dữ liệu thật để operator rà tag thô và opening block. Luồng này không đổi publish pointer và không đồng nghĩa publish dashboard.</p>
@@ -284,14 +285,14 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                   <span>So sánh 2 prompt version: bản trái</span>
                   <select name="promptCompareLeftVersionId">
                     <option value="">Chọn version</option>
-                    ${configuration.pageDetail?.configVersions.map((configVersion) => `<option value="${escapeHtml(configVersion.id)}" ${configVersion.id === configuration.promptCompareLeftVersionId ? "selected" : ""}>v${configVersion.versionNo}</option>`).join("") ?? ""}
+                    ${configuration.pageDetail?.configVersions.map((configVersion) => `<option value="${escapeHtml(configVersion.id)}" ${configVersion.id === draft.promptCompareLeftVersionId ? "selected" : ""}>v${configVersion.versionNo}</option>`).join("") ?? ""}
                   </select>
                 </label>
                 <label>
                   <span>So sánh 2 prompt version: bản phải</span>
                   <select name="promptCompareRightVersionId">
                     <option value="">Chọn version</option>
-                    ${configuration.pageDetail?.configVersions.map((configVersion) => `<option value="${escapeHtml(configVersion.id)}" ${configVersion.id === configuration.promptCompareRightVersionId ? "selected" : ""}>v${configVersion.versionNo}</option>`).join("") ?? ""}
+                    ${configuration.pageDetail?.configVersions.map((configVersion) => `<option value="${escapeHtml(configVersion.id)}" ${configVersion.id === draft.promptCompareRightVersionId ? "selected" : ""}>v${configVersion.versionNo}</option>`).join("") ?? ""}
                   </select>
                 </label>
               </div>
@@ -316,19 +317,19 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                 <button type="button" data-action="add-notification-target-row">Thêm recipient</button>
               </div>
               <div class="two-column-grid">
-                <label class="inline-check"><input type="checkbox" name="schedulerUseSystemDefaults" ${configuration.scheduler.useSystemDefaults ? "checked" : ""} /> Dùng mặc định hệ thống</label>
+                <label class="inline-check"><input type="checkbox" name="schedulerUseSystemDefaults" ${draft.scheduler.useSystemDefaults ? "checked" : ""} /> Dùng mặc định hệ thống</label>
                 <label>
                   <span>Scheduler timezone</span>
-                  <input name="schedulerTimezone" list="scheduler-timezone-options" value="${escapeHtml(configuration.scheduler.timezone)}" placeholder="Asia/Ho_Chi_Minh" />
+                  <input name="schedulerTimezone" list="scheduler-timezone-options" value="${escapeHtml(draft.scheduler.timezone)}" placeholder="Asia/Ho_Chi_Minh" />
                   <datalist id="scheduler-timezone-options">${renderDatalistOptions(onboardingTimezones)}</datalist>
                 </label>
-                <label><span>Giờ chạy official daily</span><input type="time" name="schedulerOfficialDailyTime" value="${escapeHtml(configuration.scheduler.officialDailyTime)}" /></label>
-                <label><span>Lookback hours</span><input type="number" name="schedulerLookbackHours" min="0" value="${configuration.scheduler.lookbackHours}" /></label>
+                <label><span>Giờ chạy official daily</span><input type="time" name="schedulerOfficialDailyTime" value="${escapeHtml(draft.scheduler.officialDailyTime)}" /></label>
+                <label><span>Lookback hours</span><input type="number" name="schedulerLookbackHours" min="0" value="${draft.scheduler.lookbackHours}" /></label>
               </div>
               <table class="data-table">
                 <thead><tr><th>Kênh</th><th>Recipient</th></tr></thead>
                 <tbody>
-                  ${configuration.notificationTargets.map((entry) => `
+                  ${draft.notificationTargets.map((entry) => `
                     <tr>
                       <td><select name="notificationChannel">${renderOptions(["telegram", "email"], entry.channel)}</select></td>
                       <td><input name="notificationValue" value="${escapeHtml(entry.value)}" /></td>
@@ -339,11 +340,11 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
             </article>
           </section>
 
-          <label><span>Notes</span><textarea name="notes" rows="4">${escapeHtml(configuration.notes)}</textarea></label>
+          <label><span>Notes</span><textarea name="notes" rows="4">${escapeHtml(draft.notes)}</textarea></label>
           <div class="button-row">
-            <label class="inline-check"><input type="checkbox" name="activateAfterCreate" ${configuration.activateAfterCreate ? "checked" : ""} /> activate sau khi tạo</label>
-            <label class="inline-check"><input type="checkbox" name="etlEnabled" ${configuration.etlEnabled ? "checked" : ""} /> ETL enable</label>
-            <label class="inline-check"><input type="checkbox" name="analysisEnabled" ${configuration.analysisEnabled ? "checked" : ""} /> AI enable</label>
+            <label class="inline-check"><input type="checkbox" name="activateAfterCreate" ${draft.activateAfterCreate ? "checked" : ""} /> activate sau khi tạo</label>
+            <label class="inline-check"><input type="checkbox" name="etlEnabled" ${draft.etlEnabled ? "checked" : ""} /> ETL enable</label>
+            <label class="inline-check"><input type="checkbox" name="analysisEnabled" ${draft.analysisEnabled ? "checked" : ""} /> AI enable</label>
             <button type="submit">Tạo config version</button>
           </div>
         </form>

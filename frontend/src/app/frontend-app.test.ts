@@ -57,6 +57,17 @@ beforeEach(() => {
         });
       }
 
+      if (url.pathname === "/chat-extractor/control-center/pages/list-from-token" && request.method === "POST") {
+        return json({
+          pages: [
+            {
+              pageId: "pk_101",
+              pageName: "Page Da Lieu Quan 1"
+            }
+          ]
+        });
+      }
+
       if (url.pathname === "/chat-extractor/control-center/pages/register" && request.method === "POST") {
         connectedPagesResponse = [
           {
@@ -190,11 +201,12 @@ describe("frontend app", () => {
     const app = new FrontendApp(root);
     await app.init();
 
-    (app as any).onboarding = {
+    (app as any).configuration.workspace = {
+      ...(app as any).configuration.workspace,
       token: "user-token",
       tokenPages: [{ pageId: "pk_101", pageName: "Page Da Lieu Quan 1" }],
       selectedPancakePageId: "pk_101",
-      timezone: "Asia/Ho_Chi_Minh",
+      businessTimezone: "Asia/Ho_Chi_Minh",
       etlEnabled: true,
       analysisEnabled: false,
       sampleConversationLimit: 12,
@@ -202,6 +214,9 @@ describe("frontend app", () => {
     };
 
     const form = {
+      dataset: {
+        form: "onboarding-register"
+      },
       [Symbol.iterator]: undefined
     } as unknown as HTMLFormElement;
     (globalThis as Record<string, unknown>).FormData = class {
@@ -212,9 +227,9 @@ describe("frontend app", () => {
 
     await (app as any).registerPage(form);
 
-    expect((app as any).configuration.selectedPageId).toBe("11111111-1111-4111-8111-111111111111");
+    expect((app as any).configuration.workspace.selectedPageId).toBe("11111111-1111-4111-8111-111111111111");
     expect((app as any).configuration.pageDetail?.activeConfigVersionId).toBe("cfg-101");
-    expect((app as any).configuration.promptText).toBe("Prompt default từ backend.");
+    expect((app as any).configuration.workspace.promptText).toBe("Prompt default từ backend.");
   });
 
   it("loads real onboarding sample preview into configuration state", async () => {
@@ -223,18 +238,19 @@ describe("frontend app", () => {
     const app = new FrontendApp(root);
     await app.init();
 
-    (app as any).onboarding = {
+    (app as any).configuration.workspace = {
+      ...(app as any).configuration.workspace,
       token: "user-token",
       tokenPages: [{ pageId: "pk_101", pageName: "Page Da Lieu Quan 1" }],
       selectedPancakePageId: "pk_101",
-      timezone: "Asia/Ho_Chi_Minh",
+      businessTimezone: "Asia/Ho_Chi_Minh",
       etlEnabled: true,
       analysisEnabled: false,
       sampleConversationLimit: 12,
       sampleMessagePageLimit: 2
     };
 
-    await (app as any).loadOnboardingSamplePreview();
+    await (app as any).loadOnboardingSamplePreview(null);
 
     expect((app as any).configuration.onboardingSamplePreview?.pageName).toBe("Page Da Lieu Quan 1");
     expect((app as any).configuration.onboardingSamplePreview?.conversations[0]?.normalizedTagSignals[0]?.canonicalCode).toBe("new_to_clinic");
@@ -242,23 +258,19 @@ describe("frontend app", () => {
 
   it("uses custom onboarding sample limits from the register form", async () => {
     installBrowserGlobals("?view=configuration", baseUrl);
-    const tokenForm = { kind: "token" };
-    const registerForm = { kind: "register" };
-    const root = createRoot({
-      querySelector(selector: string) {
-        if (selector === "[data-form='onboarding-token']") {
-          return tokenForm as unknown as HTMLFormElement;
-        }
-        if (selector === "[data-form='onboarding-register']") {
-          return registerForm as unknown as HTMLFormElement;
-        }
-        return null;
-      }
-    });
+    const root = createRoot();
     const app = new FrontendApp(root);
     await app.init();
 
-    (app as any).onboarding.tokenPages = [{ pageId: "pk_101", pageName: "Page Da Lieu Quan 1" }];
+    (app as any).configuration.workspace = {
+      ...(app as any).configuration.workspace,
+      token: "user-token",
+      tokenPages: [{ pageId: "pk_101", pageName: "Page Da Lieu Quan 1" }],
+      selectedPancakePageId: "pk_101",
+      businessTimezone: "Asia/Ho_Chi_Minh",
+      sampleConversationLimit: 5,
+      sampleMessagePageLimit: 4
+    };
     let capturedPreviewInput: Record<string, unknown> | null = null;
     Object.assign((app as any).controlPlaneAdapter, {
       async previewOnboardingSample(input: Record<string, unknown>) {
@@ -281,37 +293,39 @@ describe("frontend app", () => {
         };
       }
     });
-    (globalThis as Record<string, unknown>).FormData = class {
-      constructor(private readonly form: unknown) {}
 
-      get(name: string) {
-        if (this.form === tokenForm) {
-          const tokenValues: Record<string, string> = {
-            token: "user-token",
-            timezone: "Asia/Ho_Chi_Minh"
-          };
-          return tokenValues[name] ?? null;
-        }
-        if (this.form === registerForm) {
-          const registerValues: Record<string, string> = {
-            pancakePageId: "pk_101",
-            sampleConversationLimit: "5",
-            sampleMessagePageLimit: "4"
-          };
-          return registerValues[name] ?? null;
-        }
-        return null;
-      }
-
-      getAll() {
-        return [];
-      }
-    };
-
-    await (app as any).loadOnboardingSamplePreview();
+    await (app as any).loadOnboardingSamplePreview(null);
 
     expect(capturedPreviewInput?.sampleConversationLimit).toBe(5);
     expect(capturedPreviewInput?.sampleMessagePageLimit).toBe(4);
+  });
+
+  it("keeps the token in the shared workspace draft after listing pages", async () => {
+    installBrowserGlobals("?view=configuration", baseUrl);
+    const root = createRoot();
+    const app = new FrontendApp(root);
+    await app.init();
+
+    const form = {
+      dataset: {
+        form: "onboarding-token"
+      },
+      [Symbol.iterator]: undefined
+    } as unknown as HTMLFormElement;
+    (globalThis as Record<string, unknown>).FormData = class {
+      get(name: string) {
+        const values: Record<string, string> = {
+          token: "user-token",
+          businessTimezone: "Asia/Ho_Chi_Minh"
+        };
+        return values[name] ?? null;
+      }
+    };
+
+    await (app as any).listFromToken(form);
+
+    expect((app as any).configuration.workspace.token).toBe("user-token");
+    expect((app as any).configuration.workspace.selectedPancakePageId).toBe("pk_101");
   });
 });
 

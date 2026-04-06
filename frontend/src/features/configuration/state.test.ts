@@ -1,5 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import type { ConfigurationState, OnboardingState } from "../../app/screen-state.ts";
+import type { ConfigurationState } from "../../app/screen-state.ts";
 import { renderConfiguration } from "./render.ts";
 import {
   buildCreateConfigVersionInput,
@@ -194,9 +194,8 @@ describe("configuration workflow", () => {
 
   it("renders prompt profile affordances for clone and compare instead of raw json textareas", () => {
     const configuration = createConfigurationState();
-    const onboarding = createOnboardingState();
 
-    const html = renderConfiguration(configuration, onboarding);
+    const html = renderConfiguration(configuration);
 
     expect(html).toContain("Clone từ version cũ");
     expect(html).toContain("Clone từ page khác");
@@ -209,9 +208,8 @@ describe("configuration workflow", () => {
 
   it("renders prompt compare audit metadata instead of only showing prompt text", () => {
     const configuration = createConfigurationState();
-    const onboarding = createOnboardingState();
 
-    const html = renderConfiguration(configuration, onboarding);
+    const html = renderConfiguration(configuration);
 
     expect(html).toContain("Prompt A12");
     expect(html).toContain("sha256:prompt-a12");
@@ -223,11 +221,10 @@ describe("configuration workflow", () => {
 
   it("renders onboarding timezone as an owner-clean input and shows a dedicated lane for normal operators", () => {
     const configuration = createConfigurationState();
-    const onboarding = createOnboardingState();
 
-    const html = renderConfiguration(configuration, onboarding);
+    const html = renderConfiguration(configuration);
 
-    expect(html).toContain("<select name=\"timezone\">");
+    expect(html).toContain("<select name=\"businessTimezone\">");
     expect(html).toContain("Page đang vận hành");
     expect(html).toContain("Tải cấu hình page đã chọn");
   });
@@ -337,7 +334,7 @@ describe("configuration workflow", () => {
     };
 
     const payload = buildPromptPreviewArtifactInput({
-      promptText: configuration.promptText,
+      promptText: configuration.workspace.promptText,
       samplePreview,
       selectedConversationId: "c-1"
     });
@@ -544,7 +541,7 @@ describe("configuration workflow", () => {
       }
     };
 
-    const html = renderConfiguration(configuration, createOnboardingState());
+    const html = renderConfiguration(configuration);
 
     expect(html).toContain("Sample dữ liệu thật");
     expect(html).toContain("KH mới");
@@ -556,11 +553,13 @@ describe("configuration workflow", () => {
     const configuration = {
       ...createConfigurationState(),
       pageDetail: null,
-      promptText: ""
+      workspace: {
+        ...createConfigurationState().workspace,
+        promptText: ""
+      }
     };
-    const onboarding = createOnboardingState();
 
-    const html = renderConfiguration(configuration, onboarding);
+    const html = renderConfiguration(configuration);
 
     expect(html).toContain("placeholder=\"Prompt sẽ lấy từ active config của backend sau khi tải page.\"");
     expect(html).not.toContain("Giữ distinction draft / provisional / official.");
@@ -569,6 +568,10 @@ describe("configuration workflow", () => {
   it("renders prompt workspace sample and preview artifact compare separately from saved-version compare", () => {
     const configuration = {
       ...createConfigurationState(),
+      workspace: {
+        ...createConfigurationState().workspace,
+        selectedPromptSampleConversationId: "c-1"
+      },
       promptWorkspaceSamplePreview: {
         sampleWorkspaceKey: "11111111-1111-4111-8111-111111111111",
         connectedPageId: "cp-101",
@@ -624,7 +627,6 @@ describe("configuration workflow", () => {
           }
         ]
       },
-      selectedPromptSampleConversationId: "c-1",
       promptPreviewComparison: {
         sampleScope: {
           sampleScopeKey: "sha256:sample-scope",
@@ -667,7 +669,7 @@ describe("configuration workflow", () => {
       }
     };
 
-    const html = renderConfiguration(configuration, createOnboardingState());
+    const html = renderConfiguration(configuration);
 
     expect(html).toContain("Preview workspace runtime thật");
     expect(html).toContain("So sánh active vs draft trên cùng sample");
@@ -723,7 +725,7 @@ describe("configuration workflow", () => {
       promptPreviewComparisonStaleReason: "Prompt draft đã đổi, cần chạy thử prompt lại."
     };
 
-    const html = renderConfiguration(configuration, createOnboardingState());
+    const html = renderConfiguration(configuration);
 
     expect(html).toContain("Sample workspace đã cũ");
     expect(html).toContain("Preview compare cần chạy lại");
@@ -747,7 +749,6 @@ function createConfigurationState(): ConfigurationState {
         updatedAt: "2026-04-04T09:00:00.000Z"
       }
     ],
-    selectedPageId: "",
     pageDetail: {
       id: "cp-101",
       pageName: "Page Da Lieu Quan 1",
@@ -826,40 +827,36 @@ function createConfigurationState(): ConfigurationState {
         ]
       }
     },
-    selectedConfigVersionId: "",
-    promptText: "Prompt sample",
-    tagMappings: [],
-    openingRules: [],
-    scheduler: { useSystemDefaults: true, timezone: "Asia/Ho_Chi_Minh", officialDailyTime: "00:00", lookbackHours: 2 },
-    notificationTargets: [],
-    notes: "",
-    activateAfterCreate: true,
-    etlEnabled: true,
-    analysisEnabled: false,
+    workspace: {
+      token: "",
+      tokenPages: [],
+      selectedPancakePageId: "",
+      businessTimezone: "Asia/Ho_Chi_Minh",
+      selectedPageId: "",
+      selectedConfigVersionId: "",
+      etlEnabled: true,
+      analysisEnabled: false,
+      sampleConversationLimit: 12,
+      sampleMessagePageLimit: 2,
+      promptText: "Prompt sample",
+      tagMappings: [],
+      openingRules: [],
+      scheduler: { useSystemDefaults: true, timezone: "Asia/Ho_Chi_Minh", officialDailyTime: "00:00", lookbackHours: 2 },
+      notificationTargets: [],
+      notes: "",
+      activateAfterCreate: true,
+      promptCloneSourceVersionId: "",
+      promptCloneSourcePageId: "",
+      promptCompareLeftVersionId: "cfg-18",
+      promptCompareRightVersionId: "cfg-17",
+      selectedPromptSampleConversationId: ""
+    },
     onboardingSamplePreview: null,
     promptWorkspaceSamplePreview: null,
     promptWorkspaceSampleFingerprint: null,
     promptWorkspaceSampleStaleReason: null,
-    selectedPromptSampleConversationId: "",
     promptPreviewComparison: null,
     promptPreviewComparisonFingerprint: null,
-    promptPreviewComparisonStaleReason: null,
-    promptCloneSourceVersionId: "",
-    promptCloneSourcePageId: "",
-    promptCompareLeftVersionId: "cfg-18",
-    promptCompareRightVersionId: "cfg-17"
-  };
-}
-
-function createOnboardingState(): OnboardingState {
-  return {
-    token: "",
-    tokenPages: [],
-    selectedPancakePageId: "",
-    timezone: "Asia/Ho_Chi_Minh",
-    etlEnabled: true,
-    analysisEnabled: false,
-    sampleConversationLimit: 12,
-    sampleMessagePageLimit: 2
+    promptPreviewComparisonStaleReason: null
   };
 }
