@@ -209,3 +209,32 @@ Objective Card:
 - bridge code is either removed or recorded in the debt register
 - integrated result reflects the final naming and owner boundaries
 ```
+
+## Senior Audit
+
+### Audit Pass 1
+- auditor:
+  Worker `019d6212-4140-7962-bf0d-cde7ea41b561` (`gpt-5.4`, `xhigh`)
+- result:
+  Findings raised
+- material findings:
+  1. onboarding draft could still target the wrong connected page when `selectedPageId` stayed bound to an older page
+  2. register flow still overwrote the non-lazy sample-seeded draft with backend defaults
+  3. sample-to-draft seeding stopped at tag/opening rows and did not cover prompt/scheduler/notification defaults
+
+### Audit Remediation
+- changes applied:
+  Frontend register now binds the new connected-page context without forcibly hydrating backend defaults over a sample-seeded draft; connected-page reconciliation now requires `selectedPageId` to match the active onboarding `selectedPancakePageId`; sample seeding now covers default prompt, scheduler timezone alignment, and notification default-row preservation
+- proof rerun:
+  `bun test ./src/app/frontend-app.test.ts ./src/features/configuration/state.test.ts`
+- proof result:
+  Passed
+
+### Audit Pass 2
+- auditor:
+  Worker `019d621e-9bda-71a1-b0cb-670584d5ebdf` (`gpt-5.4`, `xhigh`)
+- result:
+  No findings remain for the re-reviewed scope
+- residual testing gaps:
+  - the stale-page create path is proven by focused regression coverage plus manual verification, not by one end-to-end `FrontendApp` flow test
+  - blank notification-row behavior is proven at the seeding-helper level, not by a controller-level flow test

@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { FrontendApp } from "./frontend-app.ts";
+import { DEFAULT_PAGE_LOCAL_PROMPT } from "../features/configuration/state.ts";
 
 let server: ReturnType<typeof Bun.serve> | null = null;
 let baseUrl = "";
@@ -195,7 +196,7 @@ describe("frontend app", () => {
     ]);
   });
 
-  it("hydrates the returned backend config immediately after register", async () => {
+  it("register keeps a sample-seeded draft while binding the new connected page context", async () => {
     installBrowserGlobals("?view=configuration", baseUrl);
     const root = createRoot();
     const app = new FrontendApp(root);
@@ -206,11 +207,32 @@ describe("frontend app", () => {
       token: "user-token",
       tokenPages: [{ pageId: "pk_101", pageName: "Page Da Lieu Quan 1" }],
       selectedPancakePageId: "pk_101",
+      selectedPageId: "",
       businessTimezone: "Asia/Ho_Chi_Minh",
       etlEnabled: true,
       analysisEnabled: false,
       sampleConversationLimit: 12,
-      sampleMessagePageLimit: 2
+      sampleMessagePageLimit: 2,
+      promptText: "Prompt đang chỉnh từ sample",
+      tagMappings: [
+        { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+      ]
+    };
+    (app as any).configuration.onboardingSamplePreview = {
+      pageId: "pk_101",
+      pageName: "Page Da Lieu Quan 1",
+      targetDate: "2026-04-05",
+      businessTimezone: "Asia/Ho_Chi_Minh",
+      windowStartAt: "2026-04-04T17:00:00.000Z",
+      windowEndExclusiveAt: "2026-04-05T06:00:00.000Z",
+      summary: {
+        conversationsScanned: 1,
+        threadDaysBuilt: 1,
+        messagesSeen: 3,
+        messagesSelected: 2
+      },
+      pageTags: [],
+      conversations: []
     };
 
     const form = {
@@ -229,7 +251,14 @@ describe("frontend app", () => {
 
     expect((app as any).configuration.workspace.selectedPageId).toBe("11111111-1111-4111-8111-111111111111");
     expect((app as any).configuration.pageDetail?.activeConfigVersionId).toBe("cfg-101");
-    expect((app as any).configuration.workspace.promptText).toBe("Prompt default từ backend.");
+    expect((app as any).configuration.workspace.promptText).toBe("Prompt đang chỉnh từ sample");
+    expect((app as any).configuration.workspace.tagMappings[0]).toEqual({
+      rawTag: "KH mới",
+      role: "customer_journey",
+      canonicalValue: "new_to_clinic",
+      source: "operator_override"
+    });
+    expect((app as any).configuration.onboardingSamplePreview?.pageId).toBe("pk_101");
   });
 
   it("loads real onboarding sample preview into configuration state", async () => {
@@ -260,11 +289,26 @@ describe("frontend app", () => {
       canonicalValue: "new_to_clinic",
       source: "operator_override"
     });
+    expect((app as any).configuration.workspace.promptText).toBe(DEFAULT_PAGE_LOCAL_PROMPT);
     expect((app as any).configuration.workspace.openingRules[0]).toEqual({
       buttonTitle: "Khách hàng tái khám",
       signalType: "customer_journey",
       canonicalValue: "revisit"
     });
+  });
+
+  it("clears a stale connected page binding when onboarding switches to a different pancake page", async () => {
+    installBrowserGlobals("?view=configuration", baseUrl);
+    const root = createRoot();
+    const app = new FrontendApp(root);
+    await app.init();
+
+    (app as any).configuration.workspace.selectedPancakePageId = "pk_new";
+    (app as any).configuration.workspace.selectedPageId = "11111111-1111-4111-8111-111111111111";
+
+    await (app as any).refreshControlPages({ reloadView: false });
+
+    expect((app as any).configuration.workspace.selectedPageId).toBe("");
   });
 
   it("uses custom onboarding sample limits from the register form", async () => {

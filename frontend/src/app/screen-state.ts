@@ -69,6 +69,9 @@ export type OnboardingSampleSeedSummary = {
   openingOverridesPreserved: number;
   observedTagCount: number;
   explicitOpeningSignalCount: number;
+  promptDefaultsApplied: number;
+  schedulerDefaultsApplied: number;
+  notificationDefaultsApplied: number;
 };
 
 export type ConfigurationState = {

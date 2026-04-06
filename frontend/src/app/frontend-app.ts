@@ -446,6 +446,7 @@ export class FrontendApp {
     await this.withPending("list-from-token", async () => {
       workspace.tokenPages = await this.controlPlaneAdapter.listPagesFromToken(workspace.token.trim());
       workspace.selectedPancakePageId = workspace.tokenPages[0]?.pageId ?? "";
+      this.reconcileConfigurationSelectedPageId(this.configuration.connectedPages);
       this.configuration.onboardingSamplePreview = null;
       this.configuration.onboardingSampleSeedSummary = null;
       this.configuration.workspace.scheduler.timezone = workspace.businessTimezone || this.configuration.workspace.scheduler.timezone;
@@ -461,6 +462,7 @@ export class FrontendApp {
       throw new Error("Cần chọn Pancake page.");
     }
     await this.withPending("register-page", async () => {
+      const preserveDraft = this.shouldPreserveOnboardingDraftAfterRegister();
       const detail = await this.controlPlaneAdapter.registerPage({
         pancakePageId,
         userAccessToken: workspace.token.trim(),
@@ -468,11 +470,15 @@ export class FrontendApp {
         etlEnabled: workspace.etlEnabled,
         analysisEnabled: workspace.analysisEnabled
       });
-      this.applyLoadedConnectedPage(detail);
-      this.configuration.onboardingSamplePreview = null;
-      this.configuration.onboardingSampleSeedSummary = null;
+      if (preserveDraft) {
+        this.applyRegisteredPageContext(detail);
+      } else {
+        this.applyLoadedConnectedPage(detail);
+      }
       await this.refreshControlPages({ reloadView: false });
-      this.toast = { kind: "info", message: "Đã register page qua HTTP thật." };
+      this.toast = preserveDraft
+        ? { kind: "info", message: "Đã register page và giữ nguyên workspace draft để chỉnh tiếp." }
+        : { kind: "info", message: "Đã register page qua HTTP thật." };
     });
   }
 
@@ -481,9 +487,7 @@ export class FrontendApp {
       const pages = await this.controlPlaneAdapter.listConnectedPages();
       this.configuration.connectedPages = pages;
       this.operations.connectedPages = pages;
-      this.configuration.workspace.selectedPageId = pages.some((page) => page.id === this.configuration.workspace.selectedPageId)
-        ? this.configuration.workspace.selectedPageId
-        : (pages[0]?.id ?? "");
+      this.reconcileConfigurationSelectedPageId(pages);
       this.operations.selectedPageId = pages.some((page) => page.id === this.operations.selectedPageId)
         ? this.operations.selectedPageId
         : (pages[0]?.id ?? "");
@@ -507,7 +511,7 @@ export class FrontendApp {
     this.syncConfigurationDraftFromForm(form);
     const workspace = this.configuration.workspace;
     if (!workspace.selectedPageId) {
-      throw new Error("Cần chọn connected page trước khi tạo config version.");
+      throw new Error("Cần register page hoặc tải connected page trước khi tạo config version.");
     }
     await this.withPending("create-config-version", async () => {
       await this.controlPlaneAdapter.createConfigVersion(
@@ -682,13 +686,20 @@ export class FrontendApp {
         })
       );
       const seededDraft = seedWorkspaceDraftFromOnboardingSample({
+        promptText: workspace.promptText,
         tagMappings: workspace.tagMappings,
         openingRules: workspace.openingRules,
+        scheduler: workspace.scheduler,
+        notificationTargets: workspace.notificationTargets,
         samplePreview: this.configuration.onboardingSamplePreview
       });
+      workspace.promptText = seededDraft.promptText;
       workspace.tagMappings = seededDraft.tagMappings;
       workspace.openingRules = seededDraft.openingRules;
+      workspace.scheduler = seededDraft.scheduler;
+      workspace.notificationTargets = seededDraft.notificationTargets;
       this.configuration.onboardingSampleSeedSummary = seededDraft.summary;
+      this.reconcileConfigurationSelectedPageId(this.configuration.connectedPages);
       this.toast = { kind: "info", message: "Đã nạp sample dữ liệu thật cho workspace cấu hình." };
     });
   }
@@ -707,13 +718,26 @@ export class FrontendApp {
   }
 
   private applyLoadedConnectedPage(detail: NonNullable<ConfigurationState["pageDetail"]>) {
+    this.bindConnectedPageContext(detail, { hydrateWorkspaceConfig: true, clearOnboardingSample: true });
+  }
+
+  private applyRegisteredPageContext(detail: NonNullable<ConfigurationState["pageDetail"]>) {
+    this.bindConnectedPageContext(detail, { hydrateWorkspaceConfig: false, clearOnboardingSample: false });
+  }
+
+  private bindConnectedPageContext(
+    detail: NonNullable<ConfigurationState["pageDetail"]>,
+    options: { hydrateWorkspaceConfig: boolean; clearOnboardingSample: boolean }
+  ) {
     const workspace = this.configuration.workspace;
     workspace.selectedPageId = detail.id;
     workspace.selectedPancakePageId = detail.pancakePageId;
     workspace.businessTimezone = detail.businessTimezone;
     this.configuration.pageDetail = detail;
-    this.configuration.onboardingSamplePreview = null;
-    this.configuration.onboardingSampleSeedSummary = null;
+    if (options.clearOnboardingSample) {
+      this.configuration.onboardingSamplePreview = null;
+      this.configuration.onboardingSampleSeedSummary = null;
+    }
     this.configuration.promptWorkspaceSamplePreview = null;
     this.configuration.promptWorkspaceSampleFingerprint = null;
     this.configuration.promptWorkspaceSampleStaleReason = null;
@@ -728,7 +752,11 @@ export class FrontendApp {
     workspace.promptCloneSourceVersionId = workspace.selectedConfigVersionId;
     workspace.promptCompareLeftVersionId = detail.configVersions[0]?.id ?? "";
     workspace.promptCompareRightVersionId = detail.configVersions[1]?.id ?? detail.configVersions[0]?.id ?? "";
-    this.hydrateConfig(detail.activeConfigVersion ?? detail.configVersions[0] ?? null);
+    if (options.hydrateWorkspaceConfig) {
+      this.hydrateConfig(detail.activeConfigVersion ?? detail.configVersions[0] ?? null);
+      return;
+    }
+    this.refreshPromptPreviewFreshness();
   }
 
   private syncConfigurationDraftFromForm(form: HTMLFormElement | null) {
@@ -752,6 +780,7 @@ export class FrontendApp {
     }
     if (form.dataset.form === "onboarding-register") {
       workspace.selectedPancakePageId = String(data.get("pancakePageId") ?? workspace.selectedPancakePageId).trim();
+      this.reconcileConfigurationSelectedPageId(this.configuration.connectedPages);
       workspace.sampleConversationLimit = readBoundedIntegerField(
         data,
         "sampleConversationLimit",
@@ -811,6 +840,31 @@ export class FrontendApp {
       data.getAll("notificationValue")
     );
     this.refreshPromptPreviewFreshness();
+  }
+
+  private shouldPreserveOnboardingDraftAfterRegister() {
+    const workspace = this.configuration.workspace;
+    return this.configuration.onboardingSamplePreview !== null
+      || workspace.promptText.trim().length > 0
+      || hasConfiguredTagMappings(workspace.tagMappings)
+      || hasConfiguredOpeningRules(workspace.openingRules)
+      || !workspace.scheduler.useSystemDefaults
+      || hasConfiguredNotificationTargets(workspace.notificationTargets)
+      || workspace.notes.trim().length > 0;
+  }
+
+  private reconcileConfigurationSelectedPageId(pages: ConfigurationState["connectedPages"]) {
+    const workspace = this.configuration.workspace;
+    const selectedPage = pages.find((page) => page.id === workspace.selectedPageId) ?? null;
+    if (workspace.selectedPancakePageId.trim()) {
+      if (selectedPage?.pancakePageId === workspace.selectedPancakePageId) {
+        return;
+      }
+      const matchedPage = pages.find((page) => page.pancakePageId === workspace.selectedPancakePageId);
+      workspace.selectedPageId = matchedPage?.id ?? "";
+      return;
+    }
+    workspace.selectedPageId = selectedPage?.id ?? "";
   }
 
   private async loadPromptWorkspaceSamplePreview(form: HTMLFormElement | null) {
@@ -1134,6 +1188,18 @@ function zipNotificationTargets(channels: FormDataEntryValue[], values: FormData
     channel: String(channels[index] ?? "telegram"),
     value: String(values[index] ?? "")
   }));
+}
+
+function hasConfiguredTagMappings(entries: ConfigurationState["workspace"]["tagMappings"]) {
+  return entries.some((entry) => entry.rawTag.trim() || entry.canonicalValue.trim() || entry.source === "operator_override");
+}
+
+function hasConfiguredOpeningRules(entries: ConfigurationState["workspace"]["openingRules"]) {
+  return entries.some((entry) => entry.buttonTitle.trim() || entry.canonicalValue.trim());
+}
+
+function hasConfiguredNotificationTargets(entries: ConfigurationState["workspace"]["notificationTargets"]) {
+  return entries.some((entry) => entry.value.trim());
 }
 
 function normalizeComparePageIds(comparePageIds: string[], pages: Array<{ id: string }>) {

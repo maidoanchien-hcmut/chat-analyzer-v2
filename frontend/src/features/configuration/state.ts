@@ -53,10 +53,19 @@ export type PromptPreviewFreshnessState = {
 };
 
 export type OnboardingSampleSeedResult = {
+  promptText: string;
   tagMappings: TagMappingDraft[];
   openingRules: OpeningRuleDraft[];
+  scheduler: SchedulerDraft;
+  notificationTargets: NotificationTargetDraft[];
   summary: OnboardingSampleSeedSummary;
 };
+
+export const DEFAULT_PAGE_LOCAL_PROMPT = [
+  "Đánh giá hội thoại theo đúng quy trình vận hành của page này.",
+  "Tập trung vào nhu cầu khách hàng, cách nhân viên phản hồi và kết quả chốt cuối ngày.",
+  "Không suy diễn ngoài nội dung hội thoại."
+].join(" ");
 
 export function buildCreateConfigVersionInput(input: ConfigDraftInput): CreateConfigVersionInput {
   return {
@@ -316,25 +325,37 @@ export function createEmptyNotificationTarget(): NotificationTargetDraft {
 }
 
 export function seedWorkspaceDraftFromOnboardingSample(input: {
+  promptText: string;
   tagMappings: TagMappingDraft[];
   openingRules: OpeningRuleDraft[];
+  scheduler: SchedulerDraft;
+  notificationTargets: NotificationTargetDraft[];
   samplePreview: OnboardingSamplePreviewViewModel;
 }): OnboardingSampleSeedResult {
   const tagSuggestions = collectTagSuggestions(input.samplePreview);
   const openingSuggestions = collectOpeningSuggestions(input.samplePreview);
   const tagMerge = mergeTagMappings(input.tagMappings, tagSuggestions);
   const openingMerge = mergeOpeningRules(input.openingRules, openingSuggestions);
+  const promptSeed = seedPromptText(input.promptText);
+  const schedulerSeed = seedScheduler(input.scheduler, input.samplePreview.businessTimezone);
+  const notificationSeed = seedNotificationTargets(input.notificationTargets);
 
   return {
+    promptText: promptSeed.promptText,
     tagMappings: tagMerge.entries,
     openingRules: openingMerge.entries,
+    scheduler: schedulerSeed.scheduler,
+    notificationTargets: notificationSeed.notificationTargets,
     summary: {
       tagSuggestionsApplied: tagMerge.applied,
       openingSuggestionsApplied: openingMerge.applied,
       tagOverridesPreserved: tagMerge.preserved,
       openingOverridesPreserved: openingMerge.preserved,
       observedTagCount: tagSuggestions.length,
-      explicitOpeningSignalCount: openingSuggestions.length
+      explicitOpeningSignalCount: openingSuggestions.length,
+      promptDefaultsApplied: promptSeed.applied,
+      schedulerDefaultsApplied: schedulerSeed.applied,
+      notificationDefaultsApplied: notificationSeed.applied
     }
   };
 }
@@ -491,6 +512,65 @@ function mergeOpeningRules(current: OpeningRuleDraft[], suggestions: OpeningRule
     entries: entries.length > 0 ? entries : [createEmptyOpeningRule()],
     applied,
     preserved
+  };
+}
+
+function seedPromptText(promptText: string) {
+  const trimmed = promptText.trim();
+  if (trimmed) {
+    return {
+      promptText,
+      applied: 0
+    };
+  }
+  return {
+    promptText: DEFAULT_PAGE_LOCAL_PROMPT,
+    applied: 1
+  };
+}
+
+function seedScheduler(current: SchedulerDraft, businessTimezone: string) {
+  if (!current.useSystemDefaults) {
+    return {
+      scheduler: { ...current },
+      applied: 0
+    };
+  }
+
+  if (current.timezone.trim() === businessTimezone.trim()) {
+    return {
+      scheduler: { ...current },
+      applied: 0
+    };
+  }
+
+  return {
+    scheduler: {
+      ...current,
+      timezone: businessTimezone
+    },
+    applied: 1
+  };
+}
+
+function seedNotificationTargets(current: NotificationTargetDraft[]) {
+  if (current.some((entry) => entry.channel.trim() || entry.value.trim())) {
+    return {
+      notificationTargets: current.map((entry) => ({ ...entry })),
+      applied: 0
+    };
+  }
+
+  if (current.length > 0) {
+    return {
+      notificationTargets: current.map((entry) => ({ ...entry })),
+      applied: 0
+    };
+  }
+
+  return {
+    notificationTargets: [createEmptyNotificationTarget()],
+    applied: 1
   };
 }
 

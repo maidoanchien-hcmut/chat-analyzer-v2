@@ -367,6 +367,9 @@ export function renderConfiguration(configuration: ConfigurationState) {
                   <p>
                     Tag áp dụng: ${configuration.onboardingSampleSeedSummary.tagSuggestionsApplied}.
                     Opening áp dụng: ${configuration.onboardingSampleSeedSummary.openingSuggestionsApplied}.
+                    Prompt mặc định: ${configuration.onboardingSampleSeedSummary.promptDefaultsApplied}.
+                    Scheduler mặc định: ${configuration.onboardingSampleSeedSummary.schedulerDefaultsApplied}.
+                    Notification mặc định: ${configuration.onboardingSampleSeedSummary.notificationDefaultsApplied}.
                     Override giữ nguyên: ${configuration.onboardingSampleSeedSummary.tagOverridesPreserved + configuration.onboardingSampleSeedSummary.openingOverridesPreserved}.
                   </p>
                 </div>

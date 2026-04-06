@@ -3,6 +3,7 @@ import type { ConfigurationState } from "../../app/screen-state.ts";
 import { renderConfiguration } from "./render.ts";
 import { buildTimezoneOptions } from "./timezones.ts";
 import {
+  DEFAULT_PAGE_LOCAL_PROMPT,
   buildCreateConfigVersionInput,
   buildOnboardingSamplePreviewInput,
   buildPromptPreviewComparisonFingerprint,
@@ -306,6 +307,9 @@ describe("configuration workflow", () => {
     const seeded = seedWorkspaceDraftFromOnboardingSample({
       tagMappings: [{ rawTag: "", role: "noise", canonicalValue: "", source: "system_default" }],
       openingRules: [{ buttonTitle: "", signalType: "customer_journey", canonicalValue: "" }],
+      promptText: "",
+      scheduler: { useSystemDefaults: true, timezone: "Asia/Ho_Chi_Minh", officialDailyTime: "00:00", lookbackHours: 2 },
+      notificationTargets: [],
       samplePreview: {
         pageId: "pk_101",
         pageName: "Page Da Lieu Quan 1",
@@ -343,14 +347,25 @@ describe("configuration workflow", () => {
       }
     });
 
+    expect(seeded.promptText).toBe(DEFAULT_PAGE_LOCAL_PROMPT);
     expect(seeded.tagMappings).toEqual([
       { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
     ]);
     expect(seeded.openingRules).toEqual([
       { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
     ]);
+    expect(seeded.scheduler).toEqual({
+      useSystemDefaults: true,
+      timezone: "Asia/Saigon",
+      officialDailyTime: "00:00",
+      lookbackHours: 2
+    });
+    expect(seeded.notificationTargets).toEqual([
+      { channel: "telegram", value: "" }
+    ]);
     expect(seeded.summary.tagSuggestionsApplied).toBe(1);
     expect(seeded.summary.openingSuggestionsApplied).toBe(1);
+    expect(seeded.summary.promptDefaultsApplied).toBe(1);
   });
 
   it("preserves operator overrides when a later sample suggests the same tag or opening rule", () => {
@@ -361,6 +376,9 @@ describe("configuration workflow", () => {
       openingRules: [
         { buttonTitle: "Khách hàng tái khám", signalType: "need", canonicalValue: "consultation" }
       ],
+      promptText: "Prompt riêng do operator chỉnh",
+      scheduler: { useSystemDefaults: false, timezone: "Asia/Tokyo", officialDailyTime: "08:30", lookbackHours: 6 },
+      notificationTargets: [{ channel: "email", value: "ops@example.com" }],
       samplePreview: {
         pageId: "pk_101",
         pageName: "Page Da Lieu Quan 1",
@@ -394,14 +412,25 @@ describe("configuration workflow", () => {
       }
     });
 
+    expect(seeded.promptText).toBe("Prompt riêng do operator chỉnh");
     expect(seeded.tagMappings).toEqual([
       { rawTag: "KH mới", role: "need", canonicalValue: "consultation", source: "operator_override" }
     ]);
     expect(seeded.openingRules).toEqual([
       { buttonTitle: "Khách hàng tái khám", signalType: "need", canonicalValue: "consultation" }
     ]);
+    expect(seeded.scheduler).toEqual({
+      useSystemDefaults: false,
+      timezone: "Asia/Tokyo",
+      officialDailyTime: "08:30",
+      lookbackHours: 6
+    });
+    expect(seeded.notificationTargets).toEqual([
+      { channel: "email", value: "ops@example.com" }
+    ]);
     expect(seeded.summary.tagOverridesPreserved).toBe(1);
     expect(seeded.summary.openingOverridesPreserved).toBe(1);
+    expect(seeded.summary.promptDefaultsApplied).toBe(0);
   });
 
   it("does not damage the current draft when onboarding sample returns no suggestions", () => {
@@ -414,6 +443,9 @@ describe("configuration workflow", () => {
     const seeded = seedWorkspaceDraftFromOnboardingSample({
       tagMappings: currentTagMappings,
       openingRules: currentOpeningRules,
+      promptText: "Prompt giữ nguyên",
+      scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
+      notificationTargets: [{ channel: "telegram", value: "" }],
       samplePreview: {
         pageId: "pk_101",
         pageName: "Page Da Lieu Quan 1",
@@ -432,10 +464,13 @@ describe("configuration workflow", () => {
       }
     });
 
+    expect(seeded.promptText).toBe("Prompt giữ nguyên");
     expect(seeded.tagMappings).toEqual(currentTagMappings);
     expect(seeded.openingRules).toEqual(currentOpeningRules);
+    expect(seeded.notificationTargets).toEqual([{ channel: "telegram", value: "" }]);
     expect(seeded.summary.tagSuggestionsApplied).toBe(0);
     expect(seeded.summary.openingSuggestionsApplied).toBe(0);
+    expect(seeded.summary.notificationDefaultsApplied).toBe(0);
   });
 
   it("builds prompt preview artifact input from the selected sample conversation", () => {
