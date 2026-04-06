@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { ConfigurationState } from "../../app/screen-state.ts";
 import { renderConfiguration } from "./render.ts";
+import { buildTimezoneOptions } from "./timezones.ts";
 import {
   buildCreateConfigVersionInput,
   buildOnboardingSamplePreviewInput,
@@ -226,8 +227,27 @@ describe("configuration workflow", () => {
     const html = renderConfiguration(configuration);
 
     expect(html).toContain("<select name=\"businessTimezone\">");
+    expect(html).toContain("<select name=\"schedulerTimezone\">");
     expect(html).toContain("Page đang vận hành");
     expect(html).toContain("Tải cấu hình page đã chọn");
+  });
+
+  it("builds one shared IANA timezone catalog and marks Asia/Saigon as a legacy alias", () => {
+    const options = buildTimezoneOptions([
+      "Asia/Ho_Chi_Minh",
+      "Asia/Saigon",
+      "America/Los_Angeles"
+    ]);
+
+    expect(options.find((option) => option.value === "Asia/Ho_Chi_Minh")).toEqual({
+      value: "Asia/Ho_Chi_Minh",
+      label: "GMT+07:00 - Asia/Ho_Chi_Minh"
+    });
+    expect(options.find((option) => option.value === "Asia/Saigon")).toEqual({
+      value: "Asia/Saigon",
+      label: "GMT+07:00 - Asia/Saigon (legacy alias)"
+    });
+    expect(options.filter((option) => option.value === "America/Los_Angeles")).toHaveLength(1);
   });
 
   it("builds onboarding sample preview input from the current draft without mock-only fields", () => {

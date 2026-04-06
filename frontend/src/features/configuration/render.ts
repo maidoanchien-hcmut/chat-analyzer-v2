@@ -1,5 +1,6 @@
 import type { ConfigurationState } from "../../app/screen-state.ts";
 import { escapeHtml } from "../../shared/html.ts";
+import { buildTimezoneOptions } from "./timezones.ts";
 
 export function renderConfiguration(configuration: ConfigurationState) {
   const draft = configuration.workspace;
@@ -8,9 +9,8 @@ export function renderConfiguration(configuration: ConfigurationState) {
   const selectedPromptSampleConversation = configuration.promptWorkspaceSamplePreview?.conversations.find(
     (item) => item.conversationId === draft.selectedPromptSampleConversationId
   ) ?? configuration.promptWorkspaceSamplePreview?.conversations[0] ?? null;
-  const onboardingTimezones = dedupeTimezones([
+  const timezoneOptions = buildTimezoneOptions([
     "Asia/Ho_Chi_Minh",
-    "Asia/Saigon",
     "Asia/Bangkok",
     "UTC",
     draft.businessTimezone,
@@ -54,7 +54,7 @@ export function renderConfiguration(configuration: ConfigurationState) {
             </label>
             <label>
               <span>Business timezone</span>
-              <select name="businessTimezone">${renderOptions(onboardingTimezones, draft.businessTimezone)}</select>
+              <select name="businessTimezone">${renderLabeledOptions(timezoneOptions, draft.businessTimezone)}</select>
             </label>
             <label class="inline-check"><input type="checkbox" name="etlEnabled" ${draft.etlEnabled ? "checked" : ""} /> bật ETL</label>
             <label class="inline-check"><input type="checkbox" name="analysisEnabled" ${draft.analysisEnabled ? "checked" : ""} /> bật AI</label>
@@ -320,8 +320,7 @@ export function renderConfiguration(configuration: ConfigurationState) {
                 <label class="inline-check"><input type="checkbox" name="schedulerUseSystemDefaults" ${draft.scheduler.useSystemDefaults ? "checked" : ""} /> Dùng mặc định hệ thống</label>
                 <label>
                   <span>Scheduler timezone</span>
-                  <input name="schedulerTimezone" list="scheduler-timezone-options" value="${escapeHtml(draft.scheduler.timezone)}" placeholder="Asia/Ho_Chi_Minh" />
-                  <datalist id="scheduler-timezone-options">${renderDatalistOptions(onboardingTimezones)}</datalist>
+                  <select name="schedulerTimezone">${renderLabeledOptions(timezoneOptions, draft.scheduler.timezone)}</select>
                 </label>
                 <label><span>Giờ chạy official daily</span><input type="time" name="schedulerOfficialDailyTime" value="${escapeHtml(draft.scheduler.officialDailyTime)}" /></label>
                 <label><span>Lookback hours</span><input type="number" name="schedulerLookbackHours" min="0" value="${draft.scheduler.lookbackHours}" /></label>
@@ -395,12 +394,12 @@ function renderOptions(values: string[], selectedValue: string) {
   return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
 }
 
-function renderDatalistOptions(values: string[]) {
-  return values.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
-}
-
-function dedupeTimezones(values: Array<string | null>) {
-  return [...new Set(values.map((value) => value?.trim() ?? "").filter(Boolean))];
+function renderLabeledOptions(values: Array<{ value: string; label: string }>, selectedValue: string) {
+  return values.map((entry) => `
+    <option value="${escapeHtml(entry.value)}" ${entry.value === selectedValue ? "selected" : ""}>
+      ${escapeHtml(entry.label)}
+    </option>
+  `).join("");
 }
 
 function renderPromptAuditCard(

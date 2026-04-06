@@ -26,7 +26,7 @@ Objective Card:
 | T1 | EU A: frontend workspace draft and compact lane layout | Codex coordinator (local after worker shutdown) | frontend/src/app/frontend-app.ts; frontend/src/app/screen-state.ts; frontend/src/features/configuration/render.ts; frontend/src/features/configuration/state.ts; frontend tests | NONE | Accepted | Passed | Integrated | None | Not Needed | Initial worker `019d61ed-07c2-7480-b068-2a40a05cd3c3` was shut down after no useful return; execution continued locally to protect the critical path. |
 | T2 | EU B: runtime sample seed into editable draft | Codex coordinator (local) | frontend/src/features/configuration/render.ts; frontend/src/features/configuration/state.ts; frontend/src/app/frontend-app.ts; frontend tests; optional frontend/src/adapters/contracts.ts | T1 | Accepted | Passed | Integrated | None | Not Needed | Sample preview now seeds editable tag/opening suggestions into the shared draft while preserving operator overrides. |
 | T3 | EU C: backend onboarding/register/sample contract support | Worker `019d6209-bf05-7f33-8fec-ca6788e603e4` reviewed and accepted by coordinator | backend/src/modules/chat_extractor/chat_extractor.types.ts; backend/src/modules/chat_extractor/chat_extractor.controller.ts; backend/src/modules/chat_extractor/chat_extractor.service.ts; backend tests | T2 | Accepted | Passed | Integrated | None | Not Needed | Tightened scheduler timezone validation and added proof for register/onboarding sample contracts without widening backend ownership. |
-| T4 | EU D: timezone IANA contract | Codex coordinator (local) | frontend configuration state/render/tests; optional backend validation tests | T3 | Planned | Not Run | Not Integrated | None | Not Needed | Persist IANA only, business-friendly labels allowed. |
+| T4 | EU D: timezone IANA contract | Codex coordinator (local) | frontend configuration state/render/tests; optional backend validation tests | T3 | Accepted | Passed | Integrated | None | Not Needed | Frontend now uses one shared timezone catalog for onboarding and scheduler, while surfacing `Asia/Saigon` only as a legacy alias when already present. |
 | T5 | EU E: service live runtime env and runbook | Worker `019d6209-c112-7141-86d1-e2388b6e76b0` | service/config.py; service/README.md; service/.env.example; service tests | T4 | Planned | Not Run | Not Integrated | None | Not Needed | Keep provider/runtime config fully service-owned and fail-closed. |
 ```
 
@@ -92,6 +92,26 @@ Objective Card:
 - Coordinator disposition:
   ACCEPT
 
+### T4 Acceptance Check
+- Assigned requirements:
+  Use one owner-clean frontend timezone catalog for onboarding and scheduler, keep persisted values as IANA strings, and surface any legacy alias distinctly instead of treating it as the curated standard.
+- Returned summary:
+  Added a shared frontend timezone option catalog, switched scheduler timezone from free-text/datalist to the same select-based source used by onboarding, and label `Asia/Saigon` explicitly as a legacy alias only when it already exists in draft/page state.
+- Verification result:
+  Approved
+- Requirement gaps:
+  NONE
+- Vocabulary or owner drift:
+  NONE
+- Proof assessment:
+  SUFFICIENT. `bun test ./src/features/configuration/state.test.ts ./src/app/frontend-app.test.ts` passed and `bun run build` passed in `frontend/`.
+- Bridge code assessment:
+  NONE
+- Debt registration check:
+  NOT NEEDED
+- Coordinator disposition:
+  ACCEPT
+
 ## Integration Notes
 
 ### Integration Pass 1
@@ -128,6 +148,19 @@ Objective Card:
   Validation is enforced at backend request normalization instead of relying on frontend-only discipline
 - bridge code removed during integration:
   NONE
+- debt entries added:
+  NONE
+- regressions introduced during integration:
+  NONE
+
+### Integration Pass 4
+- tasks integrated: T4
+- terminology normalized:
+  Frontend timezone selection now distinguishes `curated IANA catalog` from `legacy alias currently stored`
+- boundary corrections:
+  Scheduler timezone no longer accepts ad hoc free-text separate from the onboarding timezone catalog
+- bridge code removed during integration:
+  Removed the scheduler datalist/free-text seam in favor of the shared select catalog
 - debt entries added:
   NONE
 - regressions introduced during integration:
