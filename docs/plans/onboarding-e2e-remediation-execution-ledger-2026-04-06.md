@@ -27,7 +27,7 @@ Objective Card:
 | T2 | EU B: runtime sample seed into editable draft | Codex coordinator (local) | frontend/src/features/configuration/render.ts; frontend/src/features/configuration/state.ts; frontend/src/app/frontend-app.ts; frontend tests; optional frontend/src/adapters/contracts.ts | T1 | Accepted | Passed | Integrated | None | Not Needed | Sample preview now seeds editable tag/opening suggestions into the shared draft while preserving operator overrides. |
 | T3 | EU C: backend onboarding/register/sample contract support | Worker `019d6209-bf05-7f33-8fec-ca6788e603e4` reviewed and accepted by coordinator | backend/src/modules/chat_extractor/chat_extractor.types.ts; backend/src/modules/chat_extractor/chat_extractor.controller.ts; backend/src/modules/chat_extractor/chat_extractor.service.ts; backend tests | T2 | Accepted | Passed | Integrated | None | Not Needed | Tightened scheduler timezone validation and added proof for register/onboarding sample contracts without widening backend ownership. |
 | T4 | EU D: timezone IANA contract | Codex coordinator (local) | frontend configuration state/render/tests; optional backend validation tests | T3 | Accepted | Passed | Integrated | None | Not Needed | Frontend now uses one shared timezone catalog for onboarding and scheduler, while surfacing `Asia/Saigon` only as a legacy alias when already present. |
-| T5 | EU E: service live runtime env and runbook | Worker `019d6209-c112-7141-86d1-e2388b6e76b0` | service/config.py; service/README.md; service/.env.example; service tests | T4 | Planned | Not Run | Not Integrated | None | Not Needed | Keep provider/runtime config fully service-owned and fail-closed. |
+| T5 | EU E: service live runtime env and runbook | Worker `019d6209-c112-7141-86d1-e2388b6e76b0` reviewed and accepted by coordinator | service/config.py; service/README.md; service/.env.example; service tests | T4 | Accepted | Passed | Integrated | None | Not Needed | Service runtime env contract is now documented and fail-closed with a checked-in `.env.example`. |
 ```
 
 ## Acceptance Checks
@@ -112,6 +112,26 @@ Objective Card:
 - Coordinator disposition:
   ACCEPT
 
+### T5 Acceptance Check
+- Assigned requirements:
+  Make the service-owned live runtime env explicit, fail closed for missing required fields, provide a checked-in env example, and document the deterministic vs live modes without leaking provider config into page onboarding.
+- Returned summary:
+  `service/config.py` now validates live mode against explicit runtime env fields, `service/.env.example` provides a local template, and `service/README.md` documents the owner boundary plus startup expectations for deterministic and live modes.
+- Verification result:
+  Approved
+- Requirement gaps:
+  NONE
+- Vocabulary or owner drift:
+  NONE
+- Proof assessment:
+  SUFFICIENT. Coordinator reran `uv run pytest tests/test_executor.py -k "live_runtime or load_config or runtime_metadata"` in `service/` and confirmed `8 passed, 5 deselected`.
+- Bridge code assessment:
+  NONE
+- Debt registration check:
+  NOT NEEDED
+- Coordinator disposition:
+  ACCEPT
+
 ## Integration Notes
 
 ### Integration Pass 1
@@ -161,6 +181,19 @@ Objective Card:
   Scheduler timezone no longer accepts ad hoc free-text separate from the onboarding timezone catalog
 - bridge code removed during integration:
   Removed the scheduler datalist/free-text seam in favor of the shared select catalog
+- debt entries added:
+  NONE
+- regressions introduced during integration:
+  NONE
+
+### Integration Pass 5
+- tasks integrated: T5
+- terminology normalized:
+  `service runtime env` is explicitly separate from page onboarding and page-local prompt config
+- boundary corrections:
+  Live-provider startup now fails closed from service env parsing rather than drifting through implicit defaults
+- bridge code removed during integration:
+  NONE
 - debt entries added:
   NONE
 - regressions introduced during integration:
