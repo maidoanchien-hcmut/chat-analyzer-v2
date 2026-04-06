@@ -12,6 +12,91 @@ afterEach(() => {
 });
 
 describe("chat extractor controller", () => {
+  it("parses register page request and forwards the onboarding draft fields", async () => {
+    let capturedInput: unknown;
+    patchValue(chatExtractorService, "registerPageConfig", async (input) => {
+      capturedInput = input;
+      return {
+        page: {
+          id: "cp-101",
+          pancakePageId: input.pancakePageId,
+          pageName: "O2 SKIN",
+          businessTimezone: input.businessTimezone,
+          etlEnabled: input.etlEnabled,
+          analysisEnabled: input.analysisEnabled,
+          activeConfigVersionId: "cfg-101",
+          activeConfigVersion: {
+            id: "cfg-101",
+            versionNo: 1,
+            promptText: "Prompt default",
+            tagMappingJson: {
+              version: 1,
+              defaultRole: "noise",
+              entries: []
+            },
+            openingRulesJson: {
+              version: 1,
+              selectors: []
+            },
+            schedulerJson: {
+              version: 1,
+              timezone: input.businessTimezone,
+              officialDailyTime: "00:00",
+              lookbackHours: 2,
+              maxConversationsPerRun: 0,
+              maxMessagePagesPerThread: 0
+            },
+            notificationTargetsJson: null,
+            analysisTaxonomyVersionId: "taxonomy-1",
+            analysisTaxonomyVersion: {
+              id: "taxonomy-1",
+              versionCode: "default.v1",
+              taxonomyJson: {},
+              isActive: true
+            },
+            notes: null,
+            createdAt: "2026-04-05T06:00:00.000Z"
+          },
+          configVersions: [],
+          createdAt: "2026-04-05T06:00:00.000Z",
+          updatedAt: "2026-04-05T06:00:00.000Z"
+        }
+      };
+    });
+
+    const app = new Elysia().use(chatExtractorController);
+    const response = await app.handle(new Request("http://localhost/chat-extractor/control-center/pages/register", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json"
+      },
+      body: JSON.stringify({
+        pancakePageId: "1406535699642677",
+        userAccessToken: "user-token",
+        businessTimezone: "Asia/Saigon",
+        etlEnabled: true,
+        analysisEnabled: false
+      })
+    }));
+
+    expect(response.status).toBe(200);
+    expect(capturedInput).toEqual({
+      pancakePageId: "1406535699642677",
+      userAccessToken: "user-token",
+      businessTimezone: "Asia/Saigon",
+      etlEnabled: true,
+      analysisEnabled: false
+    });
+    await expect(response.json()).resolves.toMatchObject({
+      page: {
+        id: "cp-101",
+        pancakePageId: "1406535699642677",
+        businessTimezone: "Asia/Saigon",
+        activeConfigVersionId: "cfg-101"
+      }
+    });
+  });
+
   it("parses onboarding sample preview request and returns the worker stdout shape", async () => {
     patchValue(chatExtractorService, "previewOnboardingSample", async (input) => ({
       pageId: input.pancakePageId,

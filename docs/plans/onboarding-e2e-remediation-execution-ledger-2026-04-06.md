@@ -25,9 +25,9 @@ Objective Card:
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T1 | EU A: frontend workspace draft and compact lane layout | Codex coordinator (local after worker shutdown) | frontend/src/app/frontend-app.ts; frontend/src/app/screen-state.ts; frontend/src/features/configuration/render.ts; frontend/src/features/configuration/state.ts; frontend tests | NONE | Accepted | Passed | Integrated | None | Not Needed | Initial worker `019d61ed-07c2-7480-b068-2a40a05cd3c3` was shut down after no useful return; execution continued locally to protect the critical path. |
 | T2 | EU B: runtime sample seed into editable draft | Codex coordinator (local) | frontend/src/features/configuration/render.ts; frontend/src/features/configuration/state.ts; frontend/src/app/frontend-app.ts; frontend tests; optional frontend/src/adapters/contracts.ts | T1 | Accepted | Passed | Integrated | None | Not Needed | Sample preview now seeds editable tag/opening suggestions into the shared draft while preserving operator overrides. |
-| T3 | EU C: backend onboarding/register/sample contract support | Unassigned | backend/src/modules/chat_extractor/chat_extractor.types.ts; backend/src/modules/chat_extractor/chat_extractor.controller.ts; backend/src/modules/chat_extractor/chat_extractor.service.ts; backend tests | T2 | Planned | Not Run | Not Integrated | None | Not Needed | Only extend canonical seams needed by the frontend draft contract. |
-| T4 | EU D: timezone IANA contract | Unassigned | frontend configuration state/render/tests; optional backend validation tests | T3 | Planned | Not Run | Not Integrated | None | Not Needed | Persist IANA only, business-friendly labels allowed. |
-| T5 | EU E: service live runtime env and runbook | Unassigned | service/config.py; service/README.md; service/.env.example; service tests | T4 | Planned | Not Run | Not Integrated | None | Not Needed | Keep provider/runtime config fully service-owned and fail-closed. |
+| T3 | EU C: backend onboarding/register/sample contract support | Worker `019d6209-bf05-7f33-8fec-ca6788e603e4` reviewed and accepted by coordinator | backend/src/modules/chat_extractor/chat_extractor.types.ts; backend/src/modules/chat_extractor/chat_extractor.controller.ts; backend/src/modules/chat_extractor/chat_extractor.service.ts; backend tests | T2 | Accepted | Passed | Integrated | None | Not Needed | Tightened scheduler timezone validation and added proof for register/onboarding sample contracts without widening backend ownership. |
+| T4 | EU D: timezone IANA contract | Codex coordinator (local) | frontend configuration state/render/tests; optional backend validation tests | T3 | Planned | Not Run | Not Integrated | None | Not Needed | Persist IANA only, business-friendly labels allowed. |
+| T5 | EU E: service live runtime env and runbook | Worker `019d6209-c112-7141-86d1-e2388b6e76b0` | service/config.py; service/README.md; service/.env.example; service tests | T4 | Planned | Not Run | Not Integrated | None | Not Needed | Keep provider/runtime config fully service-owned and fail-closed. |
 ```
 
 ## Acceptance Checks
@@ -72,6 +72,26 @@ Objective Card:
 - Coordinator disposition:
   ACCEPT
 
+### T3 Acceptance Check
+- Assigned requirements:
+  Keep lazy-path register semantics intact, preserve runtime-only onboarding sample preview, propagate custom sample caps, and enforce the timezone IANA contract at backend request boundaries.
+- Returned summary:
+  Tightened `scheduler_json.timezone` normalization to parse strictly as IANA instead of silently falling back, and added controller/service proof that register forwards onboarding draft fields and onboarding sample preview overrides scheduler timezone/caps only at runtime.
+- Verification result:
+  Approved
+- Requirement gaps:
+  NONE
+- Vocabulary or owner drift:
+  NONE
+- Proof assessment:
+  SUFFICIENT. Coordinator reran `bun test ./src/modules/chat_extractor/chat_extractor.controller.test.ts ./src/modules/chat_extractor/chat_extractor.service.test.ts` in `backend/` and confirmed `20 pass, 0 fail`.
+- Bridge code assessment:
+  NONE
+- Debt registration check:
+  NOT NEEDED
+- Coordinator disposition:
+  ACCEPT
+
 ## Integration Notes
 
 ### Integration Pass 1
@@ -99,6 +119,20 @@ Objective Card:
   NONE
 - regressions introduced during integration:
   NONE
+
+### Integration Pass 3
+- tasks integrated: T3
+- terminology normalized:
+  Backend keeps `business_timezone` and `scheduler_json.timezone` as the IANA contract; onboarding sample remains a runtime preview rather than a persisted config mutation
+- boundary corrections:
+  Validation is enforced at backend request normalization instead of relying on frontend-only discipline
+- bridge code removed during integration:
+  NONE
+- debt entries added:
+  NONE
+- regressions introduced during integration:
+  NONE
+
 
 ## Pre-Audit Gate
 

@@ -429,15 +429,7 @@ export function normalizeOpeningRulesConfig(value: unknown) {
 }
 
 export function normalizeSchedulerConfig(value: unknown) {
-  const parsed = schedulerInputSchema.safeParse(value ?? {});
-  const source = parsed.success ? parsed.data : {
-    version: 1 as const,
-    timezone: "Asia/Ho_Chi_Minh",
-    official_daily_time: "00:00",
-    lookback_hours: 2,
-    max_conversations_per_run: 0,
-    max_message_pages_per_thread: 0
-  };
+  const source = schedulerInputSchema.parse(value ?? {});
 
   return {
     version: 1 as const,

@@ -442,6 +442,100 @@ describe("chat_extractor service", () => {
     expect(parsed.sampleMessagePageLimit).toBe(2);
   });
 
+  it("rejects invalid IANA timezones for register and onboarding sample contracts", async () => {
+    const { onboardingSamplePreviewBodySchema, registerPageBodySchema } = await loadChatExtractorTypes();
+
+    expect(() => registerPageBodySchema.parse({
+      pancake_page_id: "1406535699642677",
+      user_access_token: "user-token",
+      business_timezone: "Asia/Not_A_Real_City"
+    })).toThrow("timezone IANA");
+
+    expect(() => onboardingSamplePreviewBodySchema.parse({
+      user_access_token: "user-token",
+      pancake_page_id: "1406535699642677",
+      business_timezone: "Asia/Saigon",
+      scheduler_json: {
+        version: 1,
+        timezone: "Mars/Olympus_Mons",
+        official_daily_time: "08:30",
+        lookback_hours: 2,
+        max_conversations_per_run: 5,
+        max_message_pages_per_thread: 2
+      }
+    })).toThrow("timezone IANA");
+  });
+
+  it("overrides onboarding sample scheduler timezone and sample caps at runtime without persisting config", async () => {
+    const { onboardingSamplePreviewBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    let capturedRuntimePreviewInput: any;
+
+    patchRepository(repositoryModule.chatExtractorRepository, "upsertConnectedPage", async () => {
+      throw new Error("preview must stay runtime-only");
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "createPageConfigVersion", async () => {
+      throw new Error("preview must stay runtime-only");
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "activateConfigVersion", async () => {
+      throw new Error("preview must stay runtime-only");
+    });
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      listPagesFromToken: async () => [
+        {
+          pageId: "1406535699642677",
+          pageName: "O2 SKIN"
+        }
+      ],
+      runRuntimePreview: async (input) => {
+        capturedRuntimePreviewInput = input;
+        return {
+          pageId: input.pageId,
+          targetDate: input.targetDate,
+          businessTimezone: input.businessTimezone,
+          windowStartAt: input.windowStartAt,
+          windowEndExclusiveAt: input.windowEndExclusiveAt,
+          summary: {},
+          pageTags: [],
+          conversations: []
+        };
+      }
+    });
+    const parsed = onboardingSamplePreviewBodySchema.parse({
+      user_access_token: "user-token",
+      pancake_page_id: "1406535699642677",
+      business_timezone: "Asia/Saigon",
+      scheduler_json: {
+        version: 1,
+        timezone: "Europe/Berlin",
+        official_daily_time: "08:30",
+        lookback_hours: 6,
+        max_conversations_per_run: 40,
+        max_message_pages_per_thread: 9
+      },
+      sample_conversation_limit: 8,
+      sample_message_page_limit: 3
+    });
+
+    await service.previewOnboardingSample(parsed);
+
+    expect(capturedRuntimePreviewInput).toMatchObject({
+      pageId: "1406535699642677",
+      userAccessToken: "user-token",
+      businessTimezone: "Asia/Saigon",
+      schedulerJson: {
+        version: 1,
+        timezone: "Asia/Saigon",
+        officialDailyTime: "08:30",
+        lookbackHours: 6,
+        maxConversationsPerRun: 8,
+        maxMessagePagesPerThread: 3
+      }
+    });
+  });
+
   it("returns runtime-only onboarding sample preview with the worker stdout shape", async () => {
     const { onboardingSamplePreviewBodySchema } = await loadChatExtractorTypes();
 
