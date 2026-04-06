@@ -9,7 +9,8 @@ import {
   buildPromptWorkspaceSampleFingerprint,
   buildPromptWorkspaceSampleInput,
   configVersionToDraft,
-  derivePromptPreviewFreshness
+  derivePromptPreviewFreshness,
+  seedWorkspaceDraftFromOnboardingSample
 } from "./state.ts";
 
 describe("configuration workflow", () => {
@@ -279,6 +280,142 @@ describe("configuration workflow", () => {
     expect(payload.schedulerJson).toMatchObject({
       timezone: "Asia/Saigon"
     });
+  });
+
+  it("seeds tag and opening suggestions from onboarding sample into an empty editable draft", () => {
+    const seeded = seedWorkspaceDraftFromOnboardingSample({
+      tagMappings: [{ rawTag: "", role: "noise", canonicalValue: "", source: "system_default" }],
+      openingRules: [{ buttonTitle: "", signalType: "customer_journey", canonicalValue: "" }],
+      samplePreview: {
+        pageId: "pk_101",
+        pageName: "Page Da Lieu Quan 1",
+        targetDate: "2026-04-05",
+        businessTimezone: "Asia/Saigon",
+        windowStartAt: "2026-04-04T17:00:00.000Z",
+        windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+        summary: {
+          conversationsScanned: 2,
+          threadDaysBuilt: 1,
+          messagesSeen: 5,
+          messagesSelected: 3
+        },
+        pageTags: [
+          { pancakeTagId: "11", text: "KH mới", isDeactive: false }
+        ],
+        conversations: [
+          {
+            conversationId: "c-1",
+            customerDisplayName: "Khách A",
+            firstMeaningfulMessageText: "Em muốn tái khám chiều nay",
+            observedTags: [
+              { sourceTagId: "11", sourceTagText: "KH mới" }
+            ],
+            normalizedTagSignals: [
+              { role: "journey", sourceTagText: "KH mới", canonicalCode: "new_to_clinic", mappingSource: "operator" }
+            ],
+            openingMessages: [],
+            explicitSignals: [
+              { signalRole: "journey", signalCode: "revisit", rawText: "Khách hàng tái khám" }
+            ],
+            cutReason: "first_meaningful_message"
+          }
+        ]
+      }
+    });
+
+    expect(seeded.tagMappings).toEqual([
+      { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+    ]);
+    expect(seeded.openingRules).toEqual([
+      { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
+    ]);
+    expect(seeded.summary.tagSuggestionsApplied).toBe(1);
+    expect(seeded.summary.openingSuggestionsApplied).toBe(1);
+  });
+
+  it("preserves operator overrides when a later sample suggests the same tag or opening rule", () => {
+    const seeded = seedWorkspaceDraftFromOnboardingSample({
+      tagMappings: [
+        { rawTag: "KH mới", role: "need", canonicalValue: "consultation", source: "operator_override" }
+      ],
+      openingRules: [
+        { buttonTitle: "Khách hàng tái khám", signalType: "need", canonicalValue: "consultation" }
+      ],
+      samplePreview: {
+        pageId: "pk_101",
+        pageName: "Page Da Lieu Quan 1",
+        targetDate: "2026-04-05",
+        businessTimezone: "Asia/Saigon",
+        windowStartAt: "2026-04-04T17:00:00.000Z",
+        windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+        summary: {
+          conversationsScanned: 2,
+          threadDaysBuilt: 1,
+          messagesSeen: 5,
+          messagesSelected: 3
+        },
+        pageTags: [],
+        conversations: [
+          {
+            conversationId: "c-1",
+            customerDisplayName: "Khách A",
+            firstMeaningfulMessageText: "Em muốn tái khám chiều nay",
+            observedTags: [],
+            normalizedTagSignals: [
+              { role: "journey", sourceTagText: "KH mới", canonicalCode: "new_to_clinic", mappingSource: "operator" }
+            ],
+            openingMessages: [],
+            explicitSignals: [
+              { signalRole: "journey", signalCode: "revisit", rawText: "Khách hàng tái khám" }
+            ],
+            cutReason: "first_meaningful_message"
+          }
+        ]
+      }
+    });
+
+    expect(seeded.tagMappings).toEqual([
+      { rawTag: "KH mới", role: "need", canonicalValue: "consultation", source: "operator_override" }
+    ]);
+    expect(seeded.openingRules).toEqual([
+      { buttonTitle: "Khách hàng tái khám", signalType: "need", canonicalValue: "consultation" }
+    ]);
+    expect(seeded.summary.tagOverridesPreserved).toBe(1);
+    expect(seeded.summary.openingOverridesPreserved).toBe(1);
+  });
+
+  it("does not damage the current draft when onboarding sample returns no suggestions", () => {
+    const currentTagMappings = [
+      { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" as const }
+    ];
+    const currentOpeningRules = [
+      { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
+    ];
+    const seeded = seedWorkspaceDraftFromOnboardingSample({
+      tagMappings: currentTagMappings,
+      openingRules: currentOpeningRules,
+      samplePreview: {
+        pageId: "pk_101",
+        pageName: "Page Da Lieu Quan 1",
+        targetDate: "2026-04-05",
+        businessTimezone: "Asia/Saigon",
+        windowStartAt: "2026-04-04T17:00:00.000Z",
+        windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+        summary: {
+          conversationsScanned: 0,
+          threadDaysBuilt: 0,
+          messagesSeen: 0,
+          messagesSelected: 0
+        },
+        pageTags: [],
+        conversations: []
+      }
+    });
+
+    expect(seeded.tagMappings).toEqual(currentTagMappings);
+    expect(seeded.openingRules).toEqual(currentOpeningRules);
+    expect(seeded.summary.tagSuggestionsApplied).toBe(0);
+    expect(seeded.summary.openingSuggestionsApplied).toBe(0);
   });
 
   it("builds prompt preview artifact input from the selected sample conversation", () => {
@@ -852,6 +989,7 @@ function createConfigurationState(): ConfigurationState {
       selectedPromptSampleConversationId: ""
     },
     onboardingSamplePreview: null,
+    onboardingSampleSeedSummary: null,
     promptWorkspaceSamplePreview: null,
     promptWorkspaceSampleFingerprint: null,
     promptWorkspaceSampleStaleReason: null,

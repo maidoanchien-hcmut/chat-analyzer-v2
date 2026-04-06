@@ -15,7 +15,8 @@ import {
   derivePromptPreviewFreshness,
   createEmptyNotificationTarget,
   createEmptyOpeningRule,
-  createEmptyTagMapping
+  createEmptyTagMapping,
+  seedWorkspaceDraftFromOnboardingSample
 } from "../features/configuration/state.ts";
 import { renderExploration } from "../features/exploration/render.ts";
 import { renderExportWorkflow } from "../features/export/render.ts";
@@ -76,6 +77,7 @@ export class FrontendApp {
       selectedPromptSampleConversationId: ""
     },
     onboardingSamplePreview: null,
+    onboardingSampleSeedSummary: null,
     promptWorkspaceSamplePreview: null,
     promptWorkspaceSampleFingerprint: null,
     promptWorkspaceSampleStaleReason: null,
@@ -445,6 +447,7 @@ export class FrontendApp {
       workspace.tokenPages = await this.controlPlaneAdapter.listPagesFromToken(workspace.token.trim());
       workspace.selectedPancakePageId = workspace.tokenPages[0]?.pageId ?? "";
       this.configuration.onboardingSamplePreview = null;
+      this.configuration.onboardingSampleSeedSummary = null;
       this.configuration.workspace.scheduler.timezone = workspace.businessTimezone || this.configuration.workspace.scheduler.timezone;
       this.toast = { kind: "info", message: `Đã tải ${workspace.tokenPages.length} page từ token.` };
     });
@@ -467,6 +470,7 @@ export class FrontendApp {
       });
       this.applyLoadedConnectedPage(detail);
       this.configuration.onboardingSamplePreview = null;
+      this.configuration.onboardingSampleSeedSummary = null;
       await this.refreshControlPages({ reloadView: false });
       this.toast = { kind: "info", message: "Đã register page qua HTTP thật." };
     });
@@ -677,6 +681,14 @@ export class FrontendApp {
           sampleMessagePageLimit: workspace.sampleMessagePageLimit
         })
       );
+      const seededDraft = seedWorkspaceDraftFromOnboardingSample({
+        tagMappings: workspace.tagMappings,
+        openingRules: workspace.openingRules,
+        samplePreview: this.configuration.onboardingSamplePreview
+      });
+      workspace.tagMappings = seededDraft.tagMappings;
+      workspace.openingRules = seededDraft.openingRules;
+      this.configuration.onboardingSampleSeedSummary = seededDraft.summary;
       this.toast = { kind: "info", message: "Đã nạp sample dữ liệu thật cho workspace cấu hình." };
     });
   }
@@ -701,6 +713,7 @@ export class FrontendApp {
     workspace.businessTimezone = detail.businessTimezone;
     this.configuration.pageDetail = detail;
     this.configuration.onboardingSamplePreview = null;
+    this.configuration.onboardingSampleSeedSummary = null;
     this.configuration.promptWorkspaceSamplePreview = null;
     this.configuration.promptWorkspaceSampleFingerprint = null;
     this.configuration.promptWorkspaceSampleStaleReason = null;

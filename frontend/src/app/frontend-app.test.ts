@@ -254,6 +254,17 @@ describe("frontend app", () => {
 
     expect((app as any).configuration.onboardingSamplePreview?.pageName).toBe("Page Da Lieu Quan 1");
     expect((app as any).configuration.onboardingSamplePreview?.conversations[0]?.normalizedTagSignals[0]?.canonicalCode).toBe("new_to_clinic");
+    expect((app as any).configuration.workspace.tagMappings[0]).toEqual({
+      rawTag: "KH mới",
+      role: "customer_journey",
+      canonicalValue: "new_to_clinic",
+      source: "operator_override"
+    });
+    expect((app as any).configuration.workspace.openingRules[0]).toEqual({
+      buttonTitle: "Khách hàng tái khám",
+      signalType: "customer_journey",
+      canonicalValue: "revisit"
+    });
   });
 
   it("uses custom onboarding sample limits from the register form", async () => {

@@ -1,13 +1,20 @@
 import type {
   ConnectedPageConfigVersion,
   CreateConfigVersionInput,
+  OnboardingSamplePreviewViewModel,
   OnboardingSamplePreviewInput,
   PromptPreviewComparisonViewModel,
   PromptPreviewArtifactInput,
   PromptWorkspaceSampleInput,
   PromptWorkspaceSampleViewModel
 } from "../../adapters/contracts.ts";
-import type { NotificationTargetDraft, OpeningRuleDraft, SchedulerDraft, TagMappingDraft } from "../../app/screen-state.ts";
+import type {
+  NotificationTargetDraft,
+  OnboardingSampleSeedSummary,
+  OpeningRuleDraft,
+  SchedulerDraft,
+  TagMappingDraft
+} from "../../app/screen-state.ts";
 
 type ConfigDraftInput = {
   promptText: string;
@@ -43,6 +50,12 @@ export type PromptPreviewFreshnessState = {
   workspaceStaleReason: string | null;
   comparisonStaleReason: string | null;
   invalidateComparison: boolean;
+};
+
+export type OnboardingSampleSeedResult = {
+  tagMappings: TagMappingDraft[];
+  openingRules: OpeningRuleDraft[];
+  summary: OnboardingSampleSeedSummary;
 };
 
 export function buildCreateConfigVersionInput(input: ConfigDraftInput): CreateConfigVersionInput {
@@ -302,6 +315,30 @@ export function createEmptyNotificationTarget(): NotificationTargetDraft {
   };
 }
 
+export function seedWorkspaceDraftFromOnboardingSample(input: {
+  tagMappings: TagMappingDraft[];
+  openingRules: OpeningRuleDraft[];
+  samplePreview: OnboardingSamplePreviewViewModel;
+}): OnboardingSampleSeedResult {
+  const tagSuggestions = collectTagSuggestions(input.samplePreview);
+  const openingSuggestions = collectOpeningSuggestions(input.samplePreview);
+  const tagMerge = mergeTagMappings(input.tagMappings, tagSuggestions);
+  const openingMerge = mergeOpeningRules(input.openingRules, openingSuggestions);
+
+  return {
+    tagMappings: tagMerge.entries,
+    openingRules: openingMerge.entries,
+    summary: {
+      tagSuggestionsApplied: tagMerge.applied,
+      openingSuggestionsApplied: openingMerge.applied,
+      tagOverridesPreserved: tagMerge.preserved,
+      openingOverridesPreserved: openingMerge.preserved,
+      observedTagCount: tagSuggestions.length,
+      explicitOpeningSignalCount: openingSuggestions.length
+    }
+  };
+}
+
 function parseTagMappings(value: unknown): TagMappingDraft[] {
   const entries = readArrayField(value, "entries");
   const mapped = entries.map((entry) => ({
@@ -311,6 +348,150 @@ function parseTagMappings(value: unknown): TagMappingDraft[] {
     source: (readString(entry, "mappingSource") === "operator" ? "operator_override" : "system_default") as "system_default" | "operator_override"
   })).filter((entry) => entry.rawTag || entry.role !== "noise" || entry.canonicalValue || entry.source !== "system_default");
   return mapped.length > 0 ? mapped : [createEmptyTagMapping()];
+}
+
+function collectTagSuggestions(samplePreview: OnboardingSamplePreviewViewModel): TagMappingDraft[] {
+  const suggestions = new Map<string, TagMappingDraft>();
+  const upsertSuggestion = (entry: TagMappingDraft) => {
+    const rawTag = entry.rawTag.trim();
+    if (!rawTag) {
+      return;
+    }
+    const key = normalizeKey(rawTag);
+    const existing = suggestions.get(key);
+    if (!existing || rankTagSuggestion(entry) > rankTagSuggestion(existing)) {
+      suggestions.set(key, {
+        rawTag,
+        role: entry.role,
+        canonicalValue: entry.canonicalValue.trim(),
+        source: entry.source
+      });
+    }
+  };
+
+  for (const pageTag of samplePreview.pageTags) {
+    if (!pageTag.isDeactive) {
+      upsertSuggestion({
+        rawTag: pageTag.text,
+        role: "noise",
+        canonicalValue: "",
+        source: "system_default"
+      });
+    }
+  }
+
+  for (const conversation of samplePreview.conversations) {
+    for (const observedTag of conversation.observedTags) {
+      upsertSuggestion({
+        rawTag: observedTag.sourceTagText || observedTag.sourceTagId,
+        role: "noise",
+        canonicalValue: "",
+        source: "system_default"
+      });
+    }
+    for (const signal of conversation.normalizedTagSignals) {
+      upsertSuggestion({
+        rawTag: signal.sourceTagText,
+        role: mapTagRoleFromBackend(signal.role),
+        canonicalValue: signal.canonicalCode ?? "",
+        source: signal.mappingSource === "operator" ? "operator_override" : "system_default"
+      });
+    }
+  }
+
+  return [...suggestions.values()].sort((left, right) => left.rawTag.localeCompare(right.rawTag));
+}
+
+function collectOpeningSuggestions(samplePreview: OnboardingSamplePreviewViewModel): OpeningRuleDraft[] {
+  const suggestions = new Map<string, OpeningRuleDraft>();
+
+  for (const conversation of samplePreview.conversations) {
+    for (const signal of conversation.explicitSignals) {
+      const buttonTitle = signal.rawText.trim();
+      const signalType = mapOpeningSignalFromBackend(signal.signalRole);
+      const canonicalValue = signal.signalCode.trim();
+      if (!buttonTitle || !signalType || !canonicalValue) {
+        continue;
+      }
+      const key = normalizeKey(buttonTitle);
+      if (!suggestions.has(key)) {
+        suggestions.set(key, {
+          buttonTitle,
+          signalType,
+          canonicalValue
+        });
+      }
+    }
+  }
+
+  return [...suggestions.values()].sort((left, right) => left.buttonTitle.localeCompare(right.buttonTitle));
+}
+
+function mergeTagMappings(current: TagMappingDraft[], suggestions: TagMappingDraft[]) {
+  const entries = shouldReplaceEmptyTagMappings(current) ? [] : current.map((entry) => ({ ...entry }));
+  const indices = new Map(entries.map((entry, index) => [normalizeKey(entry.rawTag), index]));
+  let applied = 0;
+  let preserved = 0;
+
+  for (const suggestion of suggestions) {
+    const key = normalizeKey(suggestion.rawTag);
+    const existingIndex = indices.get(key);
+    if (existingIndex === undefined) {
+      entries.push({ ...suggestion });
+      indices.set(key, entries.length - 1);
+      applied += 1;
+      continue;
+    }
+
+    const existing = entries[existingIndex]!;
+    if (existing.source === "operator_override") {
+      preserved += 1;
+      continue;
+    }
+    if (isBlankTagMapping(existing)) {
+      entries[existingIndex] = { ...suggestion };
+      applied += 1;
+      continue;
+    }
+  }
+
+  return {
+    entries: entries.length > 0 ? entries : [createEmptyTagMapping()],
+    applied,
+    preserved
+  };
+}
+
+function mergeOpeningRules(current: OpeningRuleDraft[], suggestions: OpeningRuleDraft[]) {
+  const entries = shouldReplaceEmptyOpeningRules(current) ? [] : current.map((entry) => ({ ...entry }));
+  const indices = new Map(entries.map((entry, index) => [normalizeKey(entry.buttonTitle), index]));
+  let applied = 0;
+  let preserved = 0;
+
+  for (const suggestion of suggestions) {
+    const key = normalizeKey(suggestion.buttonTitle);
+    const existingIndex = indices.get(key);
+    if (existingIndex === undefined) {
+      entries.push({ ...suggestion });
+      indices.set(key, entries.length - 1);
+      applied += 1;
+      continue;
+    }
+
+    const existing = entries[existingIndex]!;
+    if (isBlankOpeningRule(existing)) {
+      entries[existingIndex] = { ...suggestion };
+      applied += 1;
+      continue;
+    }
+    preserved += 1;
+  }
+
+  return {
+    entries: entries.length > 0 ? entries : [createEmptyOpeningRule()],
+    applied,
+    preserved
+  };
 }
 
 function parseOpeningRules(value: unknown): OpeningRuleDraft[] {
@@ -354,6 +535,42 @@ function readArrayField(value: unknown, key: string) {
   }
   const entries = (value as Record<string, unknown>)[key];
   return Array.isArray(entries) ? entries : [];
+}
+
+function normalizeKey(value: string) {
+  return value.trim().toLocaleLowerCase();
+}
+
+function rankTagSuggestion(entry: TagMappingDraft) {
+  let score = entry.source === "operator_override" ? 4 : 2;
+  if (entry.role !== "noise") {
+    score += 2;
+  }
+  if (entry.canonicalValue.trim()) {
+    score += 1;
+  }
+  return score;
+}
+
+function shouldReplaceEmptyTagMappings(entries: TagMappingDraft[]) {
+  return entries.length === 0 || entries.every((entry) => isBlankTagMapping(entry));
+}
+
+function shouldReplaceEmptyOpeningRules(entries: OpeningRuleDraft[]) {
+  return entries.length === 0 || entries.every((entry) => isBlankOpeningRule(entry));
+}
+
+function isBlankTagMapping(entry: TagMappingDraft) {
+  return !entry.rawTag.trim()
+    && entry.role === "noise"
+    && !entry.canonicalValue.trim()
+    && entry.source === "system_default";
+}
+
+function isBlankOpeningRule(entry: OpeningRuleDraft) {
+  return !entry.buttonTitle.trim()
+    && entry.signalType === "customer_journey"
+    && !entry.canonicalValue.trim();
 }
 
 function readString(value: unknown, key: string) {

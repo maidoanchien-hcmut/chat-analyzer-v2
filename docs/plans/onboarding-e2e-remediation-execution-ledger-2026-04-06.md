@@ -24,7 +24,7 @@ Objective Card:
 | Task ID | Task Name | Owner Sub-Agent | Write Scope | Depends On | Status | Proof Status | Integration Status | Bridge Code Status | Debt Registration | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | T1 | EU A: frontend workspace draft and compact lane layout | Codex coordinator (local after worker shutdown) | frontend/src/app/frontend-app.ts; frontend/src/app/screen-state.ts; frontend/src/features/configuration/render.ts; frontend/src/features/configuration/state.ts; frontend tests | NONE | Accepted | Passed | Integrated | None | Not Needed | Initial worker `019d61ed-07c2-7480-b068-2a40a05cd3c3` was shut down after no useful return; execution continued locally to protect the critical path. |
-| T2 | EU B: runtime sample seed into editable draft | Codex coordinator (local) | frontend/src/features/configuration/render.ts; frontend/src/features/configuration/state.ts; frontend/src/app/frontend-app.ts; frontend tests; optional frontend/src/adapters/contracts.ts | T1 | In Progress | Not Run | Not Integrated | None | Not Needed | Preserve operator overrides while seeding suggestions from sample. |
+| T2 | EU B: runtime sample seed into editable draft | Codex coordinator (local) | frontend/src/features/configuration/render.ts; frontend/src/features/configuration/state.ts; frontend/src/app/frontend-app.ts; frontend tests; optional frontend/src/adapters/contracts.ts | T1 | Accepted | Passed | Integrated | None | Not Needed | Sample preview now seeds editable tag/opening suggestions into the shared draft while preserving operator overrides. |
 | T3 | EU C: backend onboarding/register/sample contract support | Unassigned | backend/src/modules/chat_extractor/chat_extractor.types.ts; backend/src/modules/chat_extractor/chat_extractor.controller.ts; backend/src/modules/chat_extractor/chat_extractor.service.ts; backend tests | T2 | Planned | Not Run | Not Integrated | None | Not Needed | Only extend canonical seams needed by the frontend draft contract. |
 | T4 | EU D: timezone IANA contract | Unassigned | frontend configuration state/render/tests; optional backend validation tests | T3 | Planned | Not Run | Not Integrated | None | Not Needed | Persist IANA only, business-friendly labels allowed. |
 | T5 | EU E: service live runtime env and runbook | Unassigned | service/config.py; service/README.md; service/.env.example; service tests | T4 | Planned | Not Run | Not Integrated | None | Not Needed | Keep provider/runtime config fully service-owned and fail-closed. |
@@ -52,6 +52,26 @@ Objective Card:
 - Coordinator disposition:
   ACCEPT
 
+### T2 Acceptance Check
+- Assigned requirements:
+  Seed onboarding runtime sample into editable draft state, preserve operator overrides on repeated sampling, and keep empty samples fail-safe.
+- Returned summary:
+  Added frontend merge helpers that convert onboarding sample observed tags and explicit opening signals into editable draft rows, seed them during onboarding sample load, and surface a seed summary in the configuration workspace.
+- Verification result:
+  Approved
+- Requirement gaps:
+  NONE
+- Vocabulary or owner drift:
+  NONE
+- Proof assessment:
+  SUFFICIENT. Added targeted seed precedence tests and reran `bun test ./src/app/frontend-app.test.ts ./src/features/configuration/state.test.ts` plus `bun run build` in `frontend/`.
+- Bridge code assessment:
+  NONE
+- Debt registration check:
+  NOT NEEDED
+- Coordinator disposition:
+  ACCEPT
+
 ## Integration Notes
 
 ### Integration Pass 1
@@ -60,6 +80,19 @@ Objective Card:
   `onboarding` form state and configuration editor state now converge under `configuration.workspace`
 - boundary corrections:
   Removed frontend dependence on cross-form `querySelector` state syncing as the source of truth for onboarding/configuration actions
+- bridge code removed during integration:
+  NONE
+- debt entries added:
+  NONE
+- regressions introduced during integration:
+  NONE
+
+### Integration Pass 2
+- tasks integrated: T2
+- terminology normalized:
+  `sample preview` remains runtime observation; `seeded draft` is the editable workspace state populated from that preview
+- boundary corrections:
+  Sample suggestions now flow into the shared draft instead of remaining read-only in a separate panel
 - bridge code removed during integration:
   NONE
 - debt entries added:

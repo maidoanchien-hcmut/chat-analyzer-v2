@@ -362,6 +362,16 @@ export function renderConfiguration(configuration: ConfigurationState) {
                 <span>Window: ${escapeHtml(configuration.onboardingSamplePreview.windowStartAt)} -> ${escapeHtml(configuration.onboardingSamplePreview.windowEndExclusiveAt)}</span>
                 ${renderSummarySpans(configuration.onboardingSamplePreview)}
               </div>
+              ${configuration.onboardingSampleSeedSummary ? `
+                <div class="banner banner-warning">
+                  <strong>Gợi ý đã seed vào draft chỉnh sửa</strong>
+                  <p>
+                    Tag áp dụng: ${configuration.onboardingSampleSeedSummary.tagSuggestionsApplied}.
+                    Opening áp dụng: ${configuration.onboardingSampleSeedSummary.openingSuggestionsApplied}.
+                    Override giữ nguyên: ${configuration.onboardingSampleSeedSummary.tagOverridesPreserved + configuration.onboardingSampleSeedSummary.openingOverridesPreserved}.
+                  </p>
+                </div>
+              ` : ""}
             </article>
             <article class="sub-panel">
               <h4>Tag thô từ page</h4>

@@ -62,12 +62,22 @@ export type ConfigurationWorkspaceDraft = {
   selectedPromptSampleConversationId: string;
 };
 
+export type OnboardingSampleSeedSummary = {
+  tagSuggestionsApplied: number;
+  openingSuggestionsApplied: number;
+  tagOverridesPreserved: number;
+  openingOverridesPreserved: number;
+  observedTagCount: number;
+  explicitOpeningSignalCount: number;
+};
+
 export type ConfigurationState = {
   activeTab: "page-info" | "taxonomy" | "opening-rules" | "prompt-profile" | "scheduler";
   connectedPages: ConnectedPageSummary[];
   pageDetail: ConnectedPageDetailViewModel | null;
   workspace: ConfigurationWorkspaceDraft;
   onboardingSamplePreview: OnboardingSamplePreviewViewModel | null;
+  onboardingSampleSeedSummary: OnboardingSampleSeedSummary | null;
   promptWorkspaceSamplePreview: PromptWorkspaceSampleViewModel | null;
   promptWorkspaceSampleFingerprint: string | null;
   promptWorkspaceSampleStaleReason: string | null;
