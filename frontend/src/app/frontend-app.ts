@@ -5,9 +5,14 @@ import type { AppToast, AsyncStatus, BusinessFilters, RouteState } from "../core
 import { renderConfiguration } from "../features/configuration/render.ts";
 import {
   buildOnboardingSamplePreviewInput,
+  buildPromptPreviewComparisonFingerprint,
+  buildPromptPreviewArtifactInput,
+  buildPromptWorkspaceSampleFingerprint,
+  buildPromptWorkspaceSampleInput,
   buildCreateConfigVersionInput,
   configVersionToDraft,
   createDefaultScheduler,
+  derivePromptPreviewFreshness,
   createEmptyNotificationTarget,
   createEmptyOpeningRule,
   createEmptyTagMapping
@@ -68,6 +73,13 @@ export class FrontendApp {
     etlEnabled: true,
     analysisEnabled: false,
     onboardingSamplePreview: null,
+    promptWorkspaceSamplePreview: null,
+    promptWorkspaceSampleFingerprint: null,
+    promptWorkspaceSampleStaleReason: null,
+    selectedPromptSampleConversationId: "",
+    promptPreviewComparison: null,
+    promptPreviewComparisonFingerprint: null,
+    promptPreviewComparisonStaleReason: null,
     promptCloneSourceVersionId: "",
     promptCloneSourcePageId: "",
     promptCompareLeftVersionId: "",
@@ -161,6 +173,10 @@ export class FrontendApp {
         this.toast = { kind: "info", message: "Đã nạp active config." };
       } else if (action === "load-onboarding-sample") {
         await this.loadOnboardingSamplePreview();
+      } else if (action === "load-prompt-workspace-sample") {
+        await this.loadPromptWorkspaceSamplePreview(target.closest("form"));
+      } else if (action === "run-prompt-preview") {
+        await this.runPromptPreview(target.closest("form"));
       } else if (action === "activate-config-version") {
         await this.activateConfigVersion();
       } else if (action === "execute-manual-run") {
@@ -180,9 +196,11 @@ export class FrontendApp {
       } else if (action === "add-tag-mapping-row") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
         this.configuration.tagMappings = [...this.configuration.tagMappings, createEmptyTagMapping()];
+        this.refreshPromptPreviewFreshness();
       } else if (action === "add-opening-rule-row") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
         this.configuration.openingRules = [...this.configuration.openingRules, createEmptyOpeningRule()];
+        this.refreshPromptPreviewFreshness();
       } else if (action === "add-notification-target-row") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
         this.configuration.notificationTargets = [...this.configuration.notificationTargets, createEmptyNotificationTarget()];
@@ -193,6 +211,7 @@ export class FrontendApp {
           throw new Error("Cần chọn prompt version để clone.");
         }
         this.configuration.promptText = configVersion.promptText;
+        this.refreshPromptPreviewFreshness();
         this.toast = { kind: "info", message: `Đã clone prompt từ v${configVersion.versionNo}.` };
       } else if (action === "clone-prompt-from-page") {
         this.syncConfigurationDraftFromForm(target.closest("form"));
@@ -204,6 +223,7 @@ export class FrontendApp {
           throw new Error("Page nguồn chưa có active config để clone.");
         }
         this.configuration.promptText = sourcePage.activeConfigVersion.promptText;
+        this.refreshPromptPreviewFreshness();
         this.toast = { kind: "info", message: `Đã clone prompt từ page ${sourcePage.pageName}.` };
       }
     } catch (error) {
@@ -649,12 +669,20 @@ export class FrontendApp {
     this.configuration.scheduler = draft.scheduler;
     this.configuration.notificationTargets = draft.notificationTargets;
     this.configuration.notes = draft.notes;
+    this.refreshPromptPreviewFreshness();
   }
 
   private applyLoadedConnectedPage(detail: NonNullable<ConfigurationState["pageDetail"]>) {
     this.configuration.selectedPageId = detail.id;
     this.configuration.pageDetail = detail;
     this.configuration.onboardingSamplePreview = null;
+    this.configuration.promptWorkspaceSamplePreview = null;
+    this.configuration.promptWorkspaceSampleFingerprint = null;
+    this.configuration.promptWorkspaceSampleStaleReason = null;
+    this.configuration.selectedPromptSampleConversationId = "";
+    this.configuration.promptPreviewComparison = null;
+    this.configuration.promptPreviewComparisonFingerprint = null;
+    this.configuration.promptPreviewComparisonStaleReason = null;
     this.configuration.selectedConfigVersionId = detail.activeConfigVersionId ?? detail.configVersions[0]?.id ?? "";
     this.configuration.etlEnabled = detail.etlEnabled;
     this.configuration.analysisEnabled = detail.analysisEnabled;
@@ -709,6 +737,9 @@ export class FrontendApp {
     this.configuration.promptCloneSourcePageId = String(data.get("promptCloneSourcePageId") ?? this.configuration.promptCloneSourcePageId).trim();
     this.configuration.promptCompareLeftVersionId = String(data.get("promptCompareLeftVersionId") ?? this.configuration.promptCompareLeftVersionId).trim();
     this.configuration.promptCompareRightVersionId = String(data.get("promptCompareRightVersionId") ?? this.configuration.promptCompareRightVersionId).trim();
+    this.configuration.selectedPromptSampleConversationId = String(
+      data.get("selectedPromptSampleConversationId") ?? this.configuration.selectedPromptSampleConversationId
+    ).trim();
     this.configuration.notes = String(data.get("notes") ?? this.configuration.notes);
     this.configuration.activateAfterCreate = data.get("activateAfterCreate") !== null;
     this.configuration.etlEnabled = data.get("etlEnabled") !== null;
@@ -734,6 +765,117 @@ export class FrontendApp {
       data.getAll("notificationChannel"),
       data.getAll("notificationValue")
     );
+    this.refreshPromptPreviewFreshness();
+  }
+
+  private async loadPromptWorkspaceSamplePreview(form: HTMLFormElement | null) {
+    this.syncConfigurationDraftFromForm(form);
+    const pageDetail = this.configuration.pageDetail;
+    if (!pageDetail) {
+      throw new Error("Cần tải connected page trước khi lấy sample prompt workspace.");
+    }
+
+    await this.withPending("load-prompt-workspace-sample", async () => {
+      this.configuration.promptWorkspaceSamplePreview = await this.controlPlaneAdapter.previewPromptWorkspaceSample(
+        pageDetail.id,
+        buildPromptWorkspaceSampleInput({
+          tagMappings: this.configuration.tagMappings,
+          openingRules: this.configuration.openingRules,
+          scheduler: this.configuration.scheduler,
+          businessTimezone: pageDetail.businessTimezone,
+          sampleConversationLimit: this.onboarding.sampleConversationLimit,
+          sampleMessagePageLimit: this.onboarding.sampleMessagePageLimit
+        })
+      );
+      this.configuration.promptWorkspaceSampleFingerprint = this.buildCurrentPromptWorkspaceSampleFingerprint();
+      this.configuration.promptWorkspaceSampleStaleReason = null;
+      this.configuration.selectedPromptSampleConversationId =
+        this.configuration.promptWorkspaceSamplePreview.conversations[0]?.conversationId ?? "";
+      this.configuration.promptPreviewComparison = null;
+      this.configuration.promptPreviewComparisonFingerprint = null;
+      this.configuration.promptPreviewComparisonStaleReason = null;
+      this.toast = { kind: "info", message: "Đã nạp sample workspace cho prompt profile." };
+    });
+  }
+
+  private async runPromptPreview(form: HTMLFormElement | null) {
+    this.syncConfigurationDraftFromForm(form);
+    const pageDetail = this.configuration.pageDetail;
+    const samplePreview = this.configuration.promptWorkspaceSamplePreview;
+    if (!pageDetail) {
+      throw new Error("Cần tải connected page trước khi chạy thử prompt.");
+    }
+    if (!samplePreview) {
+      throw new Error("Cần tải sample workspace cho prompt trước khi chạy thử.");
+    }
+    if (this.configuration.promptWorkspaceSampleStaleReason) {
+      throw new Error(this.configuration.promptWorkspaceSampleStaleReason);
+    }
+
+    await this.withPending("run-prompt-preview", async () => {
+      this.configuration.promptPreviewComparison = await this.controlPlaneAdapter.previewPromptArtifacts(
+        pageDetail.id,
+        buildPromptPreviewArtifactInput({
+          promptText: this.configuration.promptText,
+          samplePreview,
+          selectedConversationId: this.configuration.selectedPromptSampleConversationId
+        })
+      );
+      this.configuration.promptPreviewComparisonFingerprint = this.buildCurrentPromptPreviewComparisonFingerprint();
+      this.configuration.promptPreviewComparisonStaleReason = null;
+      this.toast = { kind: "info", message: "Đã chạy preview prompt trên sample runtime thật." };
+    });
+  }
+
+  private buildCurrentPromptWorkspaceSampleFingerprint() {
+    const pageDetail = this.configuration.pageDetail;
+    if (!pageDetail) {
+      return null;
+    }
+    return buildPromptWorkspaceSampleFingerprint({
+      tagMappings: this.configuration.tagMappings,
+      openingRules: this.configuration.openingRules,
+      scheduler: this.configuration.scheduler,
+      businessTimezone: pageDetail.businessTimezone,
+      sampleConversationLimit: this.onboarding.sampleConversationLimit,
+      sampleMessagePageLimit: this.onboarding.sampleMessagePageLimit
+    });
+  }
+
+  private buildCurrentPromptPreviewComparisonFingerprint() {
+    const samplePreview = this.configuration.promptWorkspaceSamplePreview;
+    if (!samplePreview) {
+      return null;
+    }
+    const selectedConversationId = this.configuration.selectedPromptSampleConversationId
+      || samplePreview.conversations[0]?.conversationId
+      || "";
+    if (!selectedConversationId) {
+      return null;
+    }
+    return buildPromptPreviewComparisonFingerprint({
+      promptText: this.configuration.promptText,
+      samplePreview,
+      selectedConversationId
+    });
+  }
+
+  private refreshPromptPreviewFreshness() {
+    const freshness = derivePromptPreviewFreshness({
+      workspaceFingerprint: this.configuration.promptWorkspaceSampleFingerprint,
+      comparisonFingerprint: this.configuration.promptPreviewComparisonFingerprint,
+      currentWorkspaceFingerprint: this.buildCurrentPromptWorkspaceSampleFingerprint(),
+      currentComparisonFingerprint: this.buildCurrentPromptPreviewComparisonFingerprint(),
+      hasSamplePreview: this.configuration.promptWorkspaceSamplePreview !== null,
+      hasComparison: this.configuration.promptPreviewComparison !== null
+    });
+
+    this.configuration.promptWorkspaceSampleStaleReason = freshness.workspaceStaleReason;
+    this.configuration.promptPreviewComparisonStaleReason = freshness.comparisonStaleReason;
+    if (freshness.invalidateComparison) {
+      this.configuration.promptPreviewComparison = null;
+      this.configuration.promptPreviewComparisonFingerprint = null;
+    }
   }
 
   private render() {

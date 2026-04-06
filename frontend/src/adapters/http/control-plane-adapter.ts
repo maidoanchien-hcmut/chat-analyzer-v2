@@ -5,6 +5,10 @@ import type {
   HealthSummaryViewModel,
   OnboardingSamplePreviewInput,
   ManualRunInput,
+  PromptPreviewArtifactInput,
+  PromptPreviewComparisonViewModel,
+  PromptWorkspaceSampleInput,
+  PromptWorkspaceSampleViewModel,
   PublishEligibility,
   RunDetailViewModel,
   RunGroupViewModel,
@@ -128,6 +132,50 @@ type RawOnboardingSamplePreview = {
   }>;
 };
 
+type RawPromptWorkspaceSamplePreview = RawOnboardingSamplePreview & {
+  sampleWorkspaceKey: string;
+  connectedPageId: string;
+  pageName: string;
+  conversations: Array<RawOnboardingSamplePreview["conversations"][number] & {
+    firstMeaningfulMessageId?: string;
+    firstMeaningfulMessageSenderRole?: string;
+    explicitRevisitSignal?: string | null;
+    explicitNeedSignal?: string | null;
+    explicitOutcomeSignal?: string | null;
+    sourceThreadJsonRedacted?: unknown;
+    messageCount?: number;
+    firstStaffResponseSeconds?: number | null;
+    avgStaffResponseSeconds?: number | null;
+    staffParticipantsJson?: unknown;
+    messages?: Array<{
+      messageId?: string;
+      insertedAt?: string;
+      senderRole?: string;
+      senderName?: string | null;
+      messageType?: string;
+      redactedText?: string | null;
+      isMeaningfulHumanMessage?: boolean;
+      isOpeningBlockMessage?: boolean;
+    }>;
+  }>;
+};
+
+type RawPromptPreviewArtifact = {
+  id: string;
+  promptVersionLabel: string;
+  promptHash: string;
+  taxonomyVersionCode: string;
+  sampleScopeKey: string;
+  sampleConversationId: string;
+  customerDisplayName: string;
+  createdAt: string;
+  runtimeMetadata: Record<string, unknown>;
+  result: Record<string, unknown>;
+  evidenceBundle: string[];
+  fieldExplanations: FieldExplanation[];
+  supportingMessageIds: string[];
+};
+
 export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlaneAdapter {
   return {
     async listPagesFromToken(userAccessToken) {
@@ -171,6 +219,58 @@ export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlan
         }
       );
       return mapOnboardingSamplePreview(result.samplePreview, input.pageName);
+    },
+    async previewPromptWorkspaceSample(pageId: string, input: PromptWorkspaceSampleInput) {
+      const result = await requestJson<{
+        samplePreview: RawPromptWorkspaceSamplePreview;
+      }>(
+        getBaseUrl(),
+        "POST",
+        `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}/prompt-workspace/sample`,
+        {
+          tagMappingJson: input.tagMappingJson,
+          openingRulesJson: input.openingRulesJson,
+          schedulerJson: input.schedulerJson,
+          sampleConversationLimit: input.sampleConversationLimit,
+          sampleMessagePageLimit: input.sampleMessagePageLimit
+        }
+      );
+      return mapPromptWorkspaceSamplePreview(result.samplePreview);
+    },
+    async previewPromptArtifacts(pageId: string, input: PromptPreviewArtifactInput) {
+      const result = await requestJson<{
+        sample_scope: {
+          sample_scope_key: string;
+          target_date: string;
+          business_timezone: string;
+          window_start_at: string;
+          window_end_exclusive_at: string;
+          selected_conversation_id: string;
+        };
+        active_artifact: RawPromptPreviewArtifact;
+        draft_artifact: RawPromptPreviewArtifact;
+      }>(
+        getBaseUrl(),
+        "POST",
+        `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}/prompt-preview-artifacts`,
+        {
+          draftPromptText: input.draftPromptText,
+          sampleWorkspaceKey: input.sampleWorkspaceKey,
+          selectedConversationId: input.selectedConversationId
+        }
+      );
+      return {
+        sampleScope: {
+          sampleScopeKey: result.sample_scope.sample_scope_key,
+          targetDate: result.sample_scope.target_date,
+          businessTimezone: result.sample_scope.business_timezone,
+          windowStartAt: result.sample_scope.window_start_at,
+          windowEndExclusiveAt: result.sample_scope.window_end_exclusive_at,
+          selectedConversationId: result.sample_scope.selected_conversation_id
+        },
+        activeArtifact: mapPromptPreviewArtifact(result.active_artifact),
+        draftArtifact: mapPromptPreviewArtifact(result.draft_artifact)
+      };
     },
     async listConnectedPages() {
       const result = await requestJson<{ pages: RawConnectedPageDetail[] }>(
@@ -373,6 +473,78 @@ function mapOnboardingSamplePreview(input: RawOnboardingSamplePreview, pageName:
   };
 }
 
+function mapPromptWorkspaceSamplePreview(input: RawPromptWorkspaceSamplePreview): PromptWorkspaceSampleViewModel {
+  return {
+    sampleWorkspaceKey: input.sampleWorkspaceKey,
+    connectedPageId: input.connectedPageId,
+    pageId: input.pageId,
+    pageName: input.pageName,
+    targetDate: input.targetDate,
+    businessTimezone: input.businessTimezone,
+    windowStartAt: input.windowStartAt,
+    windowEndExclusiveAt: input.windowEndExclusiveAt,
+    summary: {
+      conversationsScanned: readNumber(input.summary?.conversations_scanned),
+      threadDaysBuilt: readNumber(input.summary?.thread_days_built),
+      messagesSeen: readNumber(input.summary?.messages_seen),
+      messagesSelected: readNumber(input.summary?.messages_selected)
+    },
+    pageTags: input.pageTags.map((tag) => ({
+      pancakeTagId: tag.pancakeTagId,
+      text: tag.text,
+      isDeactive: tag.isDeactive
+    })),
+    conversations: input.conversations.map((conversation) => ({
+      conversationId: conversation.conversationId,
+      customerDisplayName: conversation.customerDisplayName ?? "",
+      firstMeaningfulMessageId: normalizeNullableString(conversation.firstMeaningfulMessageId),
+      firstMeaningfulMessageText: conversation.firstMeaningfulMessageText ?? "",
+      firstMeaningfulMessageSenderRole: normalizeNullableString(conversation.firstMeaningfulMessageSenderRole),
+      observedTagsJson: conversation.observedTagsJson ?? [],
+      normalizedTagSignalsJson: conversation.normalizedTagSignalsJson ?? {},
+      openingBlockJson: conversation.openingBlockJson ?? {},
+      explicitRevisitSignal: normalizeNullableString(conversation.explicitRevisitSignal),
+      explicitNeedSignal: normalizeNullableString(conversation.explicitNeedSignal),
+      explicitOutcomeSignal: normalizeNullableString(conversation.explicitOutcomeSignal),
+      sourceThreadJsonRedacted: conversation.sourceThreadJsonRedacted ?? {},
+      messageCount: typeof conversation.messageCount === "number" ? conversation.messageCount : 0,
+      firstStaffResponseSeconds: typeof conversation.firstStaffResponseSeconds === "number" ? conversation.firstStaffResponseSeconds : null,
+      avgStaffResponseSeconds: typeof conversation.avgStaffResponseSeconds === "number" ? conversation.avgStaffResponseSeconds : null,
+      staffParticipantsJson: conversation.staffParticipantsJson ?? [],
+      messages: Array.isArray(conversation.messages)
+        ? conversation.messages.map((message) => ({
+          messageId: typeof message.messageId === "string" ? message.messageId : "",
+          insertedAt: typeof message.insertedAt === "string" ? message.insertedAt : "",
+          senderRole: typeof message.senderRole === "string" ? message.senderRole : "",
+          senderName: normalizeNullableString(message.senderName),
+          messageType: typeof message.messageType === "string" ? message.messageType : "",
+          redactedText: normalizeNullableString(message.redactedText),
+          isMeaningfulHumanMessage: message.isMeaningfulHumanMessage === true,
+          isOpeningBlockMessage: message.isOpeningBlockMessage === true
+        })).filter((message) => message.messageId || message.insertedAt || message.senderRole || message.messageType || message.redactedText)
+        : []
+    }))
+  };
+}
+
+function mapPromptPreviewArtifact(input: RawPromptPreviewArtifact): PromptPreviewComparisonViewModel["activeArtifact"] {
+  return {
+    id: input.id,
+    promptVersionLabel: input.promptVersionLabel,
+    promptHash: input.promptHash,
+    taxonomyVersionCode: input.taxonomyVersionCode,
+    sampleScopeKey: input.sampleScopeKey,
+    sampleConversationId: input.sampleConversationId,
+    customerDisplayName: input.customerDisplayName,
+    createdAt: input.createdAt,
+    runtimeMetadata: input.runtimeMetadata,
+    result: input.result,
+    evidenceBundle: Array.isArray(input.evidenceBundle) ? input.evidenceBundle : [],
+    fieldExplanations: Array.isArray(input.fieldExplanations) ? input.fieldExplanations : [],
+    supportingMessageIds: Array.isArray(input.supportingMessageIds) ? input.supportingMessageIds : []
+  };
+}
+
 function flattenNormalizedTagSignals(value: unknown) {
   const source = asRecord(value);
   return Object.entries(source).flatMap(([role, entries]) => readArray(entries).map((item) => ({
@@ -387,6 +559,10 @@ function asRecord(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown>
     : {};
+}
+
+function normalizeNullableString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
 }
 
 function buildManualRunBody(input: ManualRunInput) {

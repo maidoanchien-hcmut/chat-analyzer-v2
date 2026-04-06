@@ -4,6 +4,9 @@ import { escapeHtml } from "../../shared/html.ts";
 export function renderConfiguration(configuration: ConfigurationState, onboarding: OnboardingState) {
   const compareLeft = configuration.pageDetail?.configVersions.find((item) => item.id === configuration.promptCompareLeftVersionId) ?? null;
   const compareRight = configuration.pageDetail?.configVersions.find((item) => item.id === configuration.promptCompareRightVersionId) ?? null;
+  const selectedPromptSampleConversation = configuration.promptWorkspaceSamplePreview?.conversations.find(
+    (item) => item.conversationId === configuration.selectedPromptSampleConversationId
+  ) ?? configuration.promptWorkspaceSamplePreview?.conversations[0] ?? null;
   const onboardingTimezones = dedupeTimezones([
     "Asia/Ho_Chi_Minh",
     "Asia/Saigon",
@@ -202,6 +205,80 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                 <strong>Semantics của sample workspace</strong>
                 <p>Sample chỉ lấy dữ liệu thật để operator rà tag thô và opening block. Luồng này không đổi publish pointer và không đồng nghĩa publish dashboard.</p>
               </div>
+              <article class="sub-panel">
+                <div class="section-headline">
+                  <div>
+                    <h5>Preview workspace runtime thật</h5>
+                    <p class="muted-copy">Lane này chạy AI preview trên sample conversation của page đang chọn, không đụng vào publish pointer hay active config.</p>
+                  </div>
+                  <div class="button-row">
+                    <button type="button" data-action="load-prompt-workspace-sample">Tải sample prompt</button>
+                    <button type="button" data-action="run-prompt-preview">Chạy thử prompt</button>
+                  </div>
+                </div>
+                ${configuration.promptWorkspaceSamplePreview ? `
+                  ${configuration.promptWorkspaceSampleStaleReason ? `
+                    <div class="banner banner-warning">
+                      <strong>Sample workspace đã cũ</strong>
+                      <p>${escapeHtml(configuration.promptWorkspaceSampleStaleReason)}</p>
+                    </div>
+                  ` : ""}
+                  <div class="meta-list">
+                    <span>Page: ${escapeHtml(configuration.promptWorkspaceSamplePreview.pageName)}</span>
+                    <span>Ngày sample: ${escapeHtml(configuration.promptWorkspaceSamplePreview.targetDate)}</span>
+                    <span>Window: ${escapeHtml(configuration.promptWorkspaceSamplePreview.windowStartAt)} -> ${escapeHtml(configuration.promptWorkspaceSamplePreview.windowEndExclusiveAt)}</span>
+                    <span>Hội thoại sample: ${configuration.promptWorkspaceSamplePreview.conversations.length}</span>
+                  </div>
+                  <div class="two-column-grid">
+                    <label>
+                      <span>Chọn hội thoại sample</span>
+                      <select name="selectedPromptSampleConversationId">
+                        ${configuration.promptWorkspaceSamplePreview.conversations.map((conversation) => `
+                          <option value="${escapeHtml(conversation.conversationId)}" ${conversation.conversationId === (selectedPromptSampleConversation?.conversationId ?? "") ? "selected" : ""}>
+                            ${escapeHtml(conversation.customerDisplayName || conversation.conversationId)}
+                          </option>
+                        `).join("")}
+                      </select>
+                    </label>
+                    <article class="sub-panel">
+                      <h5>Scope đang dùng</h5>
+                      <div class="meta-list">
+                        ${renderSummarySpans(configuration.promptWorkspaceSamplePreview)}
+                      </div>
+                    </article>
+                  </div>
+                  ${selectedPromptSampleConversation ? renderPromptWorkspaceConversation(selectedPromptSampleConversation) : "<p class='muted-copy'>Chưa có hội thoại sample để preview.</p>"}
+                ` : "<p class='muted-copy'>Tải sample prompt từ connected page để chọn một hội thoại và chạy AI preview trên cùng runtime thật.</p>"}
+              </article>
+              ${configuration.promptPreviewComparison ? `
+                <article class="sub-panel">
+                  <div class="section-headline">
+                    <div>
+                      <h5>So sánh active vs draft trên cùng sample</h5>
+                      <p class="muted-copy">Hai artifact bên dưới dùng cùng sample scope <code>${escapeHtml(configuration.promptPreviewComparison.sampleScope.sampleScopeKey)}</code>.</p>
+                    </div>
+                  </div>
+                  <div class="two-column-grid">
+                    <article class="sub-panel">
+                      ${renderPromptPreviewArtifactCard(configuration.promptPreviewComparison.activeArtifact, "Prompt active")}
+                    </article>
+                    <article class="sub-panel">
+                      ${renderPromptPreviewArtifactCard(configuration.promptPreviewComparison.draftArtifact, "Prompt draft")}
+                    </article>
+                  </div>
+                </article>
+              ` : configuration.promptPreviewComparisonStaleReason
+                ? `
+                  <div class="banner banner-warning">
+                    <strong>Preview compare cần chạy lại</strong>
+                    <p>${escapeHtml(configuration.promptPreviewComparisonStaleReason)}</p>
+                  </div>
+                `
+                : "<p class='muted-copy'>Kết quả preview active vs draft sẽ hiện ở đây sau khi chọn sample và bấm chạy thử prompt.</p>"}
+              <div class="banner banner-warning">
+                <strong>Version prompt đã lưu</strong>
+                <p>Khối bên dưới chỉ so sánh version/config đã lưu trong control-plane. Đây không phải runtime preview artifact của sample workspace.</p>
+              </div>
               <div class="two-column-grid">
                 <label>
                   <span>So sánh 2 prompt version: bản trái</span>
@@ -345,7 +422,99 @@ function renderPromptAuditCard(
   `;
 }
 
-function renderSummarySpans(preview: NonNullable<ConfigurationState["onboardingSamplePreview"]>) {
+function renderPromptWorkspaceConversation(
+  conversation: NonNullable<ConfigurationState["promptWorkspaceSamplePreview"]>["conversations"][number]
+) {
+  const openingSignals = readPromptSignalList(conversation.openingBlockJson);
+  const normalizedSignals = readPromptNormalizedSignals(conversation.normalizedTagSignalsJson);
+
+  return `
+    <article class="sub-panel">
+      <div class="section-headline">
+        <div>
+          <h5>${escapeHtml(conversation.customerDisplayName || conversation.conversationId)}</h5>
+          <p class="muted-copy">First meaningful message: ${escapeHtml(conversation.firstMeaningfulMessageText || "Chưa có")}</p>
+        </div>
+        <div class="meta-list">
+          <span>Message count: ${conversation.messageCount}</span>
+          <span>Explicit revisit: ${escapeHtml(conversation.explicitRevisitSignal ?? "unknown")}</span>
+          <span>Explicit need: ${escapeHtml(conversation.explicitNeedSignal ?? "unknown")}</span>
+        </div>
+      </div>
+      <div class="two-column-grid">
+        <article class="sub-panel">
+          <h5>Opening signals</h5>
+          ${openingSignals.length > 0
+            ? `<ul>${openingSignals.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+            : "<p class='muted-copy'>Không có explicit opening signal trong sample đã chọn.</p>"}
+        </article>
+        <article class="sub-panel">
+          <h5>Normalized tag signals</h5>
+          ${normalizedSignals.length > 0
+            ? `<ul>${normalizedSignals.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+            : "<p class='muted-copy'>Không có normalized tag signal cho sample này.</p>"}
+        </article>
+      </div>
+      <article class="sub-panel">
+        <h5>Transcript sample</h5>
+        ${conversation.messages.length > 0
+          ? `<ul>${conversation.messages.map((message) => `<li><strong>${escapeHtml(message.senderRole)}</strong>${message.senderName ? ` / ${escapeHtml(message.senderName)}` : ""}: ${escapeHtml(message.redactedText ?? "(không có text)")}</li>`).join("")}</ul>`
+          : "<p class='muted-copy'>Sample này chưa trả transcript message.</p>"}
+      </article>
+    </article>
+  `;
+}
+
+function renderPromptPreviewArtifactCard(
+  artifact: NonNullable<ConfigurationState["promptPreviewComparison"]>["activeArtifact"],
+  label: string
+) {
+  const resultEntries = Object.entries(artifact.result);
+  const runtimeEntries = Object.entries(artifact.runtimeMetadata);
+
+  return `
+    <h4>${escapeHtml(label)}</h4>
+    <div class="meta-list">
+      <span>Prompt version: ${escapeHtml(artifact.promptVersionLabel)}</span>
+      <span>Prompt hash: ${escapeHtml(artifact.promptHash)}</span>
+      <span>Taxonomy: ${escapeHtml(artifact.taxonomyVersionCode)}</span>
+      <span>Tạo lúc: ${escapeHtml(artifact.createdAt)}</span>
+    </div>
+    <div class="two-column-grid">
+      <article class="sub-panel">
+        <h5>Structured output</h5>
+        ${resultEntries.length > 0
+          ? `<ul>${resultEntries.map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong>: ${escapeHtml(renderJsonValue(value))}</li>`).join("")}</ul>`
+          : "<p class='muted-copy'>Artifact này chưa có structured output.</p>"}
+      </article>
+      <article class="sub-panel">
+        <h5>Runtime metadata</h5>
+        ${runtimeEntries.length > 0
+          ? `<ul>${runtimeEntries.map(([key, value]) => `<li><strong>${escapeHtml(key)}</strong>: ${escapeHtml(renderJsonValue(value))}</li>`).join("")}</ul>`
+          : "<p class='muted-copy'>Artifact này chưa có runtime metadata.</p>"}
+      </article>
+    </div>
+    <div class="two-column-grid">
+      <article class="sub-panel">
+        <h5>Evidence bundle</h5>
+        ${artifact.evidenceBundle.length > 0
+          ? `<ul>${artifact.evidenceBundle.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+          : "<p class='muted-copy'>Artifact này chưa có evidence bundle.</p>"}
+      </article>
+      <article class="sub-panel">
+        <h5>Field explanations</h5>
+        ${artifact.fieldExplanations.length > 0
+          ? `<ul>${artifact.fieldExplanations.map((item) => `<li><strong>${escapeHtml(item.field)}</strong>: ${escapeHtml(item.explanation)}</li>`).join("")}</ul>`
+          : "<p class='muted-copy'>Artifact này chưa có field explanations.</p>"}
+        <p class="muted-copy">Supporting messages: ${artifact.supportingMessageIds.length > 0 ? escapeHtml(artifact.supportingMessageIds.join(", ")) : "Chưa có"}</p>
+      </article>
+    </div>
+  `;
+}
+
+function renderSummarySpans(
+  preview: NonNullable<ConfigurationState["onboardingSamplePreview"]> | NonNullable<ConfigurationState["promptWorkspaceSamplePreview"]>
+) {
   return [
     renderSummarySpan("Hội thoại quét", preview.summary.conversationsScanned),
     renderSummarySpan("Thread day tạo được", preview.summary.threadDaysBuilt),
@@ -408,4 +577,60 @@ function renderSampleConversations(
       </div>
     </article>
   `).join("");
+}
+
+function readPromptSignalList(value: unknown) {
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+  const explicitSignals = (value as Record<string, unknown>).explicit_signals;
+  if (!Array.isArray(explicitSignals)) {
+    return [];
+  }
+  return explicitSignals.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const signalRole = typeof (item as Record<string, unknown>).signal_role === "string" ? String((item as Record<string, unknown>).signal_role) : "";
+    const signalCode = typeof (item as Record<string, unknown>).signal_code === "string" ? String((item as Record<string, unknown>).signal_code) : "";
+    const rawText = typeof (item as Record<string, unknown>).raw_text === "string" ? String((item as Record<string, unknown>).raw_text) : "";
+    return signalRole || signalCode || rawText ? [`${signalRole} / ${signalCode}: ${rawText}`] : [];
+  });
+}
+
+function readPromptNormalizedSignals(value: unknown) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return [];
+  }
+  return Object.entries(value as Record<string, unknown>).flatMap(([role, entries]) => {
+    if (!Array.isArray(entries)) {
+      return [];
+    }
+    return entries.flatMap((item) => {
+      if (!item || typeof item !== "object") {
+        return [];
+      }
+      const sourceTagText = typeof (item as Record<string, unknown>).source_tag_text === "string"
+        ? String((item as Record<string, unknown>).source_tag_text)
+        : typeof (item as Record<string, unknown>).sourceTagText === "string"
+          ? String((item as Record<string, unknown>).sourceTagText)
+          : "";
+      const canonicalCode = typeof (item as Record<string, unknown>).canonical_code === "string"
+        ? String((item as Record<string, unknown>).canonical_code)
+        : typeof (item as Record<string, unknown>).canonicalCode === "string"
+          ? String((item as Record<string, unknown>).canonicalCode)
+          : "";
+      return sourceTagText || canonicalCode ? [`${role}: ${sourceTagText} -> ${canonicalCode || "noise"}`] : [];
+    });
+  });
+}
+
+function renderJsonValue(value: unknown) {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === null || value === undefined) {
+    return "null";
+  }
+  return JSON.stringify(value);
 }

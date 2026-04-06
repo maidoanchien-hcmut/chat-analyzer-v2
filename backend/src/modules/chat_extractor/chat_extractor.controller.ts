@@ -4,6 +4,8 @@ import {
   executeJobBodySchema,
   listPagesBodySchema,
   onboardingSamplePreviewBodySchema,
+  promptPreviewArtifactBodySchema,
+  promptWorkspaceSampleBodySchema,
   previewJobBodySchema,
   publishRunBodySchema,
   registerPageBodySchema
@@ -21,6 +23,11 @@ const configVersionParamsSchema = t.Object({
 
 const runIdParamsSchema = t.Object({
   id: t.String()
+});
+
+const promptPreviewArtifactParamsSchema = t.Object({
+  id: t.String(),
+  artifactId: t.String()
 });
 
 export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
@@ -47,6 +54,16 @@ export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
     body: t.Any(),
     response: t.Any()
   })
+  .post("/control-center/pages/:id/prompt-workspace/sample", async ({ params, body }) => {
+    const parsed = promptWorkspaceSampleBodySchema.parse(normalizeBodyKeys(body));
+    return {
+      samplePreview: await chatExtractorService.previewPromptWorkspaceSample(params.id, parsed)
+    };
+  }, {
+    params: pageIdParamsSchema,
+    body: t.Any(),
+    response: t.Any()
+  })
   .get("/control-center/pages", async () => chatExtractorService.listConnectedPages(), {
     response: t.Any()
   })
@@ -66,6 +83,20 @@ export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
     return chatExtractorService.activateConfigVersion(params.id, params.configVersionId);
   }, {
     params: configVersionParamsSchema,
+    response: t.Any()
+  })
+  .post("/control-center/pages/:id/prompt-preview-artifacts", async ({ params, body }) => {
+    const parsed = promptPreviewArtifactBodySchema.parse(normalizeBodyKeys(body));
+    return chatExtractorService.previewPromptArtifacts(params.id, parsed);
+  }, {
+    params: pageIdParamsSchema,
+    body: t.Any(),
+    response: t.Any()
+  })
+  .get("/control-center/pages/:id/prompt-preview-artifacts/:artifactId", async ({ params }) => {
+    return chatExtractorService.getPromptPreviewArtifact(params.id, params.artifactId);
+  }, {
+    params: promptPreviewArtifactParamsSchema,
     response: t.Any()
   })
   .post("/jobs/preview", async ({ body }) => {

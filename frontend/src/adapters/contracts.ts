@@ -11,6 +11,85 @@ export type FieldExplanation = {
   explanation: string;
 };
 
+export type PromptWorkspaceSampleMessage = {
+  messageId: string;
+  insertedAt: string;
+  senderRole: string;
+  senderName: string | null;
+  messageType: string;
+  redactedText: string | null;
+  isMeaningfulHumanMessage: boolean;
+  isOpeningBlockMessage: boolean;
+};
+
+export type PromptWorkspaceSampleConversation = {
+  conversationId: string;
+  customerDisplayName: string;
+  firstMeaningfulMessageId: string | null;
+  firstMeaningfulMessageText: string;
+  firstMeaningfulMessageSenderRole: string | null;
+  observedTagsJson: unknown;
+  normalizedTagSignalsJson: unknown;
+  openingBlockJson: unknown;
+  explicitRevisitSignal: string | null;
+  explicitNeedSignal: string | null;
+  explicitOutcomeSignal: string | null;
+  sourceThreadJsonRedacted: unknown;
+  messageCount: number;
+  firstStaffResponseSeconds: number | null;
+  avgStaffResponseSeconds: number | null;
+  staffParticipantsJson: unknown;
+  messages: PromptWorkspaceSampleMessage[];
+};
+
+export type PromptWorkspaceSampleViewModel = {
+  sampleWorkspaceKey: string;
+  connectedPageId: string;
+  pageId: string;
+  pageName: string;
+  targetDate: string;
+  businessTimezone: string;
+  windowStartAt: string;
+  windowEndExclusiveAt: string;
+  summary: {
+    conversationsScanned: number;
+    threadDaysBuilt: number;
+    messagesSeen: number;
+    messagesSelected: number;
+  };
+  pageTags: Array<{ pancakeTagId: string; text: string; isDeactive: boolean }>;
+  conversations: PromptWorkspaceSampleConversation[];
+};
+
+export type PromptPreviewArtifactViewModel = {
+  id: string;
+  promptVersionLabel: string;
+  promptHash: string;
+  taxonomyVersionCode: string;
+  sampleScopeKey: string;
+  sampleConversationId: string;
+  customerDisplayName: string;
+  createdAt: string;
+  runtimeMetadata: Record<string, unknown>;
+  result: Record<string, unknown>;
+  evidenceBundle: string[];
+  fieldExplanations: FieldExplanation[];
+  supportingMessageIds: string[];
+};
+
+export type PromptPreviewComparisonViewModel = {
+  sampleScope: {
+    sampleScopeKey: string;
+    targetDate: string;
+    businessTimezone: string;
+    windowStartAt: string;
+    windowEndExclusiveAt: string;
+    selectedConversationId: string;
+  };
+  activeArtifact: PromptPreviewArtifactViewModel;
+  draftArtifact: PromptPreviewArtifactViewModel;
+};
+
 export type BusinessCatalog = {
   pages: BusinessPage[];
   needs: SelectOption[];
@@ -385,6 +464,20 @@ export type OnboardingSamplePreviewInput = {
   sampleMessagePageLimit: number;
 };
 
+export type PromptWorkspaceSampleInput = {
+  tagMappingJson: unknown;
+  openingRulesJson: unknown;
+  schedulerJson: unknown;
+  sampleConversationLimit: number;
+  sampleMessagePageLimit: number;
+};
+
+export type PromptPreviewArtifactInput = {
+  draftPromptText: string;
+  sampleWorkspaceKey: string;
+  selectedConversationId: string;
+};
+
 export type ManualRunInput = {
   connectedPageId: string;
   processingMode: "etl_only" | "etl_and_ai";
@@ -412,6 +505,8 @@ export interface ControlPlaneAdapter {
   listPagesFromToken(userAccessToken: string): Promise<OnboardingPageCandidate[]>;
   registerPage(input: RegisterPageInput): Promise<ConnectedPageDetailViewModel>;
   previewOnboardingSample(input: OnboardingSamplePreviewInput): Promise<OnboardingSamplePreviewViewModel>;
+  previewPromptWorkspaceSample(pageId: string, input: PromptWorkspaceSampleInput): Promise<PromptWorkspaceSampleViewModel>;
+  previewPromptArtifacts(pageId: string, input: PromptPreviewArtifactInput): Promise<PromptPreviewComparisonViewModel>;
   listConnectedPages(): Promise<ConnectedPageSummary[]>;
   getConnectedPage(pageId: string): Promise<ConnectedPageDetailViewModel>;
   createConfigVersion(pageId: string, input: CreateConfigVersionInput): Promise<void>;

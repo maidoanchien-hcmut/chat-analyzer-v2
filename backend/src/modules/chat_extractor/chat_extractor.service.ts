@@ -5,14 +5,28 @@ import { resolve } from "node:path";
 import { AppError } from "../../core/errors.ts";
 import {
   buildPagePromptIdentityText,
+  cloneJsonValue,
   DEFAULT_PAGE_PROMPT,
   defaultOpeningRulesConfig,
   defaultSchedulerConfig,
   defaultTagMappingConfig,
   hashPagePromptIdentity,
+  hashPromptPreviewSampleScope,
   hashEtlConfig,
   nextPromptVersion
 } from "./chat_extractor.artifacts.ts";
+import { conversationAnalysisClient } from "../analysis/analysis.client.ts";
+import type {
+  AnalysisRuntimeSnapshot,
+  AnalysisUnitBundle,
+  ConversationAnalysisResult
+} from "../analysis/analysis.types.ts";
+import {
+  ANALYSIS_OUTPUT_SCHEMA_VERSION,
+  ANALYSIS_RUNTIME_MODEL_NAME,
+  ANALYSIS_RUNTIME_PROFILE_ID,
+  ANALYSIS_RUNTIME_PROFILE_VERSION
+} from "../analysis/analysis.artifacts.ts";
 import {
   buildFullDayRun,
   determinePublishEligibility,
@@ -29,13 +43,16 @@ import {
   type ConnectedPageRecord,
   type PageConfigVersionRecord,
   type PagePromptIdentityRecord,
-  type PipelineRunRecord
+  type PipelineRunRecord,
+  type PromptPreviewArtifactRecord
 } from "./chat_extractor.repository.ts";
 import type {
   ExecuteJobBody,
   ManualJobBody,
   OnboardingSamplePreviewBody,
   OfficialDailyJobBody,
+  PromptPreviewArtifactBody,
+  PromptWorkspaceSampleBody,
   PreviewJobBody,
   PublishAs,
   PublishEligibility,
@@ -112,10 +129,32 @@ type RuntimePreviewTag = {
 type RuntimePreviewConversation = {
   conversationId: string;
   customerDisplayName: string;
+  firstMeaningfulMessageId: string;
   firstMeaningfulMessageText: string;
+  firstMeaningfulMessageSenderRole: string;
   observedTagsJson: unknown;
   normalizedTagSignalsJson: unknown;
   openingBlockJson: unknown;
+  explicitRevisitSignal: string | null;
+  explicitNeedSignal: string | null;
+  explicitOutcomeSignal: string | null;
+  sourceThreadJsonRedacted: unknown;
+  messageCount: number;
+  firstStaffResponseSeconds: number | null;
+  avgStaffResponseSeconds: number | null;
+  staffParticipantsJson: unknown;
+  messages: RuntimePreviewMessage[];
+};
+
+type RuntimePreviewMessage = {
+  messageId: string;
+  insertedAt: string;
+  senderRole: string;
+  senderName: string | null;
+  messageType: string;
+  redactedText: string | null;
+  isMeaningfulHumanMessage: boolean;
+  isOpeningBlockMessage: boolean;
 };
 
 export type RuntimePreviewOutput = {
@@ -128,6 +167,31 @@ export type RuntimePreviewOutput = {
   pageTags: RuntimePreviewTag[];
   conversations: RuntimePreviewConversation[];
 };
+
+type StoredPromptWorkspaceSample = {
+  connectedPageId: string;
+  samplePreview: RuntimePreviewOutput;
+  expiresAtMs: number;
+};
+
+type PromptPreviewArtifactView = {
+  id: string;
+  promptVersionLabel: string;
+  promptHash: string;
+  taxonomyVersionCode: string;
+  sampleScopeKey: string;
+  sampleConversationId: string;
+  customerDisplayName: string;
+  createdAt: string;
+  runtimeMetadata: Record<string, unknown>;
+  result: Record<string, unknown>;
+  evidenceBundle: string[];
+  fieldExplanations: Array<{ field: string; explanation: string }>;
+  supportingMessageIds: string[];
+};
+
+const PROMPT_WORKSPACE_SAMPLE_TTL_MS = 30 * 60 * 1000;
+const promptWorkspaceSampleStore = new Map<string, StoredPromptWorkspaceSample>();
 
 export class ChatExtractorService {
   private readonly listPagesFromTokenImpl: ChatExtractorServiceDependencies["listPagesFromToken"];
@@ -180,7 +244,7 @@ export class ChatExtractorService {
         versionNo: await chatExtractorRepository.nextConfigVersionNo(page.id),
         tagMappingJson: defaultTagMappingConfig(),
         openingRulesJson: defaultOpeningRulesConfig(),
-        schedulerJson: null,
+        schedulerJson: defaultSchedulerConfig(input.businessTimezone),
         notificationTargetsJson: null,
         promptText: DEFAULT_PAGE_PROMPT,
         analysisTaxonomyVersionId: defaultTaxonomy.id,
@@ -218,6 +282,85 @@ export class ChatExtractorService {
         maxMessagePagesPerThread: input.sampleMessagePageLimit
       }
     });
+  }
+
+  async previewPromptWorkspaceSample(connectedPageId: string, input: PromptWorkspaceSampleBody) {
+    const page = await this.requireConnectedPage(connectedPageId);
+    const samplePreview = await this.buildPromptWorkspaceSamplePreview(page, input);
+    const workspace = storePromptWorkspaceSample(page.page.id, samplePreview);
+    return {
+      connectedPageId: page.page.id,
+      pageName: page.page.pageName,
+      sampleWorkspaceKey: workspace.sampleWorkspaceKey,
+      sampleWorkspaceExpiresAt: workspace.sampleWorkspaceExpiresAt,
+      ...samplePreview
+    };
+  }
+
+  async previewPromptArtifacts(connectedPageId: string, input: PromptPreviewArtifactBody) {
+    const page = await this.requireConnectedPage(connectedPageId);
+    const configVersion = page.activeConfigVersion;
+    if (!configVersion) {
+      throw new AppError(400, "CHAT_EXTRACTOR_ACTIVE_CONFIG_REQUIRED", `Page ${page.page.id} chưa có active config version.`);
+    }
+
+    const sampleWorkspace = readPromptWorkspaceSample(connectedPageId, input.sampleWorkspaceKey);
+    const sampleConversation = sampleWorkspace.samplePreview.conversations.find(
+      (conversation) => conversation.conversationId === input.selectedConversationId
+    );
+    if (!sampleConversation) {
+      throw new AppError(
+        409,
+        "CHAT_EXTRACTOR_PROMPT_WORKSPACE_CONVERSATION_NOT_FOUND",
+        `Workspace sample ${input.sampleWorkspaceKey} không chứa hội thoại ${input.selectedConversationId}.`
+      );
+    }
+
+    const sampleScopeHash = hashPromptPreviewSampleScope({
+      connectedPageId: page.page.id,
+      targetDate: sampleWorkspace.samplePreview.targetDate,
+      businessTimezone: sampleWorkspace.samplePreview.businessTimezone,
+      windowStartAt: sampleWorkspace.samplePreview.windowStartAt,
+      windowEndExclusiveAt: sampleWorkspace.samplePreview.windowEndExclusiveAt,
+      sampleConversation
+    });
+
+    const activeArtifact = await this.resolvePromptPreviewArtifact(page, {
+      promptText: configVersion.promptText,
+      sampleScopeHash,
+      sampleScope: sampleWorkspace.samplePreview,
+      sampleConversation
+    });
+    const draftArtifact = await this.resolvePromptPreviewArtifact(page, {
+      promptText: input.draftPromptText,
+      sampleScopeHash,
+      sampleScope: sampleWorkspace.samplePreview,
+      sampleConversation
+    });
+
+    return {
+      sample_scope: {
+        sample_scope_key: sampleScopeHash,
+        target_date: sampleWorkspace.samplePreview.targetDate,
+        business_timezone: sampleWorkspace.samplePreview.businessTimezone,
+        window_start_at: sampleWorkspace.samplePreview.windowStartAt,
+        window_end_exclusive_at: sampleWorkspace.samplePreview.windowEndExclusiveAt,
+        selected_conversation_id: sampleConversation.conversationId
+      },
+      active_artifact: serializePromptPreviewArtifact(activeArtifact),
+      draft_artifact: serializePromptPreviewArtifact(draftArtifact)
+    };
+  }
+
+  async getPromptPreviewArtifact(connectedPageId: string, artifactId: string) {
+    const artifact = await chatExtractorRepository.getPromptPreviewArtifactById(artifactId);
+    if (!artifact || artifact.connectedPageId !== connectedPageId) {
+      throw new AppError(404, "CHAT_EXTRACTOR_PROMPT_PREVIEW_ARTIFACT_NOT_FOUND", `Prompt preview artifact ${artifactId} không thuộc page ${connectedPageId}.`);
+    }
+
+    return {
+      artifact: serializePromptPreviewArtifact(artifact)
+    };
   }
 
   async createConfigVersion(connectedPageId: string, input: {
@@ -474,50 +617,158 @@ export class ChatExtractorService {
     return this.getRun(runId);
   }
 
+  private async buildPromptWorkspaceSamplePreview(
+    page: ConnectedPageDetailRecord,
+    input: PromptWorkspaceSampleBody
+  ) {
+    const now = new Date();
+    const targetDate = formatDateInTimezone(now, page.page.businessTimezone);
+    const dayStart = parseDayStart(targetDate, page.page.businessTimezone);
+    if (now <= dayStart) {
+      throw new AppError(409, "CHAT_EXTRACTOR_PROMPT_WORKSPACE_WINDOW_EMPTY", "Chưa có khoảng sample hợp lệ trong ngày hiện tại theo business timezone của page.");
+    }
+
+    const configVersion = page.activeConfigVersion;
+    const schedulerBase = input.schedulerJson
+      ?? configVersion?.schedulerJson
+      ?? defaultSchedulerConfig(page.page.businessTimezone);
+
+    return this.runRuntimePreviewImpl({
+      pageId: page.page.pancakePageId,
+      userAccessToken: page.page.pancakeUserAccessToken,
+      businessTimezone: page.page.businessTimezone,
+      targetDate,
+      windowStartAt: dayStart.toISOString(),
+      windowEndExclusiveAt: now.toISOString(),
+      tagMappingJson: input.tagMappingJson ?? configVersion?.tagMappingJson ?? defaultTagMappingConfig(),
+      openingRulesJson: input.openingRulesJson ?? configVersion?.openingRulesJson ?? defaultOpeningRulesConfig(),
+      schedulerJson: {
+        ...schedulerBase,
+        timezone: page.page.businessTimezone,
+        maxConversationsPerRun: input.sampleConversationLimit,
+        maxMessagePagesPerThread: input.sampleMessagePageLimit
+      }
+    });
+  }
+
+  private async resolvePromptPreviewArtifact(
+    page: ConnectedPageDetailRecord,
+    input: {
+      promptText: string;
+      sampleScopeHash: string;
+      sampleScope: RuntimePreviewOutput;
+      sampleConversation: RuntimePreviewConversation;
+    }
+  ): Promise<PromptPreviewArtifactRecord> {
+    const configVersion = page.activeConfigVersion;
+    if (!configVersion) {
+      throw new AppError(400, "CHAT_EXTRACTOR_ACTIVE_CONFIG_REQUIRED", `Page ${page.page.id} chưa có active config version.`);
+    }
+
+    const promptIdentity = await this.resolvePromptIdentity(page.page.id, input.promptText, configVersion.analysisTaxonomyVersion.taxonomyJson, true);
+    const runtime = buildPromptPreviewRuntimeSnapshot(page, configVersion, promptIdentity, input.promptText);
+    const runtimeMetadata = await this.resolvePromptPreviewRuntimeMetadata(runtime);
+    const effectivePromptHash = readRuntimePromptHash(runtimeMetadata, promptIdentity.compiledPromptHash);
+
+    const existingArtifact = await chatExtractorRepository.getPromptPreviewArtifactByIdentity({
+      connectedPageId: page.page.id,
+      analysisTaxonomyVersionId: configVersion.analysisTaxonomyVersionId,
+      compiledPromptHash: effectivePromptHash,
+      sampleScopeHash: input.sampleScopeHash,
+      sampleConversationId: input.sampleConversation.conversationId
+    });
+    if (existingArtifact) {
+      return existingArtifact;
+    }
+
+    const bundle = buildPromptPreviewBundle(page, input.sampleScopeHash, input.sampleScope, input.sampleConversation);
+    const response = await conversationAnalysisClient.analyzeConversations({
+      runtime,
+      bundles: [bundle]
+    });
+    const result = response.results[0];
+    if (!result) {
+      throw new AppError(502, "CHAT_EXTRACTOR_PROMPT_PREVIEW_EMPTY_RESULT", "AI preview không trả về result nào cho sample conversation đã chọn.");
+    }
+
+    return chatExtractorRepository.createPromptPreviewArtifact({
+      connectedPageId: page.page.id,
+      analysisTaxonomyVersionId: configVersion.analysisTaxonomyVersionId,
+      compiledPromptHash: readRuntimePromptHash(response.runtimeMetadataJson, effectivePromptHash),
+      promptVersion: promptIdentity.promptVersion,
+      sampleScopeHash: input.sampleScopeHash,
+      sampleTargetDate: new Date(`${input.sampleScope.targetDate}T00:00:00.000Z`),
+      sampleWindowStartAt: new Date(input.sampleScope.windowStartAt),
+      sampleWindowEndExclusiveAt: new Date(input.sampleScope.windowEndExclusiveAt),
+      sampleConversationId: input.sampleConversation.conversationId,
+      customerDisplayName: normalizePromptPreviewCustomer(input.sampleConversation.customerDisplayName),
+      runtimeMetadataJson: cloneJsonValue(response.runtimeMetadataJson),
+      previewResultJson: serializePromptPreviewResult(result),
+      evidenceBundleJson: buildPromptPreviewEvidenceBundle(result.evidenceUsedJson),
+      fieldExplanationsJson: buildPromptPreviewFieldExplanations(result.fieldExplanationsJson),
+      supportingMessageIdsJson: cloneJsonValue(result.supportingMessageIdsJson)
+    });
+  }
+
+  private async resolvePromptIdentity(
+    connectedPageId: string,
+    promptText: string,
+    taxonomyJson: unknown,
+    persistPromptIdentity = false
+  ) {
+    const promptIdentityText = buildPagePromptIdentityText({
+      promptText,
+      taxonomyJson
+    });
+    const promptIdentityHash = hashPagePromptIdentity(promptIdentityText);
+    const existingIdentity = await chatExtractorRepository.getPromptIdentityByHash(connectedPageId, promptIdentityHash);
+    if (existingIdentity) {
+      return existingIdentity;
+    }
+
+    if (persistPromptIdentity) {
+      return chatExtractorRepository.createPromptIdentity({
+        connectedPageId,
+        compiledPromptHash: promptIdentityHash,
+        compiledPromptText: promptIdentityText
+      });
+    }
+
+    return {
+      id: null,
+      connectedPageId,
+      compiledPromptHash: promptIdentityHash,
+      promptVersion: nextPromptVersion((await chatExtractorRepository.listPromptIdentities(connectedPageId)).map((item) => item.promptVersion)),
+      compiledPromptText: promptIdentityText,
+      createdAt: null
+    };
+  }
+
+  private async resolvePromptPreviewRuntimeMetadata(runtime: AnalysisRuntimeSnapshot) {
+    const response = await conversationAnalysisClient.analyzeConversations({
+      runtime,
+      bundles: []
+    });
+    return response.runtimeMetadataJson;
+  }
+
   private async resolveRuntimeSnapshot(page: ConnectedPageDetailRecord, persistPromptIdentity = false): Promise<RuntimeSnapshot> {
     const configVersion = page.activeConfigVersion;
     if (!configVersion) {
       throw new AppError(400, "CHAT_EXTRACTOR_ACTIVE_CONFIG_REQUIRED", `Page ${page.page.id} chưa có active config version.`);
     }
 
-    const promptIdentityText = buildPagePromptIdentityText({
-      promptText: configVersion.promptText,
-      taxonomyJson: configVersion.analysisTaxonomyVersion.taxonomyJson
-    });
-    const promptIdentityHash = hashPagePromptIdentity(promptIdentityText);
-    const existingIdentity = await chatExtractorRepository.getPromptIdentityByHash(page.page.id, promptIdentityHash);
-    const promptIdentity = existingIdentity ?? {
-      id: null,
-      connectedPageId: page.page.id,
-      compiledPromptHash: promptIdentityHash,
-      promptVersion: nextPromptVersion((await chatExtractorRepository.listPromptIdentities(page.page.id)).map((item) => item.promptVersion)),
-      compiledPromptText: promptIdentityText,
-      createdAt: null
-    };
-
-    if (persistPromptIdentity && promptIdentity.id === null) {
-      const created = await chatExtractorRepository.createPromptIdentity({
-        connectedPageId: page.page.id,
-        compiledPromptHash: promptIdentityHash,
-        compiledPromptText: promptIdentityText
-      });
-      return {
-        configVersion,
-        promptIdentityText,
-        promptIdentityHash,
-        promptIdentity: created,
-        etlConfigHash: hashEtlConfig({
-          tagMapping: configVersion.tagMappingJson,
-          openingRules: configVersion.openingRulesJson,
-          scheduler: configVersion.schedulerJson
-        })
-      };
-    }
+    const promptIdentity = await this.resolvePromptIdentity(
+      page.page.id,
+      configVersion.promptText,
+      configVersion.analysisTaxonomyVersion.taxonomyJson,
+      persistPromptIdentity
+    );
 
     return {
       configVersion,
-      promptIdentityText,
-      promptIdentityHash,
+      promptIdentityText: promptIdentity.compiledPromptText,
+      promptIdentityHash: promptIdentity.compiledPromptHash,
       promptIdentity,
       etlConfigHash: hashEtlConfig({
         tagMapping: configVersion.tagMappingJson,
@@ -729,15 +980,299 @@ function parseRuntimePreviewOutput(raw: string): RuntimePreviewOutput {
           customerDisplayName: typeof (item as { customerDisplayName?: unknown }).customerDisplayName === "string"
             ? (item as { customerDisplayName: string }).customerDisplayName
             : "",
+          firstMeaningfulMessageId: typeof (item as { firstMeaningfulMessageId?: unknown }).firstMeaningfulMessageId === "string"
+            ? (item as { firstMeaningfulMessageId: string }).firstMeaningfulMessageId
+            : "",
           firstMeaningfulMessageText: typeof (item as { firstMeaningfulMessageText?: unknown }).firstMeaningfulMessageText === "string"
             ? (item as { firstMeaningfulMessageText: string }).firstMeaningfulMessageText
             : "",
+          firstMeaningfulMessageSenderRole: typeof (item as { firstMeaningfulMessageSenderRole?: unknown }).firstMeaningfulMessageSenderRole === "string"
+            ? (item as { firstMeaningfulMessageSenderRole: string }).firstMeaningfulMessageSenderRole
+            : "",
           observedTagsJson: (item as { observedTagsJson?: unknown }).observedTagsJson ?? null,
           normalizedTagSignalsJson: (item as { normalizedTagSignalsJson?: unknown }).normalizedTagSignalsJson ?? null,
-          openingBlockJson: (item as { openingBlockJson?: unknown }).openingBlockJson ?? null
+          openingBlockJson: (item as { openingBlockJson?: unknown }).openingBlockJson ?? null,
+          explicitRevisitSignal: normalizeNullableString((item as { explicitRevisitSignal?: unknown }).explicitRevisitSignal),
+          explicitNeedSignal: normalizeNullableString((item as { explicitNeedSignal?: unknown }).explicitNeedSignal),
+          explicitOutcomeSignal: normalizeNullableString((item as { explicitOutcomeSignal?: unknown }).explicitOutcomeSignal),
+          sourceThreadJsonRedacted: (item as { sourceThreadJsonRedacted?: unknown }).sourceThreadJsonRedacted ?? {},
+          messageCount: readNumberField(item, "messageCount"),
+          firstStaffResponseSeconds: readNullableNumberField(item, "firstStaffResponseSeconds"),
+          avgStaffResponseSeconds: readNullableNumberField(item, "avgStaffResponseSeconds"),
+          staffParticipantsJson: (item as { staffParticipantsJson?: unknown }).staffParticipantsJson ?? [],
+          messages: Array.isArray((item as { messages?: unknown }).messages)
+            ? ((item as { messages: Array<Record<string, unknown>> }).messages).map((message) => ({
+              messageId: typeof message.messageId === "string" ? message.messageId : "",
+              insertedAt: typeof message.insertedAt === "string" ? message.insertedAt : "",
+              senderRole: typeof message.senderRole === "string" ? message.senderRole : "",
+              senderName: normalizeNullableString(message.senderName),
+              messageType: typeof message.messageType === "string" ? message.messageType : "",
+              redactedText: normalizeNullableString(message.redactedText),
+              isMeaningfulHumanMessage: message.isMeaningfulHumanMessage === true,
+              isOpeningBlockMessage: message.isOpeningBlockMessage === true
+            })).filter((message) => message.messageId || message.insertedAt || message.senderRole || message.messageType || message.redactedText)
+            : []
         }))
       : []
   };
+}
+
+function buildPromptPreviewRuntimeSnapshot(
+  page: ConnectedPageDetailRecord,
+  configVersion: PageConfigVersionRecord,
+  promptIdentity: PagePromptIdentityRecord | {
+    id: null;
+    connectedPageId: string;
+    compiledPromptHash: string;
+    promptVersion: string;
+    compiledPromptText: string;
+    createdAt: Date | null;
+  },
+  promptText: string
+): AnalysisRuntimeSnapshot {
+  return {
+    profileId: ANALYSIS_RUNTIME_PROFILE_ID,
+    versionNo: ANALYSIS_RUNTIME_PROFILE_VERSION,
+    modelName: ANALYSIS_RUNTIME_MODEL_NAME,
+    outputSchemaVersion: ANALYSIS_OUTPUT_SCHEMA_VERSION,
+    pagePromptHash: promptIdentity.compiledPromptHash,
+    promptVersion: promptIdentity.promptVersion,
+    configVersionId: configVersion.id,
+    taxonomyVersionId: configVersion.analysisTaxonomyVersion.id,
+    taxonomyVersionCode: configVersion.analysisTaxonomyVersion.versionCode,
+    connectedPageId: page.page.id,
+    pagePromptText: promptText,
+    taxonomyJson: cloneJsonValue(configVersion.analysisTaxonomyVersion.taxonomyJson),
+    generationConfig: {},
+    profileJson: {
+      connected_page_id: page.page.id,
+      page_name: page.page.pageName,
+      business_timezone: page.page.businessTimezone,
+      config_version_id: configVersion.id,
+      taxonomy_version_id: configVersion.analysisTaxonomyVersion.id,
+      taxonomy_version_code: configVersion.analysisTaxonomyVersion.versionCode,
+      page_prompt_hash: promptIdentity.compiledPromptHash,
+      page_prompt_version: promptIdentity.promptVersion,
+      preview_mode: "prompt_profile_workspace"
+    }
+  };
+}
+
+function buildPromptPreviewBundle(
+  page: ConnectedPageDetailRecord,
+  sampleScopeHash: string,
+  sampleScope: RuntimePreviewOutput,
+  sampleConversation: RuntimePreviewConversation
+): AnalysisUnitBundle {
+  return {
+    threadDayId: `prompt-preview:${sampleScopeHash}:${sampleConversation.conversationId}`,
+    threadId: sampleConversation.conversationId,
+    connectedPageId: page.page.id,
+    pipelineRunId: `prompt-preview:${page.page.id}`,
+    runGroupId: `prompt-preview:${sampleScopeHash}`,
+    targetDate: sampleScope.targetDate,
+    businessTimezone: sampleScope.businessTimezone,
+    customerDisplayName: normalizePromptPreviewCustomer(sampleConversation.customerDisplayName),
+    normalizedTagSignalsJson: cloneJsonValue(sampleConversation.normalizedTagSignalsJson),
+    observedTagsJson: cloneJsonValue(sampleConversation.observedTagsJson),
+    openingBlockJson: cloneJsonValue(sampleConversation.openingBlockJson),
+    firstMeaningfulMessageId: sampleConversation.firstMeaningfulMessageId,
+    firstMeaningfulMessageTextRedacted: normalizePromptPreviewCustomer(sampleConversation.firstMeaningfulMessageText),
+    firstMeaningfulMessageSenderRole: sampleConversation.firstMeaningfulMessageSenderRole,
+    explicitRevisitSignal: sampleConversation.explicitRevisitSignal,
+    explicitNeedSignal: sampleConversation.explicitNeedSignal,
+    explicitOutcomeSignal: sampleConversation.explicitOutcomeSignal,
+    sourceThreadJsonRedacted: cloneJsonValue(sampleConversation.sourceThreadJsonRedacted),
+    messageCount: sampleConversation.messageCount,
+    firstStaffResponseSeconds: sampleConversation.firstStaffResponseSeconds,
+    avgStaffResponseSeconds: sampleConversation.avgStaffResponseSeconds,
+    staffParticipantsJson: cloneJsonValue(sampleConversation.staffParticipantsJson),
+    staffMessageStatsJson: [],
+    messages: sampleConversation.messages.map((message) => ({
+      id: message.messageId,
+      insertedAt: message.insertedAt,
+      senderRole: message.senderRole,
+      senderName: message.senderName,
+      messageType: message.messageType,
+      redactedText: message.redactedText,
+      isMeaningfulHumanMessage: message.isMeaningfulHumanMessage,
+      isOpeningBlockMessage: message.isOpeningBlockMessage
+    }))
+  };
+}
+
+function storePromptWorkspaceSample(connectedPageId: string, samplePreview: RuntimePreviewOutput) {
+  cleanupPromptWorkspaceSamples(Date.now());
+  const sampleWorkspaceKey = randomUUID();
+  const expiresAtMs = Date.now() + PROMPT_WORKSPACE_SAMPLE_TTL_MS;
+  promptWorkspaceSampleStore.set(sampleWorkspaceKey, {
+    connectedPageId,
+    samplePreview,
+    expiresAtMs
+  });
+  return {
+    sampleWorkspaceKey,
+    sampleWorkspaceExpiresAt: new Date(expiresAtMs).toISOString()
+  };
+}
+
+function readPromptWorkspaceSample(connectedPageId: string, sampleWorkspaceKey: string): StoredPromptWorkspaceSample {
+  const sampleWorkspace = promptWorkspaceSampleStore.get(sampleWorkspaceKey);
+  if (!sampleWorkspace || sampleWorkspace.connectedPageId !== connectedPageId) {
+    cleanupPromptWorkspaceSamples(Date.now());
+    throw new AppError(
+      409,
+      "CHAT_EXTRACTOR_PROMPT_WORKSPACE_SAMPLE_NOT_FOUND",
+      `Workspace sample ${sampleWorkspaceKey} không còn hợp lệ cho page ${connectedPageId}.`
+    );
+  }
+  if (sampleWorkspace.expiresAtMs <= Date.now()) {
+    promptWorkspaceSampleStore.delete(sampleWorkspaceKey);
+    cleanupPromptWorkspaceSamples(Date.now());
+    throw new AppError(
+      409,
+      "CHAT_EXTRACTOR_PROMPT_WORKSPACE_SAMPLE_STALE",
+      `Workspace sample ${sampleWorkspaceKey} đã hết hạn.`
+    );
+  }
+  return sampleWorkspace;
+}
+
+function cleanupPromptWorkspaceSamples(nowMs: number) {
+  for (const [workspaceKey, sampleWorkspace] of promptWorkspaceSampleStore.entries()) {
+    if (sampleWorkspace.expiresAtMs <= nowMs) {
+      promptWorkspaceSampleStore.delete(workspaceKey);
+    }
+  }
+}
+
+function serializePromptPreviewResult(result: ConversationAnalysisResult) {
+  return {
+    opening_theme_code: result.openingThemeCode,
+    opening_theme_reason: result.openingThemeReason,
+    customer_mood_code: result.customerMoodCode,
+    primary_need_code: result.primaryNeedCode,
+    primary_topic_code: result.primaryTopicCode,
+    journey_code: result.journeyCode,
+    closing_outcome_inference_code: result.closingOutcomeInferenceCode,
+    process_risk_level_code: result.processRiskLevelCode,
+    process_risk_reason_text: result.processRiskReasonText,
+    staff_assessments_json: cloneJsonValue(result.staffAssessmentsJson)
+  };
+}
+
+function buildPromptPreviewEvidenceBundle(evidenceUsedJson: Record<string, unknown>) {
+  const flattened = flattenEvidence("", evidenceUsedJson);
+  return flattened.length > 0 ? flattened : ["Không có evidence bundle từ runtime preview."];
+}
+
+function buildPromptPreviewFieldExplanations(fieldExplanationsJson: Record<string, unknown>) {
+  return Object.entries(fieldExplanationsJson)
+    .flatMap(([field, value]) => {
+      if (typeof value === "string") {
+        return [{ field, explanation: value }];
+      }
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const explanation = typeof (value as Record<string, unknown>).explanation === "string"
+          ? String((value as Record<string, unknown>).explanation)
+          : JSON.stringify(value);
+        return [{ field, explanation }];
+      }
+      return [];
+    });
+}
+
+function serializePromptPreviewArtifact(artifact: PromptPreviewArtifactRecord): PromptPreviewArtifactView {
+  return {
+    id: artifact.id,
+    promptVersionLabel: artifact.promptVersion,
+    promptHash: artifact.compiledPromptHash,
+    taxonomyVersionCode: artifact.analysisTaxonomyVersion.versionCode,
+    sampleScopeKey: artifact.sampleScopeHash,
+    sampleConversationId: artifact.sampleConversationId,
+    customerDisplayName: artifact.customerDisplayName ?? "",
+    createdAt: artifact.createdAt.toISOString(),
+    runtimeMetadata: asObjectJson(artifact.runtimeMetadataJson),
+    result: asObjectJson(artifact.previewResultJson),
+    evidenceBundle: asStringArrayJson(artifact.evidenceBundleJson),
+    fieldExplanations: asFieldExplanationArrayJson(artifact.fieldExplanationsJson),
+    supportingMessageIds: asStringArrayJson(artifact.supportingMessageIdsJson)
+  };
+}
+
+function readRuntimePromptHash(runtimeMetadataJson: Record<string, unknown>, fallback: string) {
+  const value = runtimeMetadataJson.effective_prompt_hash;
+  return typeof value === "string" && value.trim().length > 0 ? value : fallback;
+}
+
+function flattenEvidence(prefix: string, value: unknown): string[] {
+  if (typeof value === "string") {
+    return value.trim() ? [`${prefix}${value}`] : [];
+  }
+  if (Array.isArray(value)) {
+    return value.flatMap((item) => flattenEvidence(prefix, item));
+  }
+  if (value && typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>).flatMap(([key, item]) =>
+      flattenEvidence(prefix ? `${prefix}${key}: ` : `${key}: `, item)
+    );
+  }
+  if (value === null || value === undefined) {
+    return [];
+  }
+  return [`${prefix}${String(value)}`];
+}
+
+function asObjectJson(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? cloneJsonValue(value as Record<string, unknown>)
+    : {};
+}
+
+function asStringArrayJson(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string") : [];
+}
+
+function asFieldExplanationArrayJson(value: unknown) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") {
+      return [];
+    }
+    const field = typeof (item as Record<string, unknown>).field === "string"
+      ? String((item as Record<string, unknown>).field)
+      : "";
+    const explanation = typeof (item as Record<string, unknown>).explanation === "string"
+      ? String((item as Record<string, unknown>).explanation)
+      : "";
+    return field && explanation ? [{ field, explanation }] : [];
+  });
+}
+
+function readNumberField(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return 0;
+  }
+  const result = (value as Record<string, unknown>)[key];
+  return typeof result === "number" ? result : 0;
+}
+
+function readNullableNumberField(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+  const result = (value as Record<string, unknown>)[key];
+  return typeof result === "number" ? result : null;
+}
+
+function normalizeNullableString(value: unknown) {
+  return typeof value === "string" && value.trim().length > 0 ? value : null;
+}
+
+function normalizePromptPreviewCustomer(value: string | null | undefined) {
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : null;
 }
 
 function toWorkerTagMappingConfig(value: ReturnType<typeof defaultTagMappingConfig>) {

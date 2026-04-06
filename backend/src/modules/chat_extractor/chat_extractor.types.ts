@@ -120,6 +120,26 @@ export const onboardingSamplePreviewBodySchema = z
       ? null
       : raw.scheduler_json === null
         ? null
+      : normalizeSchedulerConfig(raw.scheduler_json),
+    sampleConversationLimit: raw.sample_conversation_limit,
+    sampleMessagePageLimit: raw.sample_message_page_limit
+  }));
+
+export const promptWorkspaceSampleBodySchema = z
+  .object({
+    tag_mapping_json: z.unknown().optional(),
+    opening_rules_json: z.unknown().optional(),
+    scheduler_json: z.union([z.null(), z.unknown()]).optional(),
+    sample_conversation_limit: z.number().int().min(1).max(100).default(12),
+    sample_message_page_limit: z.number().int().min(1).max(20).default(2)
+  })
+  .transform((raw) => ({
+    tagMappingJson: raw.tag_mapping_json === undefined ? undefined : normalizeTagMappingConfig(raw.tag_mapping_json),
+    openingRulesJson: raw.opening_rules_json === undefined ? undefined : normalizeOpeningRulesConfig(raw.opening_rules_json),
+    schedulerJson: raw.scheduler_json === undefined
+      ? undefined
+      : raw.scheduler_json === null
+        ? null
         : normalizeSchedulerConfig(raw.scheduler_json),
     sampleConversationLimit: raw.sample_conversation_limit,
     sampleMessagePageLimit: raw.sample_message_page_limit
@@ -157,6 +177,18 @@ export const createConfigVersionBodySchema = z
     activate: raw.activate,
     etlEnabled: raw.etl_enabled,
     analysisEnabled: raw.analysis_enabled
+  }));
+
+export const promptPreviewArtifactBodySchema = z
+  .object({
+    draft_prompt_text: z.string().trim(),
+    sample_workspace_key: z.string().uuid(),
+    selected_conversation_id: z.string().min(1)
+  })
+  .transform((raw) => ({
+    draftPromptText: raw.draft_prompt_text,
+    sampleWorkspaceKey: raw.sample_workspace_key,
+    selectedConversationId: raw.selected_conversation_id
   }));
 
 export const manualJobBodySchema = z
@@ -284,7 +316,9 @@ export type SchedulerConfig = ReturnType<typeof normalizeSchedulerConfig>;
 export type NotificationTargetsConfig = ReturnType<typeof normalizeNotificationTargets>;
 export type RegisterPageBody = z.infer<typeof registerPageBodySchema>;
 export type OnboardingSamplePreviewBody = z.infer<typeof onboardingSamplePreviewBodySchema>;
+export type PromptWorkspaceSampleBody = z.infer<typeof promptWorkspaceSampleBodySchema>;
 export type CreateConfigVersionBody = z.infer<typeof createConfigVersionBodySchema>;
+export type PromptPreviewArtifactBody = z.infer<typeof promptPreviewArtifactBodySchema>;
 export type ManualJobBody = z.infer<typeof manualJobBodySchema>;
 export type OfficialDailyJobBody = z.infer<typeof officialDailyJobBodySchema>;
 export type PreviewJobBody = z.infer<typeof previewJobBodySchema>;

@@ -21,6 +21,7 @@ model ConnectedPage {
   activeConfigVersion    PageConfigVersion?  @relation("ConnectedPageActiveConfigVersion", fields: [activeConfigVersionId], references: [id], onDelete: SetNull, onUpdate: Cascade)
   configVersions         PageConfigVersion[] @relation("ConnectedPageConfigVersions")
   promptIdentities       PagePromptIdentity[]
+  promptPreviewArtifacts PromptPreviewArtifact[]
   threads                Thread[]
   pageDimension          DimPage?
   staffDimensions        DimStaff[]
@@ -48,6 +49,33 @@ model PagePromptIdentity {
   @@map("page_prompt_identity")
 }
 
+model PromptPreviewArtifact {
+  id                        String                  @id @default(uuid()) @db.Uuid
+  connectedPageId           String                  @map("connected_page_id") @db.Uuid
+  analysisTaxonomyVersionId String                  @map("analysis_taxonomy_version_id") @db.Uuid
+  compiledPromptHash        String                  @map("compiled_prompt_hash")
+  promptVersion             String                  @map("prompt_version")
+  sampleScopeHash           String                  @map("sample_scope_hash")
+  sampleTargetDate          DateTime                @map("sample_target_date") @db.Date
+  sampleWindowStartAt       DateTime                @map("sample_window_start_at") @db.Timestamptz(6)
+  sampleWindowEndExclusiveAt DateTime               @map("sample_window_end_exclusive_at") @db.Timestamptz(6)
+  sampleConversationId      String                  @map("sample_conversation_id")
+  customerDisplayName       String?                 @map("customer_display_name")
+  runtimeMetadataJson       Json                    @default("{}") @map("runtime_metadata_json")
+  previewResultJson         Json                    @default("{}") @map("preview_result_json")
+  evidenceBundleJson        Json                    @default("[]") @map("evidence_bundle_json")
+  fieldExplanationsJson     Json                    @default("[]") @map("field_explanations_json")
+  supportingMessageIdsJson  Json                    @default("[]") @map("supporting_message_ids_json")
+  createdAt                 DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  connectedPage             ConnectedPage           @relation(fields: [connectedPageId], references: [id], onDelete: Cascade, onUpdate: Cascade)
+  analysisTaxonomyVersion   AnalysisTaxonomyVersion @relation(fields: [analysisTaxonomyVersionId], references: [id], onDelete: Restrict, onUpdate: Cascade)
+
+  @@unique([connectedPageId, analysisTaxonomyVersionId, compiledPromptHash, sampleScopeHash, sampleConversationId])
+  @@index([connectedPageId, createdAt(sort: Desc)])
+  @@index([sampleScopeHash, sampleConversationId])
+  @@map("prompt_preview_artifact")
+}
+
 model AnalysisTaxonomyVersion {
   id              String              @id @default(uuid()) @db.Uuid
   versionCode     String              @unique @map("version_code")
@@ -55,6 +83,7 @@ model AnalysisTaxonomyVersion {
   isActive        Boolean             @default(false) @map("is_active")
   createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
   configVersions  PageConfigVersion[]
+  promptPreviewArtifacts PromptPreviewArtifact[]
   frozenRunGroups PipelineRunGroup[]
   analysisRuns    AnalysisRun[]
   factThreadDays  FactThreadDay[]

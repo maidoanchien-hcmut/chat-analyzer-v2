@@ -19,6 +19,69 @@ export const DEFAULT_ANALYSIS_TAXONOMY = {
   categories: {}
 };
 
+const BUILTIN_OPENING_RULE_SELECTORS: OpeningRulesConfig["selectors"] = [
+  {
+    selectorId: "builtin-journey-new-to-clinic",
+    signalRole: "journey",
+    signalCode: "new_to_clinic",
+    allowedMessageTypes: ["template", "text"],
+    options: [
+      {
+        rawText: "Khách hàng lần đầu",
+        matchMode: "casefold_exact"
+      }
+    ]
+  },
+  {
+    selectorId: "builtin-journey-revisit",
+    signalRole: "journey",
+    signalCode: "revisit",
+    allowedMessageTypes: ["template", "text"],
+    options: [
+      {
+        rawText: "Khách hàng tái khám",
+        matchMode: "casefold_exact"
+      }
+    ]
+  },
+  {
+    selectorId: "builtin-need-consultation-call",
+    signalRole: "need",
+    signalCode: "consultation",
+    allowedMessageTypes: ["template", "text"],
+    options: [
+      {
+        rawText: "Tôi muốn gọi tư vấn",
+        matchMode: "casefold_exact"
+      }
+    ]
+  },
+  {
+    selectorId: "builtin-need-consultation-chat",
+    signalRole: "need",
+    signalCode: "consultation",
+    allowedMessageTypes: ["template", "text"],
+    options: [
+      {
+        rawText: "Tôi muốn chat tư vấn",
+        matchMode: "casefold_exact"
+      }
+    ]
+  },
+  {
+    selectorId: "builtin-need-appointment-booking",
+    signalRole: "need",
+    signalCode: "appointment_booking",
+    allowedMessageTypes: ["template", "text"],
+    options: [
+      {
+        rawText: "Đặt lịch hẹn",
+        matchMode: "casefold_exact"
+      }
+    ]
+  }
+];
+
 export function defaultTagMappingConfig(): TagMappingConfig {
   return {
     version: 1,
@@ -28,10 +91,10 @@ export function defaultTagMappingConfig(): TagMappingConfig {
 }
 
 export function defaultOpeningRulesConfig(): OpeningRulesConfig {
-  return {
+  return cloneJsonValue({
     version: 1,
-    selectors: []
-  };
+    selectors: BUILTIN_OPENING_RULE_SELECTORS
+  });
 }
 
 export function defaultSchedulerConfig(timezone: string): SchedulerConfig {
@@ -70,6 +133,24 @@ export function hashEtlConfig(input: {
     tagMapping: input.tagMapping,
     openingRules: input.openingRules,
     scheduler: input.scheduler
+  });
+}
+
+export function hashPromptPreviewSampleScope(input: {
+  connectedPageId: string;
+  targetDate: string;
+  businessTimezone: string;
+  windowStartAt: string;
+  windowEndExclusiveAt: string;
+  sampleConversation: unknown;
+}) {
+  return hashStableValue({
+    connectedPageId: input.connectedPageId,
+    targetDate: input.targetDate,
+    businessTimezone: input.businessTimezone,
+    windowStartAt: input.windowStartAt,
+    windowEndExclusiveAt: input.windowEndExclusiveAt,
+    sampleConversation: input.sampleConversation
   });
 }
 

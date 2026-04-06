@@ -204,10 +204,32 @@ type runtimePreviewTag struct {
 type runtimePreviewConversation struct {
 	ConversationID           string          `json:"conversationId"`
 	CustomerDisplayName      string          `json:"customerDisplayName"`
+	FirstMeaningfulMessageID string          `json:"firstMeaningfulMessageId"`
 	FirstMeaningfulMessage   string          `json:"firstMeaningfulMessageText"`
+	FirstMeaningfulSenderRole string         `json:"firstMeaningfulMessageSenderRole"`
 	ObservedTagsJSON         json.RawMessage `json:"observedTagsJson"`
 	NormalizedTagSignalsJSON json.RawMessage `json:"normalizedTagSignalsJson"`
 	OpeningBlockJSON         json.RawMessage `json:"openingBlockJson"`
+	ExplicitRevisitSignal    string          `json:"explicitRevisitSignal"`
+	ExplicitNeedSignal       string          `json:"explicitNeedSignal"`
+	ExplicitOutcomeSignal    string          `json:"explicitOutcomeSignal"`
+	SourceThreadJSONRedacted json.RawMessage `json:"sourceThreadJsonRedacted"`
+	MessageCount             int             `json:"messageCount"`
+	FirstStaffResponseSeconds *int           `json:"firstStaffResponseSeconds,omitempty"`
+	AvgStaffResponseSeconds  *int            `json:"avgStaffResponseSeconds,omitempty"`
+	StaffParticipantsJSON    json.RawMessage `json:"staffParticipantsJson"`
+	Messages                 []runtimePreviewMessage `json:"messages"`
+}
+
+type runtimePreviewMessage struct {
+	MessageID                string `json:"messageId"`
+	InsertedAt               string `json:"insertedAt"`
+	SenderRole               string `json:"senderRole"`
+	SenderName               string `json:"senderName"`
+	MessageType              string `json:"messageType"`
+	RedactedText             string `json:"redactedText"`
+	IsMeaningfulHumanMessage bool   `json:"isMeaningfulHumanMessage"`
+	IsOpeningBlockMessage    bool   `json:"isOpeningBlockMessage"`
 }
 
 func buildRuntimePreviewConversations(days []transform.ConversationDaySource) []runtimePreviewConversation {
@@ -216,13 +238,41 @@ func buildRuntimePreviewConversations(days []transform.ConversationDaySource) []
 		conversations = append(conversations, runtimePreviewConversation{
 			ConversationID:           day.ConversationID,
 			CustomerDisplayName:      day.CustomerDisplayName,
+			FirstMeaningfulMessageID: day.FirstMeaningfulMessageID,
 			FirstMeaningfulMessage:   day.FirstMeaningfulMessageText,
+			FirstMeaningfulSenderRole: day.FirstMeaningfulMessageSenderRole,
 			ObservedTagsJSON:         day.ObservedTagsJSON,
 			NormalizedTagSignalsJSON: day.NormalizedTagSignalsJSON,
 			OpeningBlockJSON:         day.OpeningBlockJSON,
+			ExplicitRevisitSignal:    day.ExplicitRevisitSignal,
+			ExplicitNeedSignal:       day.ExplicitNeedSignal,
+			ExplicitOutcomeSignal:    day.ExplicitOutcomeSignal,
+			SourceThreadJSONRedacted: day.SourceConversationJSONRedacted,
+			MessageCount:             day.MessageCount,
+			FirstStaffResponseSeconds: day.FirstStaffResponseSeconds,
+			AvgStaffResponseSeconds:  day.AvgStaffResponseSeconds,
+			StaffParticipantsJSON:    day.StaffParticipantsJSON,
+			Messages:                 buildRuntimePreviewMessages(day.Messages),
 		})
 	}
 	return conversations
+}
+
+func buildRuntimePreviewMessages(messages []transform.MessageSource) []runtimePreviewMessage {
+	items := make([]runtimePreviewMessage, 0, len(messages))
+	for _, message := range messages {
+		items = append(items, runtimePreviewMessage{
+			MessageID:                message.MessageID,
+			InsertedAt:               message.InsertedAt.Format(time.RFC3339),
+			SenderRole:               message.SenderRole,
+			SenderName:               message.SenderName,
+			MessageType:              message.MessageType,
+			RedactedText:             message.RedactedText,
+			IsMeaningfulHumanMessage: message.IsMeaningfulHumanMessage,
+			IsOpeningBlockMessage:    message.IsOpeningBlockMessage,
+		})
+	}
+	return items
 }
 
 func buildRuntimePreviewTags(tags []pancake.Tag) []runtimePreviewTag {

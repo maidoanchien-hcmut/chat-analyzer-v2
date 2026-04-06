@@ -5,6 +5,8 @@ import type {
   MappingQueueItem,
   OnboardingSamplePreviewViewModel,
   OnboardingPageCandidate,
+  PromptPreviewComparisonViewModel,
+  PromptWorkspaceSampleViewModel,
   RunDetailViewModel,
   RunGroupViewModel,
   RunPreviewViewModel
@@ -62,6 +64,13 @@ export type ConfigurationState = {
   etlEnabled: boolean;
   analysisEnabled: boolean;
   onboardingSamplePreview: OnboardingSamplePreviewViewModel | null;
+  promptWorkspaceSamplePreview: PromptWorkspaceSampleViewModel | null;
+  promptWorkspaceSampleFingerprint: string | null;
+  promptWorkspaceSampleStaleReason: string | null;
+  selectedPromptSampleConversationId: string;
+  promptPreviewComparison: PromptPreviewComparisonViewModel | null;
+  promptPreviewComparisonFingerprint: string | null;
+  promptPreviewComparisonStaleReason: string | null;
   promptCloneSourceVersionId: string;
   promptCloneSourcePageId: string;
   promptCompareLeftVersionId: string;

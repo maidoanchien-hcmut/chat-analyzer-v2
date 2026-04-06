@@ -82,6 +82,63 @@ describe("chat_extractor repository", () => {
     expect(result.promptVersion).toBe("C");
   });
 
+  it("reuses an existing prompt preview artifact when a concurrent create hits the unique identity constraint", async () => {
+    patchValue(prisma.promptPreviewArtifact, "create", async () => {
+      throw new Prisma.PrismaClientKnownRequestError("unique constraint", {
+        code: "P2002",
+        clientVersion: "test"
+      });
+    });
+    patchValue(prisma.promptPreviewArtifact, "findUnique", async () => ({
+      id: "artifact-1",
+      connectedPageId: "11111111-1111-4111-8111-111111111111",
+      analysisTaxonomyVersionId: "33333333-3333-4333-8333-333333333333",
+      analysisTaxonomyVersion: {
+        id: "33333333-3333-4333-8333-333333333333",
+        versionCode: "default.v1",
+        taxonomyJson: {},
+        isActive: true,
+        createdAt: new Date("2026-04-01T00:00:00.000Z")
+      },
+      compiledPromptHash: "sha256:prompt",
+      promptVersion: "A",
+      sampleScopeHash: "sha256:scope",
+      sampleTargetDate: new Date("2026-04-05T00:00:00.000Z"),
+      sampleWindowStartAt: new Date("2026-04-04T17:00:00.000Z"),
+      sampleWindowEndExclusiveAt: new Date("2026-04-05T06:00:00.000Z"),
+      sampleConversationId: "thread-1",
+      customerDisplayName: "Khách B",
+      runtimeMetadataJson: {},
+      previewResultJson: {},
+      evidenceBundleJson: [],
+      fieldExplanationsJson: [],
+      supportingMessageIdsJson: [],
+      createdAt: new Date("2026-04-05T06:00:00.000Z")
+    }));
+
+    const result = await chatExtractorRepository.createPromptPreviewArtifact({
+      connectedPageId: "11111111-1111-4111-8111-111111111111",
+      analysisTaxonomyVersionId: "33333333-3333-4333-8333-333333333333",
+      compiledPromptHash: "sha256:prompt",
+      promptVersion: "A",
+      sampleScopeHash: "sha256:scope",
+      sampleTargetDate: new Date("2026-04-05T00:00:00.000Z"),
+      sampleWindowStartAt: new Date("2026-04-04T17:00:00.000Z"),
+      sampleWindowEndExclusiveAt: new Date("2026-04-05T06:00:00.000Z"),
+      sampleConversationId: "thread-1",
+      customerDisplayName: "Khách B",
+      runtimeMetadataJson: {},
+      previewResultJson: {},
+      evidenceBundleJson: [],
+      fieldExplanationsJson: [],
+      supportingMessageIdsJson: []
+    });
+
+    expect(result.id).toBe("artifact-1");
+    expect(result.sampleScopeHash).toBe("sha256:scope");
+    expect(result.analysisTaxonomyVersion.versionCode).toBe("default.v1");
+  });
+
   it("derives run group timestamps from the earliest start and latest finish", async () => {
     let updatedPayload: any;
 

@@ -1,4 +1,12 @@
-import type { ConnectedPageConfigVersion, CreateConfigVersionInput, OnboardingSamplePreviewInput } from "../../adapters/contracts.ts";
+import type {
+  ConnectedPageConfigVersion,
+  CreateConfigVersionInput,
+  OnboardingSamplePreviewInput,
+  PromptPreviewComparisonViewModel,
+  PromptPreviewArtifactInput,
+  PromptWorkspaceSampleInput,
+  PromptWorkspaceSampleViewModel
+} from "../../adapters/contracts.ts";
 import type { NotificationTargetDraft, OpeningRuleDraft, SchedulerDraft, TagMappingDraft } from "../../app/screen-state.ts";
 
 type ConfigDraftInput = {
@@ -11,6 +19,30 @@ type ConfigDraftInput = {
   activate: boolean;
   etlEnabled: boolean;
   analysisEnabled: boolean;
+};
+
+type PromptWorkspaceFingerprintInput = {
+  tagMappings: TagMappingDraft[];
+  openingRules: OpeningRuleDraft[];
+  scheduler: SchedulerDraft;
+  businessTimezone: string;
+  sampleConversationLimit: number;
+  sampleMessagePageLimit: number;
+};
+
+type PromptPreviewFreshnessInput = {
+  workspaceFingerprint: string | null;
+  comparisonFingerprint: string | null;
+  currentWorkspaceFingerprint: string | null;
+  currentComparisonFingerprint: string | null;
+  hasSamplePreview: boolean;
+  hasComparison: boolean;
+};
+
+export type PromptPreviewFreshnessState = {
+  workspaceStaleReason: string | null;
+  comparisonStaleReason: string | null;
+  invalidateComparison: boolean;
 };
 
 export function buildCreateConfigVersionInput(input: ConfigDraftInput): CreateConfigVersionInput {
@@ -122,6 +154,96 @@ export function buildOnboardingSamplePreviewInput(input: {
     },
     sampleConversationLimit: input.sampleConversationLimit,
     sampleMessagePageLimit: input.sampleMessagePageLimit
+  };
+}
+
+export function buildPromptWorkspaceSampleInput(input: PromptWorkspaceFingerprintInput): PromptWorkspaceSampleInput {
+  const payload = buildCreateConfigVersionInput({
+    promptText: "",
+    tagMappings: input.tagMappings,
+    openingRules: input.openingRules,
+    scheduler: {
+      ...input.scheduler,
+      timezone: input.businessTimezone
+    },
+    notificationTargets: [],
+    notes: "",
+    activate: false,
+    etlEnabled: false,
+    analysisEnabled: false
+  });
+
+  return {
+    tagMappingJson: payload.tagMappingJson,
+    openingRulesJson: payload.openingRulesJson,
+    schedulerJson: payload.schedulerJson ?? {
+      version: 1,
+      timezone: input.businessTimezone,
+      officialDailyTime: input.scheduler.officialDailyTime,
+      lookbackHours: input.scheduler.lookbackHours,
+      maxConversationsPerRun: input.sampleConversationLimit,
+      maxMessagePagesPerThread: input.sampleMessagePageLimit
+    },
+    sampleConversationLimit: input.sampleConversationLimit,
+    sampleMessagePageLimit: input.sampleMessagePageLimit
+  };
+}
+
+export function buildPromptPreviewArtifactInput(input: {
+  promptText: string;
+  samplePreview: PromptWorkspaceSampleViewModel;
+  selectedConversationId: string;
+}): PromptPreviewArtifactInput {
+  const selectedConversation = input.samplePreview.conversations.find(
+    (conversation) => conversation.conversationId === input.selectedConversationId
+  );
+  if (!selectedConversation) {
+    throw new Error("Cần chọn hội thoại sample để chạy thử prompt.");
+  }
+
+  return {
+    draftPromptText: input.promptText,
+    sampleWorkspaceKey: input.samplePreview.sampleWorkspaceKey,
+    selectedConversationId: selectedConversation.conversationId
+  };
+}
+
+export function buildPromptWorkspaceSampleFingerprint(input: PromptWorkspaceFingerprintInput) {
+  return JSON.stringify(buildPromptWorkspaceSampleInput(input));
+}
+
+export function buildPromptPreviewComparisonFingerprint(input: {
+  promptText: string;
+  samplePreview: PromptWorkspaceSampleViewModel;
+  selectedConversationId: string;
+}) {
+  return JSON.stringify(buildPromptPreviewArtifactInput(input));
+}
+
+export function derivePromptPreviewFreshness(input: PromptPreviewFreshnessInput): PromptPreviewFreshnessState {
+  const workspaceStale = input.hasSamplePreview
+    && typeof input.workspaceFingerprint === "string"
+    && typeof input.currentWorkspaceFingerprint === "string"
+    && input.workspaceFingerprint !== input.currentWorkspaceFingerprint;
+  if (workspaceStale) {
+    return {
+      workspaceStaleReason: "Tag mapping, opening rules hoặc scheduler đã đổi. Tải lại sample prompt để làm mới workspace trước khi chạy preview.",
+      comparisonStaleReason: null,
+      invalidateComparison: input.hasComparison
+    };
+  }
+
+  const comparisonStale = input.hasComparison
+    && typeof input.comparisonFingerprint === "string"
+    && typeof input.currentComparisonFingerprint === "string"
+    && input.comparisonFingerprint !== input.currentComparisonFingerprint;
+
+  return {
+    workspaceStaleReason: null,
+    comparisonStaleReason: comparisonStale
+      ? "Prompt draft hoặc hội thoại sample đã đổi. Chạy thử prompt lại để cập nhật so sánh active và draft."
+      : null,
+    invalidateComparison: comparisonStale
   };
 }
 

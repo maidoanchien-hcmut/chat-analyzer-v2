@@ -2,7 +2,8 @@ import { afterEach, describe, expect, it } from "bun:test";
 import type {
   ConnectedPageDetailRecord,
   PagePromptIdentityRecord,
-  PipelineRunRecord
+  PipelineRunRecord,
+  PromptPreviewArtifactRecord
 } from "./chat_extractor.repository.ts";
 
 const TEST_DATABASE_URL = "postgresql://test:test@localhost:5432/chat_analyzer_test?schema=public";
@@ -22,6 +23,212 @@ afterEach(() => {
 });
 
 describe("chat_extractor service", () => {
+  it("loads prompt workspace sample for a connected page using stored token and merged draft config", async () => {
+    const { promptWorkspaceSampleBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    const pageDetail = createConnectedPageDetail();
+    let capturedRuntimePreviewInput: any;
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => pageDetail);
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      runRuntimePreview: async (input) => {
+        capturedRuntimePreviewInput = input;
+        return {
+          pageId: input.pageId,
+          targetDate: input.targetDate,
+          businessTimezone: input.businessTimezone,
+          windowStartAt: input.windowStartAt,
+          windowEndExclusiveAt: input.windowEndExclusiveAt,
+          summary: {
+            conversations_scanned: 3
+          },
+          pageTags: [],
+          conversations: []
+        };
+      }
+    });
+    const parsed = promptWorkspaceSampleBodySchema.parse({
+      tag_mapping_json: {
+        version: 1,
+        default_role: "noise",
+        entries: []
+      },
+      sample_conversation_limit: 3,
+      sample_message_page_limit: 1
+    });
+
+    const result = await service.previewPromptWorkspaceSample(CONNECTED_PAGE_ID, parsed);
+
+    expect(capturedRuntimePreviewInput.userAccessToken).toBe(pageDetail.page.pancakeUserAccessToken);
+    expect(capturedRuntimePreviewInput.pageId).toBe(pageDetail.page.pancakePageId);
+    expect(capturedRuntimePreviewInput.schedulerJson.maxConversationsPerRun).toBe(3);
+    expect(result.connectedPageId).toBe(CONNECTED_PAGE_ID);
+    expect(result.pageName).toBe(pageDetail.page.pageName);
+    expect(result.sampleWorkspaceKey).toMatch(
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+    );
+    expect(typeof result.sampleWorkspaceExpiresAt).toBe("string");
+  });
+
+  it("reuses existing prompt preview artifacts for the same sample scope and prompt hash", async () => {
+    const { promptPreviewArtifactBodySchema, promptWorkspaceSampleBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    const analysisClientModule = await import("../analysis/analysis.client.ts");
+    const pageDetail = createConnectedPageDetail();
+    const existingActiveArtifact = createPromptPreviewArtifactRecord({
+      id: "artifact-active",
+      compiledPromptHash: "sha256:active-effective",
+      promptVersion: "A"
+    });
+    const existingDraftArtifact = createPromptPreviewArtifactRecord({
+      id: "artifact-draft",
+      compiledPromptHash: "sha256:draft-effective",
+      promptVersion: "B"
+    });
+    const identityLookups: string[] = [];
+    let createArtifactCalls = 0;
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => pageDetail);
+    patchRepository(repositoryModule.chatExtractorRepository, "getPromptIdentityByHash", async (_pageId: string, promptHash: string) => {
+      if (promptHash === "sha256:active-compiled") {
+        return createPromptIdentityRecord({ compiledPromptHash: "sha256:active-compiled", promptVersion: "A" });
+      }
+      return null;
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "createPromptIdentity", async ({ compiledPromptHash }: { compiledPromptHash: string }) => {
+      if (compiledPromptHash === "sha256:draft-compiled") {
+        return createPromptIdentityRecord({ compiledPromptHash: "sha256:draft-compiled", promptVersion: "B" });
+      }
+      return createPromptIdentityRecord({ compiledPromptHash, promptVersion: "A" });
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "getPromptPreviewArtifactByIdentity", async (input: {
+      compiledPromptHash: string;
+    }) => {
+      identityLookups.push(input.compiledPromptHash);
+      if (input.compiledPromptHash === "sha256:active-effective") {
+        return existingActiveArtifact;
+      }
+      if (input.compiledPromptHash === "sha256:draft-effective") {
+        return existingDraftArtifact;
+      }
+      return null;
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "createPromptPreviewArtifact", async () => {
+      createArtifactCalls += 1;
+      return existingDraftArtifact;
+    });
+    patchValue(analysisClientModule.conversationAnalysisClient, "analyzeConversations", async (input) => {
+      if (input.bundles.length === 0) {
+        return {
+          results: [],
+          runtimeMetadataJson: {
+            effective_prompt_hash: input.runtime.pagePromptText === pageDetail.activeConfigVersion?.promptText
+              ? "sha256:active-effective"
+              : "sha256:draft-effective",
+            model_name: "prompt-preview-model"
+          }
+        };
+      }
+      throw new Error("preview artifacts should have been reused instead of creating a new analysis call");
+    });
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      runRuntimePreview: async () => createPromptWorkspaceSampleOutput()
+    });
+    const samplePreview = await service.previewPromptWorkspaceSample(
+      CONNECTED_PAGE_ID,
+      promptWorkspaceSampleBodySchema.parse({
+        sample_conversation_limit: 3,
+        sample_message_page_limit: 1
+      })
+    );
+    const parsed = promptPreviewArtifactBodySchema.parse({
+      draft_prompt_text: "Prompt draft cho sample",
+      sample_workspace_key: samplePreview.sampleWorkspaceKey,
+      selected_conversation_id: "thread-1"
+    });
+
+    const result = await service.previewPromptArtifacts(CONNECTED_PAGE_ID, parsed);
+
+    expect(identityLookups).toEqual(["sha256:active-effective", "sha256:draft-effective"]);
+    expect(createArtifactCalls).toBe(0);
+    expect(result.active_artifact.id).toBe("artifact-active");
+    expect(result.draft_artifact.id).toBe("artifact-draft");
+    expect(result.sample_scope.sample_scope_key).toContain("sha256:");
+  });
+
+  it("rejects unknown or stale prompt workspace keys before preview execution", async () => {
+    const { promptPreviewArtifactBodySchema, promptWorkspaceSampleBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    const pageDetail = createConnectedPageDetail();
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => pageDetail);
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      runRuntimePreview: async () => createPromptWorkspaceSampleOutput()
+    });
+
+    const unknownWorkspace = promptPreviewArtifactBodySchema.parse({
+      draft_prompt_text: "Prompt draft cho sample",
+      sample_workspace_key: "11111111-1111-4111-8111-111111111111",
+      selected_conversation_id: "thread-1"
+    });
+    await expect(service.previewPromptArtifacts(CONNECTED_PAGE_ID, unknownWorkspace)).rejects.toThrow("không còn hợp lệ");
+
+    const samplePreview = await service.previewPromptWorkspaceSample(
+      CONNECTED_PAGE_ID,
+      promptWorkspaceSampleBodySchema.parse({
+        sample_conversation_limit: 3,
+        sample_message_page_limit: 1
+      })
+    );
+    const realWorkspace = promptPreviewArtifactBodySchema.parse({
+      draft_prompt_text: "Prompt draft cho sample",
+      sample_workspace_key: samplePreview.sampleWorkspaceKey,
+      selected_conversation_id: "thread-1"
+    });
+    const nowMs = Date.now();
+    patchValue(Date, "now", () => nowMs + (31 * 60 * 1000));
+
+    await expect(service.previewPromptArtifacts(CONNECTED_PAGE_ID, realWorkspace)).rejects.toThrow("đã hết hạn");
+  });
+
+  it("serializes fetched prompt preview artifacts with persisted taxonomy metadata", async () => {
+    const repositoryModule = await loadChatExtractorRepository();
+    const artifact = createPromptPreviewArtifactRecord({
+      analysisTaxonomyVersion: {
+        id: TAXONOMY_VERSION_ID,
+        versionCode: "default.v1",
+        taxonomyJson: {},
+        isActive: false,
+        createdAt: new Date("2026-04-01T00:00:00.000Z")
+      }
+    });
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getPromptPreviewArtifactById", async () => artifact);
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => ({
+      ...createConnectedPageDetail(),
+      activeConfigVersion: {
+        ...createConnectedPageDetail().activeConfigVersion!,
+        analysisTaxonomyVersion: {
+          ...createConnectedPageDetail().activeConfigVersion!.analysisTaxonomyVersion,
+          versionCode: "rotated.v2"
+        }
+      }
+    }));
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService();
+
+    const result = await service.getPromptPreviewArtifact(CONNECTED_PAGE_ID, artifact.id);
+
+    expect(result.artifact.taxonomyVersionCode).toBe("default.v1");
+  });
+
   it("accepts official_daily preview and returns frozen snapshot fields per child run", async () => {
     const { previewJobBodySchema } = await loadChatExtractorTypes();
     const repositoryModule = await loadChatExtractorRepository();
@@ -143,6 +350,77 @@ describe("chat_extractor service", () => {
     expect(capturedUpsertInput.analysisEnabled).toBe(true);
   });
 
+  it("registering a new page seeds activation-safe defaults with scheduler snapshot and built-in opening rules", async () => {
+    const { registerPageBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    let capturedCreateConfigInput: any;
+    let activatedConfigId: string | null = null;
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageByPancakePageId", async () => null);
+    patchRepository(repositoryModule.chatExtractorRepository, "upsertConnectedPage", async () => ({
+      ...createConnectedPageDetail().page,
+      activeConfigVersionId: null
+    }));
+    patchRepository(repositoryModule.chatExtractorRepository, "ensureDefaultTaxonomy", async () => {
+      return createConnectedPageDetail().activeConfigVersion!.analysisTaxonomyVersion;
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "getActiveConfigVersion", async () => null);
+    patchRepository(repositoryModule.chatExtractorRepository, "nextConfigVersionNo", async () => 1);
+    patchRepository(repositoryModule.chatExtractorRepository, "createPageConfigVersion", async (input: unknown) => {
+      capturedCreateConfigInput = input;
+      return {
+        ...createConnectedPageDetail().activeConfigVersion!,
+        id: "cfg-new",
+        versionNo: 1,
+        schedulerJson: expectedDefaultScheduler("Asia/Saigon"),
+        openingRulesJson: expectedDefaultOpeningRules()
+      };
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "activateConfigVersion", async (_pageId: string, configVersionId: string) => {
+      activatedConfigId = configVersionId;
+      return {
+        ...createConnectedPageDetail().page,
+        activeConfigVersionId: configVersionId
+      };
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => ({
+      ...createConnectedPageDetail(),
+      page: {
+        ...createConnectedPageDetail().page,
+        businessTimezone: "Asia/Saigon",
+        activeConfigVersionId: "cfg-new"
+      },
+      activeConfigVersion: {
+        ...createConnectedPageDetail().activeConfigVersion!,
+        id: "cfg-new",
+        versionNo: 1,
+        schedulerJson: expectedDefaultScheduler("Asia/Saigon"),
+        openingRulesJson: expectedDefaultOpeningRules()
+      }
+    }));
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      listPagesFromToken: async () => [
+        {
+          pageId: "1406535699642677",
+          pageName: "O2 SKIN"
+        }
+      ]
+    });
+    const parsed = registerPageBodySchema.parse({
+      pancake_page_id: "1406535699642677",
+      user_access_token: "user-token",
+      business_timezone: "Asia/Saigon"
+    });
+
+    await service.registerPageConfig(parsed as never);
+
+    expect(capturedCreateConfigInput.schedulerJson).toEqual(expectedDefaultScheduler("Asia/Saigon"));
+    expect(capturedCreateConfigInput.openingRulesJson).toEqual(expectedDefaultOpeningRules());
+    expect(activatedConfigId === "cfg-new").toBe(true);
+  });
+
   it("normalizes onboarding sample preview request with default draft config and sample caps", async () => {
     const { onboardingSamplePreviewBodySchema } = await loadChatExtractorTypes();
 
@@ -158,10 +436,7 @@ describe("chat_extractor service", () => {
       defaultRole: "noise",
       entries: []
     });
-    expect(parsed.openingRulesJson).toEqual({
-      version: 1,
-      selectors: []
-    });
+    expect(parsed.openingRulesJson).toEqual(expectedDefaultOpeningRules());
     expect(parsed.schedulerJson).toBeNull();
     expect(parsed.sampleConversationLimit).toBe(12);
     expect(parsed.sampleMessagePageLimit).toBe(2);
@@ -505,10 +780,7 @@ function createConnectedPageDetail(overrides?: {
           defaultRole: "noise",
           entries: []
         } as const,
-        openingRulesJson: {
-          version: 1,
-          selectors: []
-        } as const,
+        openingRulesJson: expectedDefaultOpeningRules(),
         schedulerJson: {
           version: 1,
           timezone: "Asia/Ho_Chi_Minh",
@@ -538,13 +810,186 @@ function createConnectedPageDetail(overrides?: {
 }
 
 function createPromptIdentity(): PagePromptIdentityRecord {
+  return createPromptIdentityRecord({});
+}
+
+function createPromptIdentityRecord(overrides: Partial<PagePromptIdentityRecord>): PagePromptIdentityRecord {
   return {
     id: PROMPT_IDENTITY_ID,
     connectedPageId: CONNECTED_PAGE_ID,
     compiledPromptHash: "sha256:existing-hash",
     promptVersion: "A",
     compiledPromptText: "compiled prompt",
-    createdAt: new Date("2026-04-01T00:00:00.000Z")
+    createdAt: new Date("2026-04-01T00:00:00.000Z"),
+    ...overrides
+  };
+}
+
+function createPromptPreviewArtifactRecord(overrides?: Partial<PromptPreviewArtifactRecord>): PromptPreviewArtifactRecord {
+  return {
+    id: "artifact-1",
+    connectedPageId: CONNECTED_PAGE_ID,
+    analysisTaxonomyVersionId: TAXONOMY_VERSION_ID,
+    analysisTaxonomyVersion: {
+      id: TAXONOMY_VERSION_ID,
+      versionCode: "default.v1",
+      taxonomyJson: {},
+      isActive: true,
+      createdAt: new Date("2026-04-01T00:00:00.000Z")
+    },
+    compiledPromptHash: "sha256:preview-prompt",
+    promptVersion: "A",
+    sampleScopeHash: "sha256:sample-scope",
+    sampleTargetDate: new Date("2026-04-05T00:00:00.000Z"),
+    sampleWindowStartAt: new Date("2026-04-04T17:00:00.000Z"),
+    sampleWindowEndExclusiveAt: new Date("2026-04-05T06:00:00.000Z"),
+    sampleConversationId: "thread-1",
+    customerDisplayName: "Khách B",
+    runtimeMetadataJson: {
+      model_name: "prompt-preview-model",
+      effective_prompt_hash: "sha256:preview-effective"
+    },
+    previewResultJson: {
+      primary_need_code: "appointment_booking"
+    },
+    evidenceBundleJson: ["Opening block: Khách hàng tái khám"],
+    fieldExplanationsJson: [{ field: "primary_need_code", explanation: "Khách muốn đặt lịch." }],
+    supportingMessageIdsJson: ["msg-1"],
+    createdAt: new Date("2026-04-05T06:00:00.000Z"),
+    ...overrides
+  };
+}
+
+function createPromptWorkspaceSampleOutput() {
+  return {
+    pageId: "1406535699642677",
+    targetDate: "2026-04-05",
+    businessTimezone: "Asia/Saigon",
+    windowStartAt: "2026-04-04T17:00:00.000Z",
+    windowEndExclusiveAt: "2026-04-05T06:00:00.000Z",
+    summary: {
+      conversations_scanned: 1
+    },
+    pageTags: [],
+    conversations: [
+      {
+        conversationId: "thread-1",
+        customerDisplayName: "Khách B",
+        firstMeaningfulMessageId: "msg-1",
+        firstMeaningfulMessageText: "Mình muốn hỏi giá điều trị.",
+        firstMeaningfulMessageSenderRole: "customer",
+        observedTagsJson: [{ sourceTagText: "KH tái khám" }],
+        normalizedTagSignalsJson: { journey: [] },
+        openingBlockJson: { explicitSignals: [] },
+        explicitRevisitSignal: "revisit",
+        explicitNeedSignal: "appointment_booking",
+        explicitOutcomeSignal: null,
+        sourceThreadJsonRedacted: {},
+        messageCount: 1,
+        firstStaffResponseSeconds: 120,
+        avgStaffResponseSeconds: 120,
+        staffParticipantsJson: [],
+        messages: [
+          {
+            messageId: "msg-1",
+            insertedAt: "2026-04-05T00:01:00.000Z",
+            senderRole: "customer",
+            senderName: null,
+            messageType: "text",
+            redactedText: "Mình muốn hỏi giá điều trị.",
+            isMeaningfulHumanMessage: true,
+            isOpeningBlockMessage: false
+          }
+        ]
+      }
+    ]
+  };
+}
+
+function patchValue<T extends object, K extends keyof T>(target: T, key: K, value: T[K]) {
+  const original = target[key];
+  target[key] = value;
+  repoRestorers.push(() => {
+    target[key] = original;
+  });
+}
+
+function expectedDefaultScheduler(timezone: string) {
+  return {
+    version: 1,
+    timezone,
+    officialDailyTime: "00:00",
+    lookbackHours: 2,
+    maxConversationsPerRun: 0,
+    maxMessagePagesPerThread: 0
+  };
+}
+
+function expectedDefaultOpeningRules() {
+  return {
+    version: 1,
+    selectors: [
+      {
+        selectorId: "builtin-journey-new-to-clinic",
+        signalRole: "journey",
+        signalCode: "new_to_clinic",
+        allowedMessageTypes: ["template", "text"],
+        options: [
+          {
+            rawText: "Khách hàng lần đầu",
+            matchMode: "casefold_exact"
+          }
+        ]
+      },
+      {
+        selectorId: "builtin-journey-revisit",
+        signalRole: "journey",
+        signalCode: "revisit",
+        allowedMessageTypes: ["template", "text"],
+        options: [
+          {
+            rawText: "Khách hàng tái khám",
+            matchMode: "casefold_exact"
+          }
+        ]
+      },
+      {
+        selectorId: "builtin-need-consultation-call",
+        signalRole: "need",
+        signalCode: "consultation",
+        allowedMessageTypes: ["template", "text"],
+        options: [
+          {
+            rawText: "Tôi muốn gọi tư vấn",
+            matchMode: "casefold_exact"
+          }
+        ]
+      },
+      {
+        selectorId: "builtin-need-consultation-chat",
+        signalRole: "need",
+        signalCode: "consultation",
+        allowedMessageTypes: ["template", "text"],
+        options: [
+          {
+            rawText: "Tôi muốn chat tư vấn",
+            matchMode: "casefold_exact"
+          }
+        ]
+      },
+      {
+        selectorId: "builtin-need-appointment-booking",
+        signalRole: "need",
+        signalCode: "appointment_booking",
+        allowedMessageTypes: ["template", "text"],
+        options: [
+          {
+            rawText: "Đặt lịch hẹn",
+            matchMode: "casefold_exact"
+          }
+        ]
+      }
+    ]
   };
 }
 

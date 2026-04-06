@@ -1,7 +1,16 @@
 import { describe, expect, it } from "bun:test";
 import type { ConfigurationState, OnboardingState } from "../../app/screen-state.ts";
 import { renderConfiguration } from "./render.ts";
-import { buildCreateConfigVersionInput, buildOnboardingSamplePreviewInput, configVersionToDraft } from "./state.ts";
+import {
+  buildCreateConfigVersionInput,
+  buildOnboardingSamplePreviewInput,
+  buildPromptPreviewComparisonFingerprint,
+  buildPromptPreviewArtifactInput,
+  buildPromptWorkspaceSampleFingerprint,
+  buildPromptWorkspaceSampleInput,
+  configVersionToDraft,
+  derivePromptPreviewFreshness
+} from "./state.ts";
 
 describe("configuration workflow", () => {
   it("serializes structured configuration editors into the control-plane contract", () => {
@@ -218,8 +227,7 @@ describe("configuration workflow", () => {
 
     const html = renderConfiguration(configuration, onboarding);
 
-    expect(html).toContain("<input name=\"timezone\"");
-    expect(html).toContain("onboarding-timezone-options");
+    expect(html).toContain("<select name=\"timezone\">");
     expect(html).toContain("Page đang vận hành");
     expect(html).toContain("Tải cấu hình page đã chọn");
   });
@@ -251,6 +259,247 @@ describe("configuration workflow", () => {
     expect(payload.schedulerJson).toMatchObject({
       timezone: "Asia/Saigon"
     });
+  });
+
+  it("builds connected-page prompt workspace sample input from the current draft", () => {
+    const payload = buildPromptWorkspaceSampleInput({
+      tagMappings: [
+        { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+      ],
+      openingRules: [
+        { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
+      ],
+      scheduler: { useSystemDefaults: true, timezone: "Asia/Bangkok", officialDailyTime: "00:00", lookbackHours: 2 },
+      businessTimezone: "Asia/Saigon",
+      sampleConversationLimit: 9,
+      sampleMessagePageLimit: 3
+    });
+
+    expect(payload).toMatchObject({
+      sampleConversationLimit: 9,
+      sampleMessagePageLimit: 3
+    });
+    expect(payload.schedulerJson).toMatchObject({
+      timezone: "Asia/Saigon"
+    });
+  });
+
+  it("builds prompt preview artifact input from the selected sample conversation", () => {
+    const configuration = createConfigurationState();
+    const samplePreview = {
+      sampleWorkspaceKey: "11111111-1111-4111-8111-111111111111",
+      connectedPageId: "cp-101",
+      pageId: "pk-101",
+      pageName: "Page Da Lieu Quan 1",
+      targetDate: "2026-04-05",
+      businessTimezone: "Asia/Saigon",
+      windowStartAt: "2026-04-04T17:00:00.000Z",
+      windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+      summary: {
+        conversationsScanned: 6,
+        threadDaysBuilt: 4,
+        messagesSeen: 22,
+        messagesSelected: 11
+      },
+      pageTags: [],
+      conversations: [
+        {
+          conversationId: "c-1",
+          customerDisplayName: "Khách A",
+          firstMeaningfulMessageId: "msg-1",
+          firstMeaningfulMessageText: "Em muốn tái khám chiều nay",
+          firstMeaningfulMessageSenderRole: "customer",
+          observedTagsJson: [],
+          normalizedTagSignalsJson: {},
+          openingBlockJson: {},
+          explicitRevisitSignal: "revisit",
+          explicitNeedSignal: "appointment_booking",
+          explicitOutcomeSignal: null,
+          sourceThreadJsonRedacted: {},
+          messageCount: 2,
+          firstStaffResponseSeconds: 120,
+          avgStaffResponseSeconds: 120,
+          staffParticipantsJson: [],
+          messages: [
+            {
+              messageId: "msg-1",
+              insertedAt: "2026-04-05T02:00:00.000Z",
+              senderRole: "customer",
+              senderName: null,
+              messageType: "text",
+              redactedText: "Em muốn tái khám chiều nay",
+              isMeaningfulHumanMessage: true,
+              isOpeningBlockMessage: false
+            }
+          ]
+        }
+      ]
+    };
+
+    const payload = buildPromptPreviewArtifactInput({
+      promptText: configuration.promptText,
+      samplePreview,
+      selectedConversationId: "c-1"
+    });
+
+    expect(payload.draftPromptText).toBe("Prompt sample");
+    expect(payload.sampleWorkspaceKey).toBe("11111111-1111-4111-8111-111111111111");
+    expect(payload.selectedConversationId).toBe("c-1");
+  });
+
+  it("marks prompt preview freshness stale when sample-driving config changes", () => {
+    const samplePreview = {
+      sampleWorkspaceKey: "11111111-1111-4111-8111-111111111111",
+      connectedPageId: "cp-101",
+      pageId: "pk-101",
+      pageName: "Page Da Lieu Quan 1",
+      targetDate: "2026-04-05",
+      businessTimezone: "Asia/Saigon",
+      windowStartAt: "2026-04-04T17:00:00.000Z",
+      windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+      summary: {
+        conversationsScanned: 6,
+        threadDaysBuilt: 4,
+        messagesSeen: 22,
+        messagesSelected: 11
+      },
+      pageTags: [],
+      conversations: [
+        {
+          conversationId: "c-1",
+          customerDisplayName: "Khách A",
+          firstMeaningfulMessageId: "msg-1",
+          firstMeaningfulMessageText: "Em muốn tái khám chiều nay",
+          firstMeaningfulMessageSenderRole: "customer",
+          observedTagsJson: [],
+          normalizedTagSignalsJson: {},
+          openingBlockJson: {},
+          explicitRevisitSignal: "revisit",
+          explicitNeedSignal: "appointment_booking",
+          explicitOutcomeSignal: null,
+          sourceThreadJsonRedacted: {},
+          messageCount: 2,
+          firstStaffResponseSeconds: 120,
+          avgStaffResponseSeconds: 120,
+          staffParticipantsJson: [],
+          messages: []
+        }
+      ]
+    };
+
+    const staleWorkspaceFingerprint = buildPromptWorkspaceSampleFingerprint({
+      tagMappings: [],
+      openingRules: [],
+      scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
+      businessTimezone: "Asia/Saigon",
+      sampleConversationLimit: 12,
+      sampleMessagePageLimit: 2
+    });
+    const currentWorkspaceFingerprint = buildPromptWorkspaceSampleFingerprint({
+      tagMappings: [{ rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }],
+      openingRules: [],
+      scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
+      businessTimezone: "Asia/Saigon",
+      sampleConversationLimit: 12,
+      sampleMessagePageLimit: 2
+    });
+    const comparisonFingerprint = buildPromptPreviewComparisonFingerprint({
+      promptText: "Prompt sample",
+      samplePreview,
+      selectedConversationId: "c-1"
+    });
+
+    const freshness = derivePromptPreviewFreshness({
+      workspaceFingerprint: staleWorkspaceFingerprint,
+      comparisonFingerprint,
+      currentWorkspaceFingerprint,
+      currentComparisonFingerprint: comparisonFingerprint,
+      hasSamplePreview: true,
+      hasComparison: true
+    });
+
+    expect(freshness.workspaceStaleReason).toContain("Tải lại sample prompt");
+    expect(freshness.comparisonStaleReason).toBeNull();
+    expect(freshness.invalidateComparison).toBe(true);
+  });
+
+  it("marks prompt preview comparison stale when prompt draft changes", () => {
+    const samplePreview = {
+      sampleWorkspaceKey: "11111111-1111-4111-8111-111111111111",
+      connectedPageId: "cp-101",
+      pageId: "pk-101",
+      pageName: "Page Da Lieu Quan 1",
+      targetDate: "2026-04-05",
+      businessTimezone: "Asia/Saigon",
+      windowStartAt: "2026-04-04T17:00:00.000Z",
+      windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+      summary: {
+        conversationsScanned: 6,
+        threadDaysBuilt: 4,
+        messagesSeen: 22,
+        messagesSelected: 11
+      },
+      pageTags: [],
+      conversations: [
+        {
+          conversationId: "c-1",
+          customerDisplayName: "Khách A",
+          firstMeaningfulMessageId: "msg-1",
+          firstMeaningfulMessageText: "Em muốn tái khám chiều nay",
+          firstMeaningfulMessageSenderRole: "customer",
+          observedTagsJson: [],
+          normalizedTagSignalsJson: {},
+          openingBlockJson: {},
+          explicitRevisitSignal: "revisit",
+          explicitNeedSignal: "appointment_booking",
+          explicitOutcomeSignal: null,
+          sourceThreadJsonRedacted: {},
+          messageCount: 2,
+          firstStaffResponseSeconds: 120,
+          avgStaffResponseSeconds: 120,
+          staffParticipantsJson: [],
+          messages: []
+        }
+      ]
+    };
+
+    const staleComparisonFingerprint = buildPromptPreviewComparisonFingerprint({
+      promptText: "Prompt cũ",
+      samplePreview,
+      selectedConversationId: "c-1"
+    });
+    const currentComparisonFingerprint = buildPromptPreviewComparisonFingerprint({
+      promptText: "Prompt mới",
+      samplePreview,
+      selectedConversationId: "c-1"
+    });
+
+    const freshness = derivePromptPreviewFreshness({
+      workspaceFingerprint: buildPromptWorkspaceSampleFingerprint({
+        tagMappings: [],
+        openingRules: [],
+        scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
+        businessTimezone: "Asia/Saigon",
+        sampleConversationLimit: 12,
+        sampleMessagePageLimit: 2
+      }),
+      comparisonFingerprint: staleComparisonFingerprint,
+      currentWorkspaceFingerprint: buildPromptWorkspaceSampleFingerprint({
+        tagMappings: [],
+        openingRules: [],
+        scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
+        businessTimezone: "Asia/Saigon",
+        sampleConversationLimit: 12,
+        sampleMessagePageLimit: 2
+      }),
+      currentComparisonFingerprint: currentComparisonFingerprint,
+      hasSamplePreview: true,
+      hasComparison: true
+    });
+
+    expect(freshness.workspaceStaleReason).toBeNull();
+    expect(freshness.comparisonStaleReason).toContain("Chạy thử prompt lại");
+    expect(freshness.invalidateComparison).toBe(true);
   });
 
   it("renders onboarding sample workspace from raw HTTP preview payload", () => {
@@ -315,6 +564,171 @@ describe("configuration workflow", () => {
 
     expect(html).toContain("placeholder=\"Prompt sẽ lấy từ active config của backend sau khi tải page.\"");
     expect(html).not.toContain("Giữ distinction draft / provisional / official.");
+  });
+
+  it("renders prompt workspace sample and preview artifact compare separately from saved-version compare", () => {
+    const configuration = {
+      ...createConfigurationState(),
+      promptWorkspaceSamplePreview: {
+        sampleWorkspaceKey: "11111111-1111-4111-8111-111111111111",
+        connectedPageId: "cp-101",
+        pageId: "pk-101",
+        pageName: "Page Da Lieu Quan 1",
+        targetDate: "2026-04-05",
+        businessTimezone: "Asia/Saigon",
+        windowStartAt: "2026-04-04T17:00:00.000Z",
+        windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+        summary: {
+          conversationsScanned: 6,
+          threadDaysBuilt: 4,
+          messagesSeen: 22,
+          messagesSelected: 11
+        },
+        pageTags: [],
+        conversations: [
+          {
+            conversationId: "c-1",
+            customerDisplayName: "Khách A",
+            firstMeaningfulMessageId: "msg-1",
+            firstMeaningfulMessageText: "Em muốn tái khám chiều nay",
+            firstMeaningfulMessageSenderRole: "customer",
+            observedTagsJson: [],
+            normalizedTagSignalsJson: {
+              journey: [{ sourceTagText: "KH mới", canonicalCode: "new_to_clinic" }]
+            },
+            openingBlockJson: {
+              explicit_signals: [
+                { signal_role: "journey", signal_code: "revisit", raw_text: "Khách hàng tái khám" }
+              ]
+            },
+            explicitRevisitSignal: "revisit",
+            explicitNeedSignal: "appointment_booking",
+            explicitOutcomeSignal: null,
+            sourceThreadJsonRedacted: {},
+            messageCount: 2,
+            firstStaffResponseSeconds: 120,
+            avgStaffResponseSeconds: 120,
+            staffParticipantsJson: [],
+            messages: [
+              {
+                messageId: "msg-1",
+                insertedAt: "2026-04-05T02:00:00.000Z",
+                senderRole: "customer",
+                senderName: null,
+                messageType: "text",
+                redactedText: "Em muốn tái khám chiều nay",
+                isMeaningfulHumanMessage: true,
+                isOpeningBlockMessage: false
+              }
+            ]
+          }
+        ]
+      },
+      selectedPromptSampleConversationId: "c-1",
+      promptPreviewComparison: {
+        sampleScope: {
+          sampleScopeKey: "sha256:sample-scope",
+          targetDate: "2026-04-05",
+          businessTimezone: "Asia/Saigon",
+          windowStartAt: "2026-04-04T17:00:00.000Z",
+          windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+          selectedConversationId: "c-1"
+        },
+        activeArtifact: {
+          id: "artifact-active",
+          promptVersionLabel: "A12",
+          promptHash: "sha256:active",
+          taxonomyVersionCode: "tax-2026-04",
+          sampleScopeKey: "sha256:sample-scope",
+          sampleConversationId: "c-1",
+          customerDisplayName: "Khách A",
+          createdAt: "2026-04-05T09:00:00.000Z",
+          runtimeMetadata: { model_name: "gpt-live" },
+          result: { primary_need_code: "appointment_booking" },
+          evidenceBundle: ["Opening block: Khách hàng tái khám"],
+          fieldExplanations: [{ field: "primary_need_code", explanation: "Khách yêu cầu đặt lịch." }],
+          supportingMessageIds: ["msg-1"]
+        },
+        draftArtifact: {
+          id: "artifact-draft",
+          promptVersionLabel: "B01",
+          promptHash: "sha256:draft",
+          taxonomyVersionCode: "tax-2026-04",
+          sampleScopeKey: "sha256:sample-scope",
+          sampleConversationId: "c-1",
+          customerDisplayName: "Khách A",
+          createdAt: "2026-04-05T09:01:00.000Z",
+          runtimeMetadata: { model_name: "gpt-live" },
+          result: { primary_need_code: "consultation" },
+          evidenceBundle: ["Prompt draft nghiêng về tư vấn trước khi chốt lịch"],
+          fieldExplanations: [{ field: "primary_need_code", explanation: "Draft rubric ưu tiên consultation." }],
+          supportingMessageIds: ["msg-1"]
+        }
+      }
+    };
+
+    const html = renderConfiguration(configuration, createOnboardingState());
+
+    expect(html).toContain("Preview workspace runtime thật");
+    expect(html).toContain("So sánh active vs draft trên cùng sample");
+    expect(html).toContain("Version prompt đã lưu");
+    expect(html).toContain("Transcript sample");
+    expect(html).toContain("primary_need_code");
+    expect(html).toContain("sha256:sample-scope");
+  });
+
+  it("renders stale prompt preview warnings instead of treating old evidence as current", () => {
+    const configuration = {
+      ...createConfigurationState(),
+      promptWorkspaceSamplePreview: {
+        sampleWorkspaceKey: "11111111-1111-4111-8111-111111111111",
+        connectedPageId: "cp-101",
+        pageId: "pk-101",
+        pageName: "Page Da Lieu Quan 1",
+        targetDate: "2026-04-05",
+        businessTimezone: "Asia/Saigon",
+        windowStartAt: "2026-04-04T17:00:00.000Z",
+        windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+        summary: {
+          conversationsScanned: 6,
+          threadDaysBuilt: 4,
+          messagesSeen: 22,
+          messagesSelected: 11
+        },
+        pageTags: [],
+        conversations: [
+          {
+            conversationId: "c-1",
+            customerDisplayName: "Khách A",
+            firstMeaningfulMessageId: "msg-1",
+            firstMeaningfulMessageText: "Em muốn tái khám chiều nay",
+            firstMeaningfulMessageSenderRole: "customer",
+            observedTagsJson: [],
+            normalizedTagSignalsJson: {},
+            openingBlockJson: {},
+            explicitRevisitSignal: "revisit",
+            explicitNeedSignal: "appointment_booking",
+            explicitOutcomeSignal: null,
+            sourceThreadJsonRedacted: {},
+            messageCount: 2,
+            firstStaffResponseSeconds: 120,
+            avgStaffResponseSeconds: 120,
+            staffParticipantsJson: [],
+            messages: []
+          }
+        ]
+      },
+      promptWorkspaceSampleStaleReason: "Tag mapping đã đổi, cần tải lại sample prompt.",
+      promptPreviewComparison: null,
+      promptPreviewComparisonStaleReason: "Prompt draft đã đổi, cần chạy thử prompt lại."
+    };
+
+    const html = renderConfiguration(configuration, createOnboardingState());
+
+    expect(html).toContain("Sample workspace đã cũ");
+    expect(html).toContain("Preview compare cần chạy lại");
+    expect(html).toContain("Tag mapping đã đổi");
+    expect(html).toContain("Prompt draft đã đổi");
   });
 });
 
@@ -423,6 +837,13 @@ function createConfigurationState(): ConfigurationState {
     etlEnabled: true,
     analysisEnabled: false,
     onboardingSamplePreview: null,
+    promptWorkspaceSamplePreview: null,
+    promptWorkspaceSampleFingerprint: null,
+    promptWorkspaceSampleStaleReason: null,
+    selectedPromptSampleConversationId: "",
+    promptPreviewComparison: null,
+    promptPreviewComparisonFingerprint: null,
+    promptPreviewComparisonStaleReason: null,
     promptCloneSourceVersionId: "",
     promptCloneSourcePageId: "",
     promptCompareLeftVersionId: "cfg-18",

@@ -58,6 +58,27 @@ export type PagePromptIdentityRecord = {
   createdAt: Date;
 };
 
+export type PromptPreviewArtifactRecord = {
+  id: string;
+  connectedPageId: string;
+  analysisTaxonomyVersionId: string;
+  analysisTaxonomyVersion: AnalysisTaxonomyVersionRecord;
+  compiledPromptHash: string;
+  promptVersion: string;
+  sampleScopeHash: string;
+  sampleTargetDate: Date;
+  sampleWindowStartAt: Date;
+  sampleWindowEndExclusiveAt: Date;
+  sampleConversationId: string;
+  customerDisplayName: string | null;
+  runtimeMetadataJson: unknown;
+  previewResultJson: unknown;
+  evidenceBundleJson: unknown;
+  fieldExplanationsJson: unknown;
+  supportingMessageIdsJson: unknown;
+  createdAt: Date;
+};
+
 export type ConnectedPageDetailRecord = {
   page: ConnectedPageRecord;
   activeConfigVersion: PageConfigVersionRecord | null;
@@ -135,6 +156,24 @@ type CreatePagePromptIdentityInput = {
   connectedPageId: string;
   compiledPromptHash: string;
   compiledPromptText: string;
+};
+
+type CreatePromptPreviewArtifactInput = {
+  connectedPageId: string;
+  analysisTaxonomyVersionId: string;
+  compiledPromptHash: string;
+  promptVersion: string;
+  sampleScopeHash: string;
+  sampleTargetDate: Date;
+  sampleWindowStartAt: Date;
+  sampleWindowEndExclusiveAt: Date;
+  sampleConversationId: string;
+  customerDisplayName: string | null;
+  runtimeMetadataJson: Prisma.InputJsonValue;
+  previewResultJson: Prisma.InputJsonValue;
+  evidenceBundleJson: Prisma.InputJsonValue;
+  fieldExplanationsJson: Prisma.InputJsonValue;
+  supportingMessageIdsJson: Prisma.InputJsonValue;
 };
 
 type CreateRunGroupWithRunsInput = {
@@ -420,6 +459,92 @@ class ChatExtractorRepository {
         throw error;
       }
     });
+  }
+
+  async getPromptPreviewArtifactById(id: string): Promise<PromptPreviewArtifactRecord | null> {
+    const row = await prisma.promptPreviewArtifact.findUnique({
+      where: { id },
+      include: {
+        analysisTaxonomyVersion: true
+      }
+    });
+    return row ? mapPromptPreviewArtifact(row) : null;
+  }
+
+  async getPromptPreviewArtifactByIdentity(input: {
+    connectedPageId: string;
+    analysisTaxonomyVersionId: string;
+    compiledPromptHash: string;
+    sampleScopeHash: string;
+    sampleConversationId: string;
+  }): Promise<PromptPreviewArtifactRecord | null> {
+    const row = await prisma.promptPreviewArtifact.findUnique({
+      where: {
+        connectedPageId_analysisTaxonomyVersionId_compiledPromptHash_sampleScopeHash_sampleConversationId: {
+          connectedPageId: input.connectedPageId,
+          analysisTaxonomyVersionId: input.analysisTaxonomyVersionId,
+          compiledPromptHash: input.compiledPromptHash,
+          sampleScopeHash: input.sampleScopeHash,
+          sampleConversationId: input.sampleConversationId
+        }
+      },
+      include: {
+        analysisTaxonomyVersion: true
+      }
+    });
+    return row ? mapPromptPreviewArtifact(row) : null;
+  }
+
+  async createPromptPreviewArtifact(input: CreatePromptPreviewArtifactInput) {
+    try {
+      const row = await prisma.promptPreviewArtifact.create({
+        data: {
+          connectedPageId: input.connectedPageId,
+          analysisTaxonomyVersionId: input.analysisTaxonomyVersionId,
+          compiledPromptHash: input.compiledPromptHash,
+          promptVersion: input.promptVersion,
+          sampleScopeHash: input.sampleScopeHash,
+          sampleTargetDate: input.sampleTargetDate,
+          sampleWindowStartAt: input.sampleWindowStartAt,
+          sampleWindowEndExclusiveAt: input.sampleWindowEndExclusiveAt,
+          sampleConversationId: input.sampleConversationId,
+          customerDisplayName: input.customerDisplayName,
+          runtimeMetadataJson: input.runtimeMetadataJson,
+          previewResultJson: input.previewResultJson,
+          evidenceBundleJson: input.evidenceBundleJson,
+          fieldExplanationsJson: input.fieldExplanationsJson,
+          supportingMessageIdsJson: input.supportingMessageIdsJson
+        },
+        include: {
+          analysisTaxonomyVersion: true
+        }
+      });
+      return mapPromptPreviewArtifact(row);
+    } catch (error) {
+      if (
+        error instanceof Prisma.PrismaClientKnownRequestError
+        && error.code === "P2002"
+      ) {
+        const concurrent = await prisma.promptPreviewArtifact.findUnique({
+          where: {
+            connectedPageId_analysisTaxonomyVersionId_compiledPromptHash_sampleScopeHash_sampleConversationId: {
+              connectedPageId: input.connectedPageId,
+              analysisTaxonomyVersionId: input.analysisTaxonomyVersionId,
+              compiledPromptHash: input.compiledPromptHash,
+              sampleScopeHash: input.sampleScopeHash,
+              sampleConversationId: input.sampleConversationId
+            }
+          },
+          include: {
+            analysisTaxonomyVersion: true
+          }
+        });
+        if (concurrent) {
+          return mapPromptPreviewArtifact(concurrent);
+        }
+      }
+      throw error;
+    }
   }
 
   async createRunGroupWithRuns(input: CreateRunGroupWithRunsInput) {
@@ -841,6 +966,54 @@ function mapPagePromptIdentity(row: {
     compiledPromptHash: row.compiledPromptHash,
     promptVersion: row.promptVersion,
     compiledPromptText: row.compiledPromptText,
+    createdAt: row.createdAt
+  };
+}
+
+function mapPromptPreviewArtifact(row: {
+  id: string;
+  connectedPageId: string;
+  analysisTaxonomyVersionId: string;
+  analysisTaxonomyVersion: {
+    id: string;
+    versionCode: string;
+    taxonomyJson: Prisma.JsonValue;
+    isActive: boolean;
+    createdAt: Date;
+  };
+  compiledPromptHash: string;
+  promptVersion: string;
+  sampleScopeHash: string;
+  sampleTargetDate: Date;
+  sampleWindowStartAt: Date;
+  sampleWindowEndExclusiveAt: Date;
+  sampleConversationId: string;
+  customerDisplayName: string | null;
+  runtimeMetadataJson: Prisma.JsonValue;
+  previewResultJson: Prisma.JsonValue;
+  evidenceBundleJson: Prisma.JsonValue;
+  fieldExplanationsJson: Prisma.JsonValue;
+  supportingMessageIdsJson: Prisma.JsonValue;
+  createdAt: Date;
+}): PromptPreviewArtifactRecord {
+  return {
+    id: row.id,
+    connectedPageId: row.connectedPageId,
+    analysisTaxonomyVersionId: row.analysisTaxonomyVersionId,
+    analysisTaxonomyVersion: mapAnalysisTaxonomyVersion(row.analysisTaxonomyVersion),
+    compiledPromptHash: row.compiledPromptHash,
+    promptVersion: row.promptVersion,
+    sampleScopeHash: row.sampleScopeHash,
+    sampleTargetDate: row.sampleTargetDate,
+    sampleWindowStartAt: row.sampleWindowStartAt,
+    sampleWindowEndExclusiveAt: row.sampleWindowEndExclusiveAt,
+    sampleConversationId: row.sampleConversationId,
+    customerDisplayName: row.customerDisplayName,
+    runtimeMetadataJson: row.runtimeMetadataJson,
+    previewResultJson: row.previewResultJson,
+    evidenceBundleJson: row.evidenceBundleJson,
+    fieldExplanationsJson: row.fieldExplanationsJson,
+    supportingMessageIdsJson: row.supportingMessageIdsJson,
     createdAt: row.createdAt
   };
 }
