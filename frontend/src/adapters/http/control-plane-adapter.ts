@@ -56,6 +56,10 @@ type RawConnectedPageDetail = {
   pancakePageId: string;
   pageName: string;
   businessTimezone: string;
+  tokenStatus?: string;
+  connectionStatus?: string;
+  tokenPreviewMasked?: string | null;
+  lastValidatedAt?: string | null;
   etlEnabled: boolean;
   analysisEnabled: boolean;
   activeConfigVersionId: string | null;
@@ -80,8 +84,10 @@ type RawRunSummary = {
 type RawRunDetail = {
   run: RawRunSummary;
   artifact_counts: {
+    thread_count: number;
     thread_day_count: number;
     message_count: number;
+    covered_thread_ids?: string[];
   };
   analysis_metrics: {
     analysis_run_id: string;
@@ -114,6 +120,15 @@ type RawRunDetail = {
   error_text: string | null;
 };
 
+type RawOnboardingConversation = {
+  conversationId: string;
+  customerDisplayName?: string;
+  firstMeaningfulMessageText?: string;
+  observedTagsJson: unknown;
+  normalizedTagSignalsJson?: unknown;
+  openingBlockJson: unknown;
+};
+
 type RawOnboardingSamplePreview = {
   pageId: string;
   targetDate: string;
@@ -122,42 +137,37 @@ type RawOnboardingSamplePreview = {
   windowEndExclusiveAt: string;
   summary: Record<string, unknown>;
   pageTags: Array<{ pancakeTagId: string; text: string; isDeactive: boolean }>;
-  conversations: Array<{
-    conversationId: string;
-    customerDisplayName?: string;
-    firstMeaningfulMessageText?: string;
-    observedTagsJson: unknown;
-    normalizedTagSignalsJson?: unknown;
-    openingBlockJson: unknown;
+  conversations: RawOnboardingConversation[];
+};
+
+type RawPromptWorkspaceConversation = RawOnboardingConversation & {
+  firstMeaningfulMessageId?: string;
+  firstMeaningfulMessageSenderRole?: string;
+  explicitRevisitSignal?: string | null;
+  explicitNeedSignal?: string | null;
+  explicitOutcomeSignal?: string | null;
+  sourceThreadJsonRedacted?: unknown;
+  messageCount?: number;
+  firstStaffResponseSeconds?: number | null;
+  avgStaffResponseSeconds?: number | null;
+  staffParticipantsJson?: unknown;
+  messages?: Array<{
+    messageId?: string;
+    insertedAt?: string;
+    senderRole?: string;
+    senderName?: string | null;
+    messageType?: string;
+    redactedText?: string | null;
+    isMeaningfulHumanMessage?: boolean;
+    isOpeningBlockMessage?: boolean;
   }>;
 };
 
-type RawPromptWorkspaceSamplePreview = RawOnboardingSamplePreview & {
+type RawPromptWorkspaceSamplePreview = Omit<RawOnboardingSamplePreview, "conversations"> & {
   sampleWorkspaceKey: string;
   connectedPageId: string;
   pageName: string;
-  conversations: Array<RawOnboardingSamplePreview["conversations"][number] & {
-    firstMeaningfulMessageId?: string;
-    firstMeaningfulMessageSenderRole?: string;
-    explicitRevisitSignal?: string | null;
-    explicitNeedSignal?: string | null;
-    explicitOutcomeSignal?: string | null;
-    sourceThreadJsonRedacted?: unknown;
-    messageCount?: number;
-    firstStaffResponseSeconds?: number | null;
-    avgStaffResponseSeconds?: number | null;
-    staffParticipantsJson?: unknown;
-    messages?: Array<{
-      messageId?: string;
-      insertedAt?: string;
-      senderRole?: string;
-      senderName?: string | null;
-      messageType?: string;
-      redactedText?: string | null;
-      isMeaningfulHumanMessage?: boolean;
-      isOpeningBlockMessage?: boolean;
-    }>;
-  }>;
+  conversations: RawPromptWorkspaceConversation[];
 };
 
 type RawPromptPreviewArtifact = {
@@ -549,10 +559,11 @@ function flattenNormalizedTagSignals(value: unknown) {
   const source = asRecord(value);
   return Object.entries(source).flatMap(([role, entries]) => readArray(entries).map((item) => ({
     role,
+    sourceTagId: readString(item, "source_tag_id") || readString(item, "sourceTagId"),
     sourceTagText: readString(item, "source_tag_text") || readString(item, "sourceTagText"),
     canonicalCode: readString(item, "canonical_code") || readString(item, "canonicalCode"),
     mappingSource: readString(item, "mapping_source") || readString(item, "mappingSource")
-  }))).filter((item) => item.sourceTagText || item.canonicalCode || item.mappingSource);
+  }))).filter((item) => item.sourceTagId || item.sourceTagText || item.canonicalCode || item.mappingSource);
 }
 
 function asRecord(value: unknown) {
@@ -584,6 +595,10 @@ function mapConnectedPage(input: RawConnectedPageDetail): ConnectedPageDetailVie
     pageName: input.pageName,
     pancakePageId: input.pancakePageId,
     businessTimezone: input.businessTimezone,
+    tokenStatus: normalizeTokenStatus(input.tokenStatus),
+    connectionStatus: normalizeConnectionStatus(input.connectionStatus),
+    tokenPreviewMasked: typeof input.tokenPreviewMasked === "string" ? input.tokenPreviewMasked : null,
+    lastValidatedAt: typeof input.lastValidatedAt === "string" ? input.lastValidatedAt : null,
     etlEnabled: input.etlEnabled,
     analysisEnabled: input.analysisEnabled,
     activeConfigVersionId: input.activeConfigVersionId,
@@ -625,6 +640,18 @@ function mapConnectedPage(input: RawConnectedPageDetail): ConnectedPageDetailVie
       }
       : null
   };
+}
+
+function normalizeTokenStatus(value: string | undefined) {
+  return value === "missing" || value === "valid" || value === "invalid" || value === "not_checked"
+    ? value
+    : "not_checked";
+}
+
+function normalizeConnectionStatus(value: string | undefined) {
+  return value === "connected" || value === "token_invalid" || value === "page_unavailable" || value === "not_checked"
+    ? value
+    : "not_checked";
 }
 
 function mapRunGroup(input: {
@@ -687,8 +714,10 @@ function mapRunSummary(input: RawRunSummary) {
 function mapRunDetail(result: RawRunDetail): RunDetailViewModel {
   return {
     run: mapRunSummary(result.run),
+    threadCount: result.artifact_counts.thread_count,
     threadDayCount: result.artifact_counts.thread_day_count,
     messageCount: result.artifact_counts.message_count,
+    coveredThreadIds: Array.isArray(result.artifact_counts.covered_thread_ids) ? result.artifact_counts.covered_thread_ids : [],
     analysisMetrics: result.analysis_metrics
       ? {
         analysisRunId: result.analysis_metrics.analysis_run_id,

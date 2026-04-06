@@ -8,6 +8,8 @@ export function renderOperations(state: OperationsState) {
   const selectedRun = childRuns.find((run) => run.id === state.publishRunId) ?? (state.runDetail?.run.id === state.publishRunId ? state.runDetail.run : null);
   const publishAction = selectedRun ? derivePublishAction(selectedRun.publishEligibility) : null;
   const healthCards = state.healthSummary?.cards ?? [];
+  const coveredThreadIds = state.runDetail?.coveredThreadIds ?? [];
+  const coveredThreadPreview = coveredThreadIds.slice(0, 20);
 
   return `
     <section class="feature-stack">
@@ -161,7 +163,8 @@ export function renderOperations(state: OperationsState) {
           <div class="meta-list">
             <span>Run: ${escapeHtml(state.runDetail.run.id)}</span>
             <span>Ngày: ${escapeHtml(state.runDetail.run.targetDate)}</span>
-            <span>Thread: ${state.runDetail.threadDayCount}</span>
+            <span>Thread: ${state.runDetail.threadCount}</span>
+            <span>Thread-day: ${state.runDetail.threadDayCount}</span>
             <span>Tin nhắn: ${escapeHtml(state.runDetail.messageCount)}</span>
           </div>
           ${state.runDetail.publishWarning ? `<div class="banner banner-warning"><strong>Cảnh báo publish</strong><p>${escapeHtml(state.runDetail.publishWarning)}</p></div>` : ""}
@@ -196,6 +199,19 @@ export function renderOperations(state: OperationsState) {
                 : "<p class='muted-copy'>Chua co semantic mart metrics cho run nay.</p>"}
             </article>
           </div>
+          <article class="sub-panel">
+            <h4>Thread coverage</h4>
+            <div class="meta-list">
+              <span>Covered thread ids: ${coveredThreadIds.length}</span>
+              <span>Preview rows: ${coveredThreadPreview.length}</span>
+            </div>
+            ${coveredThreadIds.length > 0
+              ? `<pre class="code-block">${escapeHtml(prettyJson({
+                coveredThreadIds: coveredThreadPreview,
+                remainingThreadCount: Math.max(coveredThreadIds.length - coveredThreadPreview.length, 0)
+              }))}</pre>`
+              : "<p class='muted-copy'>Run này chưa có thread coverage nào được materialize.</p>"}
+          </article>
         ` : "<p class='muted-copy'>Run detail sẽ hiện ETL counts, analysis metrics, mart diagnostics và warning publish.</p>"}
         <div class="banner banner-warning">
           <strong>CRM mapping</strong>

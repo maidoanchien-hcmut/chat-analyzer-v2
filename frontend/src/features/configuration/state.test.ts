@@ -20,7 +20,7 @@ describe("configuration workflow", () => {
     const payload = buildCreateConfigVersionInput({
       promptText: "Giữ distinction draft / provisional / official",
       tagMappings: [
-        { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+        { sourceTagId: "11", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
       ],
       openingRules: [
         { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
@@ -40,7 +40,7 @@ describe("configuration workflow", () => {
       defaultRole: "noise",
       entries: [
         {
-          sourceTagId: "tag-1",
+          sourceTagId: "11",
           sourceTagText: "KH mới",
           role: "journey",
           canonicalCode: "new_to_clinic",
@@ -141,7 +141,7 @@ describe("configuration workflow", () => {
     });
 
     expect(draft.tagMappings).toEqual([
-      { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+      { sourceTagId: "tag-1", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
     ]);
     expect(draft.openingRules).toEqual([
       { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
@@ -179,7 +179,7 @@ describe("configuration workflow", () => {
     });
 
     expect(draft.tagMappings).toEqual([
-      { rawTag: "", role: "noise", canonicalValue: "", source: "system_default" }
+      { sourceTagId: "", rawTag: "", role: "noise", canonicalValue: "", source: "system_default" }
     ]);
     expect(draft.openingRules).toEqual([
       { buttonTitle: "", signalType: "customer_journey", canonicalValue: "" }
@@ -223,14 +223,82 @@ describe("configuration workflow", () => {
   });
 
   it("renders onboarding timezone as an owner-clean input and shows a dedicated lane for normal operators", () => {
-    const configuration = createConfigurationState();
+    const configuration = {
+      ...createConfigurationState(),
+      activeTab: "page-info" as const
+    };
 
     const html = renderConfiguration(configuration);
 
     expect(html).toContain("<select name=\"businessTimezone\">");
-    expect(html).toContain("<select name=\"schedulerTimezone\">");
     expect(html).toContain("Page đang vận hành");
     expect(html).toContain("Tải cấu hình page đã chọn");
+    expect(html).not.toContain("<select name=\"schedulerTimezone\">");
+  });
+
+  it("renders only the active configuration panel instead of one long combined form", () => {
+    const pageInfoHtml = renderConfiguration({
+      ...createConfigurationState(),
+      activeTab: "page-info"
+    });
+    expect(pageInfoHtml).toContain('data-form="onboarding-token"');
+    expect(pageInfoHtml).not.toContain('name="tagRawTag"');
+    expect(pageInfoHtml).not.toContain("Preview workspace runtime thật");
+
+    const taxonomyHtml = renderConfiguration({
+      ...createConfigurationState(),
+      activeTab: "taxonomy",
+      workspace: {
+        ...createConfigurationState().workspace,
+        tagMappings: [
+          {
+            sourceTagId: "11",
+            rawTag: "KH mới",
+            role: "customer_journey",
+            canonicalValue: "new_to_clinic",
+            source: "operator_override"
+          }
+        ]
+      }
+    });
+    expect(taxonomyHtml).toContain('name="tagRawTag"');
+    expect(taxonomyHtml).not.toContain('data-form="onboarding-token"');
+    expect(taxonomyHtml).not.toContain("Preview workspace runtime thật");
+
+    const openingRulesHtml = renderConfiguration({
+      ...createConfigurationState(),
+      activeTab: "opening-rules",
+      workspace: {
+        ...createConfigurationState().workspace,
+        openingRules: [
+          {
+            buttonTitle: "Khách hàng tái khám",
+            signalType: "customer_journey",
+            canonicalValue: "revisit"
+          }
+        ]
+      }
+    });
+    expect(openingRulesHtml).toContain('name="openingButtonTitle"');
+    expect(openingRulesHtml).not.toContain('name="tagRawTag"');
+    expect(openingRulesHtml).not.toContain("Scheduler default toàn hệ thống");
+
+    const promptProfileHtml = renderConfiguration({
+      ...createConfigurationState(),
+      activeTab: "prompt-profile"
+    });
+    expect(promptProfileHtml).toContain("Preview workspace runtime thật");
+    expect(promptProfileHtml).not.toContain('data-form="onboarding-token"');
+    expect(promptProfileHtml).not.toContain("Scheduler default toàn hệ thống");
+
+    const schedulerHtml = renderConfiguration({
+      ...createConfigurationState(),
+      activeTab: "scheduler"
+    });
+    expect(schedulerHtml).toContain("Scheduler default toàn hệ thống");
+    expect(schedulerHtml).toContain('name="notes"');
+    expect(schedulerHtml).not.toContain('name="tagRawTag"');
+    expect(schedulerHtml).not.toContain("Preview workspace runtime thật");
   });
 
   it("builds one shared IANA timezone catalog and marks Asia/Saigon as a legacy alias", () => {
@@ -258,7 +326,7 @@ describe("configuration workflow", () => {
       pageName: "Page Da Lieu Quan 1",
       businessTimezone: "Asia/Saigon",
       tagMappings: [
-        { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+        { sourceTagId: "11", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
       ],
       openingRules: [
         { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
@@ -283,7 +351,7 @@ describe("configuration workflow", () => {
   it("builds connected-page prompt workspace sample input from the current draft", () => {
     const payload = buildPromptWorkspaceSampleInput({
       tagMappings: [
-        { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+        { sourceTagId: "11", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
       ],
       openingRules: [
         { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
@@ -305,7 +373,7 @@ describe("configuration workflow", () => {
 
   it("seeds tag and opening suggestions from onboarding sample into an empty editable draft", () => {
     const seeded = seedWorkspaceDraftFromOnboardingSample({
-      tagMappings: [{ rawTag: "", role: "noise", canonicalValue: "", source: "system_default" }],
+      tagMappings: [{ sourceTagId: "", rawTag: "", role: "noise", canonicalValue: "", source: "system_default" }],
       openingRules: [{ buttonTitle: "", signalType: "customer_journey", canonicalValue: "" }],
       promptText: "",
       scheduler: { useSystemDefaults: true, timezone: "Asia/Ho_Chi_Minh", officialDailyTime: "00:00", lookbackHours: 2 },
@@ -335,7 +403,7 @@ describe("configuration workflow", () => {
               { sourceTagId: "11", sourceTagText: "KH mới" }
             ],
             normalizedTagSignals: [
-              { role: "journey", sourceTagText: "KH mới", canonicalCode: "new_to_clinic", mappingSource: "operator" }
+              { role: "journey", sourceTagId: "11", sourceTagText: "KH mới", canonicalCode: "new_to_clinic", mappingSource: "operator" }
             ],
             openingMessages: [],
             explicitSignals: [
@@ -349,7 +417,7 @@ describe("configuration workflow", () => {
 
     expect(seeded.promptText).toBe(DEFAULT_PAGE_LOCAL_PROMPT);
     expect(seeded.tagMappings).toEqual([
-      { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+      { sourceTagId: "11", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
     ]);
     expect(seeded.openingRules).toEqual([
       { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
@@ -371,7 +439,7 @@ describe("configuration workflow", () => {
   it("preserves operator overrides when a later sample suggests the same tag or opening rule", () => {
     const seeded = seedWorkspaceDraftFromOnboardingSample({
       tagMappings: [
-        { rawTag: "KH mới", role: "need", canonicalValue: "consultation", source: "operator_override" }
+        { sourceTagId: "", rawTag: "KH mới", role: "need", canonicalValue: "consultation", source: "operator_override" }
       ],
       openingRules: [
         { buttonTitle: "Khách hàng tái khám", signalType: "need", canonicalValue: "consultation" }
@@ -400,7 +468,7 @@ describe("configuration workflow", () => {
             firstMeaningfulMessageText: "Em muốn tái khám chiều nay",
             observedTags: [],
             normalizedTagSignals: [
-              { role: "journey", sourceTagText: "KH mới", canonicalCode: "new_to_clinic", mappingSource: "operator" }
+              { role: "journey", sourceTagId: "", sourceTagText: "KH mới", canonicalCode: "new_to_clinic", mappingSource: "operator" }
             ],
             openingMessages: [],
             explicitSignals: [
@@ -414,7 +482,7 @@ describe("configuration workflow", () => {
 
     expect(seeded.promptText).toBe("Prompt riêng do operator chỉnh");
     expect(seeded.tagMappings).toEqual([
-      { rawTag: "KH mới", role: "need", canonicalValue: "consultation", source: "operator_override" }
+      { sourceTagId: "", rawTag: "KH mới", role: "need", canonicalValue: "consultation", source: "operator_override" }
     ]);
     expect(seeded.openingRules).toEqual([
       { buttonTitle: "Khách hàng tái khám", signalType: "need", canonicalValue: "consultation" }
@@ -435,7 +503,7 @@ describe("configuration workflow", () => {
 
   it("does not damage the current draft when onboarding sample returns no suggestions", () => {
     const currentTagMappings = [
-      { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" as const }
+      { sourceTagId: "", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" as const }
     ];
     const currentOpeningRules = [
       { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
@@ -585,7 +653,7 @@ describe("configuration workflow", () => {
       sampleMessagePageLimit: 2
     });
     const currentWorkspaceFingerprint = buildPromptWorkspaceSampleFingerprint({
-      tagMappings: [{ rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }],
+      tagMappings: [{ sourceTagId: "11", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }],
       openingRules: [],
       scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
       businessTimezone: "Asia/Saigon",
@@ -694,6 +762,7 @@ describe("configuration workflow", () => {
   it("renders onboarding sample workspace from raw HTTP preview payload", () => {
     const configuration = {
       ...createConfigurationState(),
+      activeTab: "page-info" as const,
       onboardingSamplePreview: {
         pageId: "pk_101",
         pageName: "Page Da Lieu Quan 1",
@@ -719,7 +788,7 @@ describe("configuration workflow", () => {
               { sourceTagId: "11", sourceTagText: "KH mới" }
             ],
             normalizedTagSignals: [
-              { role: "journey", sourceTagText: "KH mới", canonicalCode: "new_to_clinic", mappingSource: "operator" }
+              { role: "journey", sourceTagId: "11", sourceTagText: "KH mới", canonicalCode: "new_to_clinic", mappingSource: "operator" }
             ],
             openingMessages: [
               { senderRole: "customer", messageType: "text", redactedText: "Em muốn tái khám chiều nay" }
@@ -789,7 +858,7 @@ describe("configuration workflow", () => {
             firstMeaningfulMessageSenderRole: "customer",
             observedTagsJson: [],
             normalizedTagSignalsJson: {
-              journey: [{ sourceTagText: "KH mới", canonicalCode: "new_to_clinic" }]
+              journey: [{ sourceTagId: "11", sourceTagText: "KH mới", canonicalCode: "new_to_clinic" }]
             },
             openingBlockJson: {
               explicit_signals: [
@@ -935,6 +1004,10 @@ function createConfigurationState(): ConfigurationState {
         pageName: "Page Da Lieu Quan 1",
         pancakePageId: "pk_101",
         businessTimezone: "Asia/Ho_Chi_Minh",
+        tokenStatus: "valid",
+        connectionStatus: "connected",
+        tokenPreviewMasked: "abc***xyz",
+        lastValidatedAt: "2026-04-04T09:00:00.000Z",
         etlEnabled: true,
         analysisEnabled: false,
         activeConfigVersionId: "cfg-18",
@@ -946,6 +1019,10 @@ function createConfigurationState(): ConfigurationState {
       pageName: "Page Da Lieu Quan 1",
       pancakePageId: "pk_101",
       businessTimezone: "Asia/Ho_Chi_Minh",
+      tokenStatus: "valid",
+      connectionStatus: "connected",
+      tokenPreviewMasked: "abc***xyz",
+      lastValidatedAt: "2026-04-04T09:00:00.000Z",
       etlEnabled: true,
       analysisEnabled: false,
       activeConfigVersionId: "cfg-18",

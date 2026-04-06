@@ -127,6 +127,8 @@ class RuntimeMetadataModel(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
   runtime_mode: str
+  provider: str
+  model_name: str
   system_prompt_version: str
   effective_prompt_hash: str
   effective_prompt_text: str
@@ -134,6 +136,7 @@ class RuntimeMetadataModel(BaseModel):
   profile_id: str
   version_no: int
   taxonomy_version: str
+  generation_config: dict[str, Any] = Field(default_factory=dict)
 
 
 class InvalidServiceResultError(ValueError):

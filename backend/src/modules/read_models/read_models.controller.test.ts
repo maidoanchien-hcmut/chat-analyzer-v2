@@ -48,6 +48,39 @@ describe("read models controller", () => {
     });
   });
 
+  it("parses exploration builder query params and forwards them to the service", async () => {
+    patchValue(readModelsService, "getExploration", async (_filters, input) => ({
+      builder: {
+        metricOptions: [],
+        breakdownOptions: [],
+        compareOptions: [],
+        selectedMetric: input.metric,
+        selectedBreakdownBy: input.breakdownBy,
+        selectedCompareBy: input.compareBy
+      },
+      metric: "Số thread",
+      breakdownBy: "Opening theme",
+      compareBy: "Inbox mới/cũ",
+      chartSummary: "Builder runtime đã chọn metric/breakdown/compare thật.",
+      rows: [],
+      warning: null
+    }));
+
+    const app = new Elysia().use(readModelsController);
+    const response = await app.handle(new Request(`http://localhost/read-models/exploration?pageId=${CONNECTED_PAGE_ID}&startDate=2026-04-01&endDate=2026-04-05&metric=booked_rate&breakdownBy=source&compareBy=revisit`));
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({
+      exploration: expect.objectContaining({
+        builder: expect.objectContaining({
+          selectedMetric: "booked_rate",
+          selectedBreakdownBy: "source",
+          selectedCompareBy: "revisit"
+        })
+      })
+    });
+  });
+
   it("parses thread history params and returns owner-shaped thread workspace payload", async () => {
     patchValue(readModelsService, "getThreadHistory", async (_filters, threadId, threadDayId, tab) => ({
       warning: null,
@@ -63,6 +96,18 @@ describe("read models controller", () => {
       activeThreadId: threadId ?? "thread-1",
       activeThreadDayId: threadDayId ?? "thread-day-1",
       activeTab: tab,
+      workspace: {
+        openingBlockMessages: [],
+        explicitSignals: [],
+        normalizedTagSignals: [],
+        sourceSignals: {
+          explicitRevisit: null,
+          explicitNeed: null,
+          explicitOutcome: null
+        },
+        structuredOutput: [],
+        sourceThreadJsonRedacted: {}
+      },
       transcript: [],
       analysisHistory: [],
       audit: {
@@ -72,7 +117,8 @@ describe("read models controller", () => {
         taxonomyVersion: "tax-2026-04",
         evidence: [],
         explanations: [],
-        supportingMessageIds: []
+        supportingMessageIds: [],
+        structuredOutput: []
       },
       crmLink: {
         customer: "CRM KH-7712",

@@ -261,13 +261,17 @@ class AnalysisRepository {
   async updateAnalysisRunRuntimeSnapshot(
     analysisRunId: string,
     runtimeSnapshotJson: Record<string, unknown>,
-    promptHash?: string
+    options?: {
+      promptHash?: string;
+      modelName?: string;
+    }
   ): Promise<AnalysisRunRecord> {
     const row = await prisma.analysisRun.update({
       where: { id: analysisRunId },
       data: {
         runtimeSnapshotJson: runtimeSnapshotJson as Prisma.InputJsonValue,
-        ...(promptHash ? { promptHash } : {})
+        ...(options?.promptHash ? { promptHash: options.promptHash } : {}),
+        ...(options?.modelName ? { modelName: options.modelName } : {})
       }
     });
     return mapAnalysisRun(row);

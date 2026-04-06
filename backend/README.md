@@ -31,7 +31,13 @@ Schema extraction hiện theo owner-clean seam:
 - `active_publish_snapshot`
 - `publish_history`
 
-`chat-extractor` là owner của control-plane và manual execution. Các endpoint local hiện có:
+`chat-extractor` là owner của control-plane và manual execution. Onboarding mặc định hiện tự seed:
+
+- `tag_mapping_json` với default `noise`
+- built-in opening heuristic từ observed payload sample (`Khách hàng lần đầu`, `Khách hàng tái khám`, `Tôi muốn gọi/chat tư vấn`, `Đặt lịch hẹn`)
+- `scheduler_json` snapshot theo timezone page với `officialDailyTime = 00:00`, `lookbackHours = 2`
+
+Các endpoint local hiện có:
 
 - `POST /chat-extractor/control-center/pages/list-from-token`
 - `POST /chat-extractor/control-center/pages/register`

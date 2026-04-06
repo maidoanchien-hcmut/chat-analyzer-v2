@@ -395,7 +395,13 @@ export function normalizeTagMappingConfig(value: unknown) {
   return {
     version: 1 as const,
     defaultRole: "noise" as const,
-    entries: [...deduped.values()].sort((left, right) => left.sourceTagText.localeCompare(right.sourceTagText))
+    entries: [...deduped.values()].sort((left, right) => {
+      const byText = left.sourceTagText.localeCompare(right.sourceTagText);
+      if (byText !== 0) {
+        return byText;
+      }
+      return left.sourceTagId.localeCompare(right.sourceTagId);
+    })
   };
 }
 

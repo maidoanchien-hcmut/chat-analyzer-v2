@@ -165,6 +165,117 @@ func TestBuildConversationDayAppliesTagSignalsAndOpeningSignals(t *testing.T) {
 	}
 }
 
+func TestBuildConversationDayPrefersSourceTagIDsWhenDuplicateTextsAreReordered(t *testing.T) {
+	location := time.FixedZone("ICT", 7*60*60)
+	window := DayWindow{
+		Start:        time.Date(2026, 4, 1, 0, 0, 0, 0, location),
+		EndExclusive: time.Date(2026, 4, 2, 0, 0, 0, 0, location),
+	}
+
+	conversation := pancake.Conversation{
+		ID:         "conv-duplicate-tags",
+		PageID:     "page-1",
+		From:       pancake.Actor{ID: "customer-1", Name: "An"},
+		InsertedAt: "2026-04-01T09:00:00",
+		UpdatedAt:  "2026-04-01T09:05:00",
+		Tags: []json.RawMessage{
+			json.RawMessage(`{"id":202}`),
+			json.RawMessage(`{"id":101}`),
+		},
+	}
+	tagDictionary := map[int64]pancake.Tag{
+		101: {
+			ID:   101,
+			Text: "Khách hàng cũ",
+		},
+		202: {
+			ID:   202,
+			Text: "Khách hàng cũ",
+		},
+	}
+	messages := []pancake.Message{
+		mustMessage(t, "m-real", "2026-04-01T09:01:00", "customer-1", "em muốn đặt lịch tái khám", nil),
+	}
+
+	buildWithEntries := func(entries []controlplane.TagMappingEntry) map[string]any {
+		day, err := BuildConversationDay(window, conversation, pancake.MessageContext{}, messages, len(messages), tagDictionary, controlplane.RuntimeConfig{
+			TagMapping: controlplane.TagMappingConfig{
+				Version:     1,
+				DefaultRole: "noise",
+				Entries:     entries,
+			},
+		})
+		if err != nil {
+			t.Fatalf("BuildConversationDay returned error: %v", err)
+		}
+
+		var normalized map[string]any
+		if err := json.Unmarshal(day.NormalizedTagSignalsJSON, &normalized); err != nil {
+			t.Fatalf("unmarshal normalized tag signals: %v", err)
+		}
+		return normalized
+	}
+
+	first := buildWithEntries([]controlplane.TagMappingEntry{
+		{
+			SourceTagID:   "202",
+			SourceTagText: "Khách hàng cũ",
+			Role:          "need",
+			CanonicalCode: "consultation",
+			MappingSource: "operator",
+			Status:        "active",
+		},
+		{
+			SourceTagID:   "101",
+			SourceTagText: "Khách hàng cũ",
+			Role:          "journey",
+			CanonicalCode: "revisit",
+			MappingSource: "operator",
+			Status:        "active",
+		},
+	})
+	second := buildWithEntries([]controlplane.TagMappingEntry{
+		{
+			SourceTagID:   "101",
+			SourceTagText: "Khách hàng cũ",
+			Role:          "journey",
+			CanonicalCode: "revisit",
+			MappingSource: "operator",
+			Status:        "active",
+		},
+		{
+			SourceTagID:   "202",
+			SourceTagText: "Khách hàng cũ",
+			Role:          "need",
+			CanonicalCode: "consultation",
+			MappingSource: "operator",
+			Status:        "active",
+		},
+	})
+
+	if !jsonEqual(first, second) {
+		t.Fatalf("expected normalized tag signals to stay stable under config reordering, got %v vs %v", first, second)
+	}
+
+	journey, _ := first["journey"].([]any)
+	if len(journey) != 1 {
+		t.Fatalf("expected one journey mapping, got %d", len(journey))
+	}
+	journeyItem, _ := journey[0].(map[string]any)
+	if got := journeyItem["source_tag_id"]; got != "101" {
+		t.Fatalf("expected journey mapping to preserve source_tag_id 101, got %v", got)
+	}
+
+	need, _ := first["need"].([]any)
+	if len(need) != 1 {
+		t.Fatalf("expected one need mapping, got %d", len(need))
+	}
+	needItem, _ := need[0].(map[string]any)
+	if got := needItem["source_tag_id"]; got != "202" {
+		t.Fatalf("expected need mapping to preserve source_tag_id 202, got %v", got)
+	}
+}
+
 func TestBuildConversationDayTreatsBotFlowAndOptionClicksAsOpeningBlock(t *testing.T) {
 	location := time.FixedZone("ICT", 7*60*60)
 	window := DayWindow{
@@ -560,4 +671,16 @@ func mustUnknownPageActorMessage(t *testing.T, id, insertedAt, fromID, originalM
 
 func int64Ptr(value int64) *int64 {
 	return &value
+}
+
+func jsonEqual(left, right any) bool {
+	leftJSON, err := json.Marshal(left)
+	if err != nil {
+		return false
+	}
+	rightJSON, err := json.Marshal(right)
+	if err != nil {
+		return false
+	}
+	return string(leftJSON) == string(rightJSON)
 }

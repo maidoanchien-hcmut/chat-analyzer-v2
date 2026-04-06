@@ -1,7 +1,11 @@
 import { Elysia, t } from "elysia";
 import { AppError } from "../../core/errors.ts";
 import { readModelsService } from "./read_models.service.ts";
-import type { ExportWorkbookRequest, ReadModelFilterInput } from "./read_models.types.ts";
+import type {
+  ExportWorkbookRequest,
+  ExplorationQueryInput,
+  ReadModelFilterInput
+} from "./read_models.types.ts";
 
 const runIdParamsSchema = t.Object({
   id: t.String()
@@ -32,7 +36,10 @@ export const readModelsController = new Elysia({ prefix: "/read-models" })
     response: t.Any()
   })
   .get("/exploration", async ({ query }) => ({
-    exploration: await readModelsService.getExploration(parseFilters(query))
+    exploration: await readModelsService.getExploration(
+      parseFilters(query),
+      parseExplorationQuery(query)
+    )
   }), {
     query: t.Any(),
     response: t.Any()
@@ -98,6 +105,26 @@ function parseExportRequest(query: Record<string, unknown>): ExportWorkbookReque
     pageId: readConnectedPageId(query.pageId),
     startDate: readString(query.startDate),
     endDate: readString(query.endDate)
+  };
+}
+
+function parseExplorationQuery(query: Record<string, unknown>): ExplorationQueryInput {
+  return {
+    metric: normalizeUnion(
+      readString(query.metric),
+      ["thread_count", "new_inbox_count", "revisit_count", "booked_rate", "ai_cost", "first_response_seconds"],
+      "thread_count"
+    ),
+    breakdownBy: normalizeUnion(
+      readString(query.breakdownBy),
+      ["day", "opening_theme", "primary_need", "primary_topic", "closing_outcome", "customer_mood", "process_risk_level", "source"],
+      "opening_theme"
+    ),
+    compareBy: normalizeUnion(
+      readString(query.compareBy),
+      ["none", "page", "inbox_bucket", "revisit"],
+      "none"
+    )
   };
 }
 

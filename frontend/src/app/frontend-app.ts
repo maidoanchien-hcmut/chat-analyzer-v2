@@ -331,6 +331,9 @@ export class FrontendApp {
         || form.dataset.form === "configuration-create"
       ) {
         this.syncConfigurationDraftFromForm(form);
+        if (!shouldRerenderConfigurationChange(event, form)) {
+          return;
+        }
       } else if (form.dataset.form === "page-comparison-filters") {
         if (!this.catalog) {
           return;
@@ -382,7 +385,6 @@ export class FrontendApp {
       return;
     }
     this.syncConfigurationDraftFromForm(form);
-    this.render();
   }
 
   private async loadCurrentView() {
@@ -819,6 +821,7 @@ export class FrontendApp {
     workspace.etlEnabled = data.get("etlEnabled") !== null;
     workspace.analysisEnabled = data.get("analysisEnabled") !== null;
     workspace.tagMappings = zipTagMappings(
+      workspace.tagMappings,
       data.getAll("tagRawTag"),
       data.getAll("tagRole"),
       data.getAll("tagCanonicalValue"),
@@ -1032,6 +1035,19 @@ export class FrontendApp {
   }
 }
 
+export function shouldRerenderConfigurationChange(event: Event, form: HTMLFormElement) {
+  if (form.dataset.form !== "configuration-create") {
+    return false;
+  }
+
+  const target = event.target as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null;
+  const name = target?.name ?? "";
+  return name === "selectedConfigVersionId"
+    || name === "selectedPromptSampleConversationId"
+    || name === "promptCompareLeftVersionId"
+    || name === "promptCompareRightVersionId";
+}
+
 function renderFilterBar(catalog: NonNullable<FrontendApp["catalog"]>, route: RouteState) {
   return `
     <form class="panel-card filter-bar" data-form="business-filters">
@@ -1163,9 +1179,16 @@ function mergeRouteSearch(current: RouteState, rawSearch: string): RouteState {
   return next;
 }
 
-function zipTagMappings(rawTags: FormDataEntryValue[], roles: FormDataEntryValue[], canonicalValues: FormDataEntryValue[], sources: FormDataEntryValue[]) {
-  const length = Math.max(rawTags.length, roles.length, canonicalValues.length, sources.length, 1);
+function zipTagMappings(
+  existingEntries: ConfigurationState["workspace"]["tagMappings"],
+  rawTags: FormDataEntryValue[],
+  roles: FormDataEntryValue[],
+  canonicalValues: FormDataEntryValue[],
+  sources: FormDataEntryValue[]
+) {
+  const length = Math.max(existingEntries.length, rawTags.length, roles.length, canonicalValues.length, sources.length, 1);
   return Array.from({ length }, (_, index) => ({
+    sourceTagId: existingEntries[index]?.sourceTagId ?? "",
     rawTag: String(rawTags[index] ?? ""),
     role: String(roles[index] ?? "noise"),
     canonicalValue: String(canonicalValues[index] ?? ""),

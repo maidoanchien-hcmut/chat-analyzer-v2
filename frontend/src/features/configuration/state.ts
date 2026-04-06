@@ -75,8 +75,8 @@ export function buildCreateConfigVersionInput(input: ConfigDraftInput): CreateCo
       defaultRole: "noise",
       entries: input.tagMappings
         .filter((entry) => entry.rawTag.trim() && entry.role.trim())
-        .map((entry, index) => ({
-          sourceTagId: `tag-${index + 1}`,
+        .map((entry) => ({
+          sourceTagId: resolveTagSourceIdentity(entry),
           sourceTagText: entry.rawTag.trim(),
           role: mapTagRoleToBackend(entry.role),
           canonicalCode: entry.canonicalValue.trim() || null,
@@ -293,6 +293,7 @@ export function configVersionToDraft(configVersion: ConnectedPageConfigVersion |
 
 export function createEmptyTagMapping(): TagMappingDraft {
   return {
+    sourceTagId: "",
     rawTag: "",
     role: "noise",
     canonicalValue: "",
@@ -363,6 +364,7 @@ export function seedWorkspaceDraftFromOnboardingSample(input: {
 function parseTagMappings(value: unknown): TagMappingDraft[] {
   const entries = readArrayField(value, "entries");
   const mapped = entries.map((entry) => ({
+    sourceTagId: readString(entry, "sourceTagId"),
     rawTag: readString(entry, "sourceTagText"),
     role: mapTagRoleFromBackend(readString(entry, "role")),
     canonicalValue: readString(entry, "canonicalCode"),
@@ -382,6 +384,7 @@ function collectTagSuggestions(samplePreview: OnboardingSamplePreviewViewModel):
     const existing = suggestions.get(key);
     if (!existing || rankTagSuggestion(entry) > rankTagSuggestion(existing)) {
       suggestions.set(key, {
+        sourceTagId: entry.sourceTagId.trim(),
         rawTag,
         role: entry.role,
         canonicalValue: entry.canonicalValue.trim(),
@@ -393,6 +396,7 @@ function collectTagSuggestions(samplePreview: OnboardingSamplePreviewViewModel):
   for (const pageTag of samplePreview.pageTags) {
     if (!pageTag.isDeactive) {
       upsertSuggestion({
+        sourceTagId: pageTag.pancakeTagId,
         rawTag: pageTag.text,
         role: "noise",
         canonicalValue: "",
@@ -404,6 +408,7 @@ function collectTagSuggestions(samplePreview: OnboardingSamplePreviewViewModel):
   for (const conversation of samplePreview.conversations) {
     for (const observedTag of conversation.observedTags) {
       upsertSuggestion({
+        sourceTagId: observedTag.sourceTagId,
         rawTag: observedTag.sourceTagText || observedTag.sourceTagId,
         role: "noise",
         canonicalValue: "",
@@ -412,6 +417,7 @@ function collectTagSuggestions(samplePreview: OnboardingSamplePreviewViewModel):
     }
     for (const signal of conversation.normalizedTagSignals) {
       upsertSuggestion({
+        sourceTagId: signal.sourceTagId,
         rawTag: signal.sourceTagText,
         role: mapTagRoleFromBackend(signal.role),
         canonicalValue: signal.canonicalCode ?? "",
@@ -450,12 +456,12 @@ function collectOpeningSuggestions(samplePreview: OnboardingSamplePreviewViewMod
 
 function mergeTagMappings(current: TagMappingDraft[], suggestions: TagMappingDraft[]) {
   const entries = shouldReplaceEmptyTagMappings(current) ? [] : current.map((entry) => ({ ...entry }));
-  const indices = new Map(entries.map((entry, index) => [normalizeKey(entry.rawTag), index]));
+  const indices = new Map(entries.map((entry, index) => [tagIdentityKey(entry), index]));
   let applied = 0;
   let preserved = 0;
 
   for (const suggestion of suggestions) {
-    const key = normalizeKey(suggestion.rawTag);
+    const key = tagIdentityKey(suggestion);
     const existingIndex = indices.get(key);
     if (existingIndex === undefined) {
       entries.push({ ...suggestion });
@@ -623,6 +629,9 @@ function normalizeKey(value: string) {
 
 function rankTagSuggestion(entry: TagMappingDraft) {
   let score = entry.source === "operator_override" ? 4 : 2;
+  if (entry.sourceTagId.trim()) {
+    score += 2;
+  }
   if (entry.role !== "noise") {
     score += 2;
   }
@@ -641,10 +650,23 @@ function shouldReplaceEmptyOpeningRules(entries: OpeningRuleDraft[]) {
 }
 
 function isBlankTagMapping(entry: TagMappingDraft) {
-  return !entry.rawTag.trim()
+  return !entry.sourceTagId.trim()
+    && !entry.rawTag.trim()
     && entry.role === "noise"
     && !entry.canonicalValue.trim()
     && entry.source === "system_default";
+}
+
+function resolveTagSourceIdentity(entry: TagMappingDraft) {
+  const sourceTagId = entry.sourceTagId.trim();
+  if (sourceTagId) {
+    return sourceTagId;
+  }
+  return `manual:${normalizeKey(entry.rawTag)}`;
+}
+
+function tagIdentityKey(entry: TagMappingDraft) {
+  return entry.sourceTagId.trim() || normalizeKey(entry.rawTag);
 }
 
 function isBlankOpeningRule(entry: OpeningRuleDraft) {

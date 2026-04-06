@@ -3,7 +3,7 @@ import { stableStringify } from "../chat_extractor/chat_extractor.artifacts.ts";
 
 export const ANALYSIS_RUNTIME_PROFILE_ID = "conversation-analysis";
 export const ANALYSIS_RUNTIME_PROFILE_VERSION = 1;
-export const ANALYSIS_RUNTIME_MODEL_NAME = "service-managed";
+export const ANALYSIS_RUNTIME_MODEL_NAME = "resolved-by-service";
 export const ANALYSIS_OUTPUT_SCHEMA_VERSION = "conversation_analysis.v2";
 export const ANALYSIS_BATCH_SIZE = 25;
 

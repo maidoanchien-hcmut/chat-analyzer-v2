@@ -75,6 +75,25 @@ function renderActiveTab(viewModel: ThreadHistoryViewModel) {
             <ul>${viewModel.audit.explanations.map((item) => `<li><strong>${escapeHtml(item.field)}</strong>: ${escapeHtml(item.explanation)}</li>`).join("")}</ul>
           </article>
         </div>
+        <div class="two-column-grid">
+          <article class="sub-panel">
+            <h3>Structured output</h3>
+            ${viewModel.audit.structuredOutput.length > 0
+              ? `<ul>${viewModel.audit.structuredOutput.map((item) => `
+                  <li>
+                    <strong>${escapeHtml(item.field)}</strong>: ${escapeHtml(item.label)} (${escapeHtml(item.code)})
+                    ${item.reason ? `<div class="muted-copy">${escapeHtml(item.reason)}</div>` : ""}
+                  </li>
+                `).join("")}</ul>`
+              : "<p class='muted-copy'>Chưa có structured output cho lần phân tích này.</p>"}
+          </article>
+          <article class="sub-panel">
+            <h3>Supporting messages</h3>
+            ${viewModel.audit.supportingMessageIds.length > 0
+              ? `<ul>${viewModel.audit.supportingMessageIds.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`
+              : "<p class='muted-copy'>Chưa có supporting message id.</p>"}
+          </article>
+        </div>
       </div>
     `;
   }
@@ -91,7 +110,59 @@ function renderActiveTab(viewModel: ThreadHistoryViewModel) {
   }
 
   return `
-    <div class="conversation-list">
+    <div class="feature-stack">
+      <section class="two-column-grid">
+        <article class="sub-panel">
+          <h3>Opening block</h3>
+          ${viewModel.workspace.openingBlockMessages.length > 0
+            ? `<ul>${viewModel.workspace.openingBlockMessages.map((item) => `
+                <li>
+                  <strong>${escapeHtml(item.senderRole)}</strong> / ${escapeHtml(item.messageType)}
+                  ${item.messageId ? ` / ${escapeHtml(item.messageId)}` : ""}: ${escapeHtml(item.text)}
+                </li>
+              `).join("")}</ul>`
+            : "<p class='muted-copy'>Chưa có opening block messages.</p>"}
+        </article>
+        <article class="sub-panel">
+          <h3>Explicit signals</h3>
+          ${viewModel.workspace.explicitSignals.length > 0
+            ? `<ul>${viewModel.workspace.explicitSignals.map((item) => `<li>${escapeHtml(item.signalRole)} / ${escapeHtml(item.signalCode)}: ${escapeHtml(item.rawText)}</li>`).join("")}</ul>`
+            : "<p class='muted-copy'>Chưa có explicit signals.</p>"}
+          <div class="meta-list">
+            <span>Explicit revisit: ${escapeHtml(viewModel.workspace.sourceSignals.explicitRevisit ?? "unknown")}</span>
+            <span>Explicit need: ${escapeHtml(viewModel.workspace.sourceSignals.explicitNeed ?? "unknown")}</span>
+            <span>Explicit outcome: ${escapeHtml(viewModel.workspace.sourceSignals.explicitOutcome ?? "unknown")}</span>
+          </div>
+        </article>
+      </section>
+      <section class="two-column-grid">
+        <article class="sub-panel">
+          <h3>Normalized tag signals</h3>
+          ${viewModel.workspace.normalizedTagSignals.length > 0
+            ? `<ul>${viewModel.workspace.normalizedTagSignals.map((item) => `
+                <li>${escapeHtml(item.role)} / ${escapeHtml(item.sourceTagText || item.sourceTagId)} -> ${escapeHtml(item.canonicalCode || "noise")} (${escapeHtml(item.mappingSource || "unknown")})</li>
+              `).join("")}</ul>`
+            : "<p class='muted-copy'>Chưa có normalized tag signals.</p>"}
+        </article>
+        <article class="sub-panel">
+          <h3>Source thread</h3>
+          <pre class="code-block">${escapeHtml(JSON.stringify(viewModel.workspace.sourceThreadJsonRedacted, null, 2))}</pre>
+        </article>
+      </section>
+      <section class="two-column-grid">
+        <article class="sub-panel">
+          <h3>Structured output</h3>
+          ${viewModel.workspace.structuredOutput.length > 0
+            ? `<ul>${viewModel.workspace.structuredOutput.map((item) => `
+                <li>
+                  <strong>${escapeHtml(item.field)}</strong>: ${escapeHtml(item.label)} (${escapeHtml(item.code)})
+                  ${item.reason ? `<div class="muted-copy">${escapeHtml(item.reason)}</div>` : ""}
+                </li>
+              `).join("")}</ul>`
+            : "<p class='muted-copy'>Chưa có structured output.</p>"}
+        </article>
+      </section>
+      <div class="conversation-list">
       ${viewModel.transcript.map((message) => `
         <article class="conversation-item ${message.emphasized ? "conversation-emphasis" : ""}">
           <div class="conversation-meta"><strong>${escapeHtml(message.author)}</strong><span>${escapeHtml(message.at)}</span></div>
@@ -103,6 +174,7 @@ function renderActiveTab(viewModel: ThreadHistoryViewModel) {
           <p>${escapeHtml(message.text)}</p>
         </article>
       `).join("")}
+      </div>
     </div>
   `;
 }

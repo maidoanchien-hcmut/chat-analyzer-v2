@@ -13,6 +13,7 @@ import type {
 } from "../adapters/contracts.ts";
 
 export type TagMappingDraft = {
+  sourceTagId: string;
   rawTag: string;
   role: string;
   canonicalValue: string;

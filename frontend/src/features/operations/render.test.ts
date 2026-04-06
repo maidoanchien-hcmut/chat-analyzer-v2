@@ -14,6 +14,9 @@ describe("operations render", () => {
     expect(html).toContain("Export .xlsx của ngày này sẽ regenerate theo snapshot mới.");
     expect(html).toContain("analysis-run-1");
     expect(html).toContain("factThreadDayCount");
+    expect(html).toContain("Thread: 31");
+    expect(html).toContain("Thread-day: 42");
+    expect(html).toContain("coveredThreadIds");
     expect(html).toContain("Redis PONG");
   });
 });
@@ -84,8 +87,10 @@ function createOperationsState(): OperationsState {
         },
         publishedAt: null
       },
+      threadCount: 31,
       threadDayCount: 42,
       messageCount: 388,
+      coveredThreadIds: ["thread-1", "thread-2"],
       analysisMetrics: {
         analysisRunId: "analysis-run-1",
         status: "completed",

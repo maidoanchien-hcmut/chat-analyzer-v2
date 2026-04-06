@@ -167,7 +167,7 @@ describe("chat_extractor repository", () => {
   });
 });
 
-function patchValue<T extends object, K extends keyof T>(target: T, key: K, value: T[K]) {
+function patchValue<T extends object, K extends keyof T>(target: T, key: K, value: any) {
   const original = target[key];
   target[key] = value;
   restorers.push(() => {

@@ -591,6 +591,12 @@ class ReadModelsRepository {
             id: true,
             firstMeaningfulMessageId: true,
             firstMeaningfulMessageTextRedacted: true,
+            normalizedTagSignalsJson: true,
+            openingBlockJson: true,
+            explicitRevisitSignal: true,
+            explicitNeedSignal: true,
+            explicitOutcomeSignal: true,
+            sourceThreadJsonRedacted: true,
             pipelineRun: {
               select: {
                 targetDate: true
@@ -617,9 +623,13 @@ class ReadModelsRepository {
               select: {
                 openingThemeCode: true,
                 primaryNeedCode: true,
+                primaryTopicCode: true,
+                journeyCode: true,
+                openingThemeReason: true,
                 closingOutcomeInferenceCode: true,
                 customerMoodCode: true,
                 processRiskLevelCode: true,
+                processRiskReasonText: true,
                 staffAssessmentsJson: true,
                 evidenceUsedJson: true,
                 fieldExplanationsJson: true,

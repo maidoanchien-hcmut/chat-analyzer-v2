@@ -18,6 +18,13 @@ type AnalysisServiceDeps = {
   batchSize?: number;
 };
 
+type PreparedRuntimeIdentity = {
+  promptHash: string;
+  modelName: string;
+  runtimeSnapshotJson: Record<string, unknown>;
+  canReuseExistingRun: boolean;
+};
+
 export class AnalysisService {
   private readonly repository: typeof analysisRepository;
   private readonly client: ConversationAnalysisClient;
@@ -43,9 +50,12 @@ export class AnalysisService {
 
     const threadDays = await this.repository.listThreadDaysForRun(pipelineRunId);
     const runtime = buildRuntimeSnapshot(pipelineRun);
+    const preparedRuntime = await this.prepareRuntimeIdentity(runtime);
     const envelopes = threadDays.map((threadDay) => buildUnitEnvelope(pipelineRun, threadDay));
-    const analysisRun = await this.resolveAnalysisRun(pipelineRun, runtime, envelopes);
-    const existingResults = await this.repository.listAnalysisResults(analysisRun.id);
+    const analysisRun = await this.resolveAnalysisRun(pipelineRun, runtime, preparedRuntime, envelopes);
+    const existingResults = preparedRuntime.canReuseExistingRun
+      ? await this.repository.listAnalysisResults(analysisRun.id)
+      : [];
     const terminalResultByThreadDayId = new Map(
       existingResults
         .filter((result) => result.resultStatus === "succeeded" || result.resultStatus === "unknown")
@@ -96,45 +106,35 @@ export class AnalysisService {
   private async resolveAnalysisRun(
     pipelineRun: AnalysisPipelineRunRecord,
     runtime: AnalysisRuntimeSnapshot,
+    preparedRuntime: PreparedRuntimeIdentity,
     envelopes: AnalysisUnitEnvelope[]
   ) {
     const identity: AnalysisRunIdentity = {
       pipelineRunId: pipelineRun.id,
       configVersionId: pipelineRun.runGroup.frozenConfigVersionId,
       taxonomyVersionId: pipelineRun.runGroup.frozenTaxonomyVersionId,
-      modelName: runtime.modelName,
-      promptHash: runtime.pagePromptHash,
+      modelName: preparedRuntime.modelName,
+      promptHash: preparedRuntime.promptHash,
       promptVersion: runtime.promptVersion,
       outputSchemaVersion: runtime.outputSchemaVersion,
       runtimeProfileId: runtime.profileId,
       runtimeProfileVersion: runtime.versionNo
     };
-    const existing = await this.repository.findLatestMatchingAnalysisRun(identity);
-    if (existing) {
-      return existing;
+    if (preparedRuntime.canReuseExistingRun) {
+      const existing = await this.repository.findLatestMatchingAnalysisRun(identity);
+      if (existing) {
+        return existing;
+      }
     }
 
     return this.repository.createAnalysisRun({
       pipelineRunId: pipelineRun.id,
       configVersionId: pipelineRun.runGroup.frozenConfigVersionId,
       taxonomyVersionId: pipelineRun.runGroup.frozenTaxonomyVersionId,
-      modelName: runtime.modelName,
-      promptHash: runtime.pagePromptHash,
+      modelName: preparedRuntime.modelName,
+      promptHash: preparedRuntime.promptHash,
       promptVersion: runtime.promptVersion,
-      runtimeSnapshotJson: cloneJson({
-        profile_id: runtime.profileId,
-        version_no: runtime.versionNo,
-        model_name: runtime.modelName,
-        prompt_version: runtime.promptVersion,
-        output_schema_version: runtime.outputSchemaVersion,
-        taxonomy_version_id: runtime.taxonomyVersionId,
-        taxonomy_version_code: runtime.taxonomyVersionCode,
-        page_prompt_hash: runtime.pagePromptHash,
-        page_prompt_version: runtime.promptVersion,
-        page_prompt_text: runtime.pagePromptText,
-        taxonomy_json: runtime.taxonomyJson,
-        profile_json: runtime.profileJson
-      }),
+      runtimeSnapshotJson: preparedRuntime.runtimeSnapshotJson,
       outputSchemaVersion: runtime.outputSchemaVersion,
       unitCountPlanned: envelopes.length,
       runtimeProfileId: runtime.profileId,
@@ -153,6 +153,7 @@ export class AnalysisService {
         bundles: batch.map((item) => item.bundle)
       });
       const effectivePromptHash = readEffectivePromptHash(response.runtimeMetadataJson, runtime.pagePromptHash);
+      const effectiveModelName = readEffectiveModelName(response.runtimeMetadataJson, runtime.modelName);
       if (Object.keys(response.runtimeMetadataJson).length > 0) {
         await this.repository.updateAnalysisRunRuntimeSnapshot(
           analysisRun.id,
@@ -161,7 +162,10 @@ export class AnalysisService {
             response.runtimeMetadataJson,
             runtime
           ),
-          effectivePromptHash
+          {
+            promptHash: effectivePromptHash,
+            modelName: effectiveModelName
+          }
         );
       }
       const resultMap = new Map(response.results.map((item) => [item.threadDayId, item]));
@@ -182,6 +186,40 @@ export class AnalysisService {
           message: error instanceof Error ? error.message : String(error)
         }))
       );
+    }
+  }
+
+  private async prepareRuntimeIdentity(runtime: AnalysisRuntimeSnapshot): Promise<PreparedRuntimeIdentity> {
+    try {
+      const response = await this.client.analyzeConversations({
+        runtime,
+        bundles: []
+      });
+      if (Object.keys(response.runtimeMetadataJson).length === 0) {
+        return {
+          promptHash: runtime.pagePromptHash,
+          modelName: runtime.modelName,
+          runtimeSnapshotJson: buildInitialRuntimeSnapshotJson(runtime),
+          canReuseExistingRun: false
+        };
+      }
+      return {
+        promptHash: readEffectivePromptHash(response.runtimeMetadataJson, runtime.pagePromptHash),
+        modelName: readEffectiveModelName(response.runtimeMetadataJson, runtime.modelName),
+        runtimeSnapshotJson: mergeRuntimeSnapshot(
+          buildInitialRuntimeSnapshotJson(runtime),
+          response.runtimeMetadataJson,
+          runtime
+        ),
+        canReuseExistingRun: true
+      };
+    } catch {
+      return {
+        promptHash: runtime.pagePromptHash,
+        modelName: runtime.modelName,
+        runtimeSnapshotJson: buildInitialRuntimeSnapshotJson(runtime),
+        canReuseExistingRun: false
+      };
     }
   }
 }
@@ -215,6 +253,23 @@ function buildRuntimeSnapshot(pipelineRun: AnalysisPipelineRunRecord): AnalysisR
       page_prompt_version: pipelineRun.runGroup.frozenPromptVersion
     }
   };
+}
+
+function buildInitialRuntimeSnapshotJson(runtime: AnalysisRuntimeSnapshot) {
+  return cloneJson({
+    profile_id: runtime.profileId,
+    version_no: runtime.versionNo,
+    requested_model_name: runtime.modelName,
+    prompt_version: runtime.promptVersion,
+    output_schema_version: runtime.outputSchemaVersion,
+    taxonomy_version_id: runtime.taxonomyVersionId,
+    taxonomy_version_code: runtime.taxonomyVersionCode,
+    page_prompt_hash: runtime.pagePromptHash,
+    page_prompt_version: runtime.promptVersion,
+    page_prompt_text: runtime.pagePromptText,
+    taxonomy_json: runtime.taxonomyJson,
+    profile_json: runtime.profileJson
+  });
 }
 
 function buildUnitEnvelope(
@@ -335,7 +390,7 @@ function mergeRuntimeSnapshot(
     backend_runtime: {
       profile_id: runtime.profileId,
       version_no: runtime.versionNo,
-      model_name: runtime.modelName,
+      requested_model_name: runtime.modelName,
       page_prompt_hash: runtime.pagePromptHash,
       page_prompt_version: runtime.promptVersion,
       taxonomy_version_id: runtime.taxonomyVersionId,
@@ -347,6 +402,11 @@ function mergeRuntimeSnapshot(
 
 function readEffectivePromptHash(runtimeMetadataJson: Record<string, unknown>, fallback: string) {
   const value = runtimeMetadataJson.effective_prompt_hash;
+  return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
+}
+
+function readEffectiveModelName(runtimeMetadataJson: Record<string, unknown>, fallback: string) {
+  const value = runtimeMetadataJson.model_name;
   return typeof value === "string" && value.trim().length > 0 ? value.trim() : fallback;
 }
 

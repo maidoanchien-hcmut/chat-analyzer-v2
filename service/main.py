@@ -9,7 +9,7 @@ import grpc
 
 import conversation_analysis_pb2 as conversation_analysis_pb2
 import conversation_analysis_pb2_grpc as conversation_analysis_pb2_grpc
-from analysis_executor import ConversationAnalysisExecutor, DeterministicAnalysisAdapter
+from analysis_executor import ConversationAnalysisExecutor, build_analysis_adapter
 from analysis_models import MessageModel, RuntimeSnapshotModel, UnitBundleModel
 from config import load_config
 
@@ -116,7 +116,7 @@ def serve() -> None:
   )
   executor = ConversationAnalysisExecutor(
     config=config,
-    adapter=DeterministicAnalysisAdapter(config),
+    adapter=build_analysis_adapter(config),
   )
   conversation_analysis_pb2_grpc.add_ConversationAnalysisServiceServicer_to_server(
     ConversationAnalysisServiceServicer(executor),
@@ -125,7 +125,13 @@ def serve() -> None:
   bind_address = f"{config.grpc_host}:{config.grpc_port}"
   server.add_insecure_port(bind_address)
   server.start()
-  logging.getLogger(__name__).info("Analysis service listening at %s", bind_address)
+  logging.getLogger(__name__).info(
+    "Analysis service listening at %s (runtime_mode=%s, provider=%s, model=%s)",
+    bind_address,
+    config.runtime_mode,
+    config.resolve_provider_name(),
+    config.resolve_model_name(),
+  )
   server.wait_for_termination()
 
 

@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
 import re
 import unicodedata
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Callable, Protocol
+from urllib import error as urllib_error
+from urllib import request as urllib_request
 
 from config import ServiceConfig
 from analysis_models import (
@@ -20,25 +23,27 @@ from analysis_models import (
   UnitBundleModel,
 )
 
-SYSTEM_PROMPT_VERSION = "service_system.v1"
-SYSTEM_PROMPT_CONVERSATION_ANALYSIS = """Bạn là AI nhà phân tích hội thoại sales/cskh của hệ thống chat-analyzer cho một công ty duy nhất.
+SYSTEM_PROMPT_VERSION = "service_system.v2"
+SYSTEM_PROMPT_CONVERSATION_ANALYSIS = """Bạn là AI phân tích hội thoại sales/cskh nội bộ của hệ thống chat-analyzer cho một công ty duy nhất.
 
 Vai trò cố định:
-- Chỉ làm nhiệm vụ phân tích và đánh giá tuân thủ vận hành trong hội thoại.
-- Không nhập vai nhân viên tư vấn hoặc chatbot trả lời khách hàng.
+- Chỉ phân tích chất lượng xử lý hội thoại và tín hiệu vận hành trong đúng slice được cung cấp.
+- Không nhập vai nhân viên tư vấn hay chatbot trả lời khách.
 - Không tạo thông tin ngoài evidence.
 - Luôn ưu tiên evidence deterministic từ extraction seam trước khi suy luận.
 
-Trọng tâm đánh giá:
-- Đánh giá nhân viên có làm đúng quy trình vận hành của page hay không.
-- Chỉ ra lỗi thao tác, thiếu bước, và dấu hiệu vi phạm quy định nếu có.
-- Nêu gợi ý cải thiện ngắn gọn, có thể hành động.
+Hợp đồng phân loại bắt buộc:
+- Phải phân loại tối thiểu các trục: `opening_theme_code`, `customer_mood_code`, `primary_need_code`, `primary_topic_code`, `journey_code`, `closing_outcome_inference_code`, `process_risk_level_code`, `staff_assessments_json`.
+- `journey_code` và `primary_need_code` là hai trục khác nhau; `revisit` không bao giờ là `primary_need_code`.
+- Phải phân biệt field nào dựa trên explicit signal và field nào là inference.
+- Khi evidence không đủ, trả `unknown` thay vì đoán.
+- Ưu tiên explicit source evidence, opening selections, tag signals và deterministic metrics trước transcript-level inference.
 
-Nguyên tắc bắt buộc:
-- Output phải ngắn gọn, rõ nghĩa, dùng được cho vận hành.
-- Khi thiếu dữ liệu hoặc quy trình page chưa đủ rõ, trả về "unknown" thay vì suy đoán.
-- Tôn trọng boundary ngày và snapshot; không trộn ngữ cảnh ngoài unit được cung cấp.
-- `journey_code` và `primary_need_code` là hai trục khác nhau; `revisit` không bao giờ là primary need."""
+Yêu cầu output:
+- Chỉ trả về đúng một JSON object hợp lệ theo output contract.
+- `field_explanations_json` phải nêu rõ cách suy ra từng field quan trọng và whether explicit/inference.
+- `staff_assessments_json` chỉ chứa nhân sự thực sự có trong `staff_participants_json`.
+- Nội dung phải ngắn gọn, dùng được cho vận hành."""
 
 
 class AnalysisAdapter(Protocol):
@@ -50,6 +55,9 @@ class AnalysisAdapter(Protocol):
     effective_prompt_text: str,
   ) -> AdapterResultModel:
     ...
+
+
+LiveTransport = Callable[[str, dict[str, str], dict[str, Any], float], dict[str, Any]]
 
 
 @dataclass(slots=True)
@@ -127,12 +135,70 @@ class DeterministicAnalysisAdapter:
       status=status,
       output=output,
       usage_json={
-        "provider": self.config.runtime_mode,
+        "provider": self.config.resolve_provider_name(),
+        "runtime_mode": self.config.runtime_mode,
         "model_name": runtime.model_name,
         "token_estimate": _estimate_token_count(analysis_messages),
       },
       cost_micros=0,
       failure_info_json=failure_info,
+    )
+
+
+@dataclass(slots=True)
+class OpenAICompatibleAnalysisAdapter:
+  config: ServiceConfig
+  transport: LiveTransport | None = None
+
+  async def analyze_bundle(
+    self,
+    runtime: RuntimeSnapshotModel,
+    bundle: UnitBundleModel,
+    prompt_hash: str,
+    effective_prompt_text: str,
+  ) -> AdapterResultModel:
+    payload = {
+      "model": runtime.model_name,
+      "messages": [
+        {"role": "system", "content": effective_prompt_text},
+        {"role": "user", "content": build_bundle_prompt_text(bundle)},
+      ],
+      "temperature": _read_float(runtime.generation_config.get("temperature"), self.config.generation_temperature),
+      "top_p": _read_float(runtime.generation_config.get("top_p"), self.config.generation_top_p),
+      "response_format": {"type": "json_object"},
+      "max_tokens": _read_int(
+        runtime.generation_config.get("max_output_tokens"),
+        self.config.generation_max_output_tokens,
+      ),
+    }
+    url = resolve_chat_completions_url(self.config.provider_base_url or "")
+    headers = {
+      "Authorization": f"Bearer {self.config.provider_api_key or ''}",
+      "Content-Type": "application/json",
+    }
+    transport = self.transport or default_live_transport
+    raw_response = await asyncio.to_thread(
+      transport,
+      url,
+      headers,
+      payload,
+      self.config.request_timeout_seconds,
+    )
+    assistant_text = extract_assistant_text(raw_response)
+    output = AnalysisOutputModel.model_validate(parse_json_object_from_text(assistant_text))
+    usage = _as_object(raw_response.get("usage"))
+
+    return AdapterResultModel(
+      status="succeeded",
+      output=output,
+      usage_json={
+        "provider": self.config.resolve_provider_name(),
+        "runtime_mode": self.config.runtime_mode,
+        "model_name": runtime.model_name,
+        **usage,
+      },
+      cost_micros=_read_int(raw_response.get("cost_micros") or usage.get("cost_micros"), 0),
+      failure_info_json=None,
     )
 
 
@@ -146,27 +212,48 @@ class ConversationAnalysisExecutor:
     runtime: RuntimeSnapshotModel,
     bundles: list[UnitBundleModel],
   ) -> tuple[list[ServiceResultModel], RuntimeMetadataModel]:
-    effective_prompt_text = build_effective_prompt_text(runtime)
-    prompt_hash = build_prompt_hash(runtime, effective_prompt_text)
+    resolved_runtime = resolve_runtime_snapshot(runtime, self.config)
+    effective_prompt_text = build_effective_prompt_text(resolved_runtime)
+    prompt_hash = build_prompt_hash(resolved_runtime, effective_prompt_text)
     metadata = RuntimeMetadataModel(
       runtime_mode=self.config.runtime_mode,
+      provider=self.config.resolve_provider_name(),
+      model_name=resolved_runtime.model_name,
       system_prompt_version=SYSTEM_PROMPT_VERSION,
       effective_prompt_hash=prompt_hash,
       effective_prompt_text=effective_prompt_text,
-      output_schema_version=runtime.output_schema_version,
-      profile_id=runtime.profile_id,
-      version_no=runtime.version_no,
-      taxonomy_version=runtime.taxonomy_version,
+      output_schema_version=resolved_runtime.output_schema_version,
+      profile_id=resolved_runtime.profile_id,
+      version_no=resolved_runtime.version_no,
+      taxonomy_version=resolved_runtime.taxonomy_version,
+      generation_config=resolved_runtime.generation_config,
     )
     results = []
     for bundle in bundles:
       try:
-        adapter_result = await self.adapter.analyze_bundle(runtime, bundle, prompt_hash, effective_prompt_text)
+        adapter_result = await self.adapter.analyze_bundle(resolved_runtime, bundle, prompt_hash, effective_prompt_text)
         normalized = normalize_adapter_result(bundle, prompt_hash, adapter_result)
       except Exception as error:
         normalized = failure_result_from_exception(bundle.thread_day_id, prompt_hash, error)
       results.append(normalized)
     return results, metadata
+
+
+def build_analysis_adapter(config: ServiceConfig) -> AnalysisAdapter:
+  if config.runtime_mode == "deterministic_dev":
+    return DeterministicAnalysisAdapter(config)
+  return OpenAICompatibleAnalysisAdapter(config)
+
+
+def resolve_runtime_snapshot(runtime: RuntimeSnapshotModel, config: ServiceConfig) -> RuntimeSnapshotModel:
+  generation_config = config.default_generation_config()
+  generation_config.update(_as_object(runtime.generation_config))
+  return runtime.model_copy(
+    update={
+      "model_name": config.resolve_model_name(),
+      "generation_config": generation_config,
+    }
+  )
 
 
 def build_effective_prompt_text(runtime: RuntimeSnapshotModel) -> str:
@@ -179,6 +266,15 @@ def build_effective_prompt_text(runtime: RuntimeSnapshotModel) -> str:
     f"[OUTPUT_SCHEMA_VERSION]\n{runtime.output_schema_version}",
     f"[TAXONOMY_JSON]\n{taxonomy_text}",
     f"[PAGE_OPERATIONAL_RULES]\n{page_prompt}",
+  ])
+
+
+def build_bundle_prompt_text(bundle: UnitBundleModel) -> str:
+  return "\n\n".join([
+    "Phân tích đúng 1 thread_day dưới đây. Trả về duy nhất 1 JSON object với đúng các field của output contract.",
+    "Nếu không đủ evidence, điền unknown. Không thêm markdown, không thêm giải thích ngoài JSON.",
+    "[UNIT_BUNDLE_JSON]",
+    json.dumps(bundle.model_dump(mode="json"), ensure_ascii=False, sort_keys=True),
   ])
 
 
@@ -195,6 +291,80 @@ def build_prompt_hash(runtime: RuntimeSnapshotModel, effective_prompt_text: str)
     sort_keys=True,
   )
   return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def parse_json_object_from_text(value: str) -> dict[str, Any]:
+  raw = value.strip()
+  if raw.startswith("```"):
+    raw = re.sub(r"^```(?:json)?\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+  try:
+    parsed = json.loads(raw)
+  except json.JSONDecodeError:
+    start = raw.find("{")
+    end = raw.rfind("}")
+    if start < 0 or end <= start:
+      raise InvalidServiceResultError("live provider did not return a JSON object")
+    parsed = json.loads(raw[start:end + 1])
+  if not isinstance(parsed, dict):
+    raise InvalidServiceResultError("live provider output must be a JSON object")
+  return parsed
+
+
+def resolve_chat_completions_url(base_url: str) -> str:
+  normalized = base_url.strip().rstrip("/")
+  if not normalized:
+    raise RuntimeError("provider_base_url is required for live runtime")
+  return normalized if normalized.endswith("/chat/completions") else f"{normalized}/chat/completions"
+
+
+def extract_assistant_text(response: dict[str, Any]) -> str:
+  choices = response.get("choices")
+  if not isinstance(choices, list) or not choices:
+    raise InvalidServiceResultError("live provider response missing choices")
+  message = _as_object(_as_object(choices[0]).get("message"))
+  content = message.get("content")
+  if isinstance(content, str) and content.strip():
+    return content.strip()
+  if isinstance(content, list):
+    text_parts = []
+    for item in content:
+      if isinstance(item, str):
+        text_parts.append(item)
+        continue
+      if isinstance(item, dict):
+        text_value = item.get("text")
+        if isinstance(text_value, str):
+          text_parts.append(text_value)
+    joined = "\n".join(part.strip() for part in text_parts if part and part.strip())
+    if joined:
+      return joined
+  raise InvalidServiceResultError("live provider response missing message content")
+
+
+def default_live_transport(
+  url: str,
+  headers: dict[str, str],
+  payload: dict[str, Any],
+  timeout_seconds: float,
+) -> dict[str, Any]:
+  body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+  request = urllib_request.Request(url, data=body, headers=headers, method="POST")
+  try:
+    with urllib_request.urlopen(request, timeout=timeout_seconds) as response:
+      raw = response.read().decode("utf-8")
+  except urllib_error.HTTPError as exc:
+    details = exc.read().decode("utf-8", errors="replace")
+    raise RuntimeError(f"live provider request failed: HTTP {exc.code}: {details}") from exc
+  except urllib_error.URLError as exc:
+    raise RuntimeError(f"live provider request failed: {exc.reason}") from exc
+  try:
+    parsed = json.loads(raw)
+  except json.JSONDecodeError as exc:
+    raise RuntimeError("live provider returned invalid JSON") from exc
+  if not isinstance(parsed, dict):
+    raise RuntimeError("live provider response must be a JSON object")
+  return parsed
 
 
 def normalize_adapter_result(
@@ -549,13 +719,13 @@ def _build_field_explanations(
   customer_messages: list[Any],
 ) -> dict[str, Any]:
   return {
-    "opening_theme_code": "Lấy từ opening block nếu có explicit signal, fallback về first meaningful message.",
-    "primary_need_code": f"Ưu tiên explicit need signal/tag signal, fallback keyword; current value = {primary_need_code}.",
-    "journey_code": "Ưu tiên explicit revisit/journey signal, fallback keyword transcript.",
+    "opening_theme_code": "Ưu tiên explicit opening signal; fallback về first meaningful message. explicit_or_inference=explicit_then_fallback",
+    "primary_need_code": f"Ưu tiên explicit need signal/tag signal, fallback keyword; current value = {primary_need_code}. explicit_or_inference=mixed",
+    "journey_code": "Ưu tiên explicit revisit/journey signal, fallback keyword transcript. explicit_or_inference=mixed",
     "process_risk_level_code": (
-      "Đẩy lên high khi có khách nhắn mà chưa thấy nhân viên phản hồi trong slice."
+      "Đẩy lên high khi có khách nhắn mà chưa thấy nhân viên phản hồi trong slice. explicit_or_inference=inference"
       if process_risk_level_code == "high"
-      else "Suy luận nhẹ dựa trên transcript và sự hiện diện của phản hồi nhân viên."
+      else "Suy luận nhẹ dựa trên transcript và sự hiện diện của phản hồi nhân viên. explicit_or_inference=inference"
     ),
     "staff_assessments_json": (
       "Chỉ sinh assessment cho staff thực sự xuất hiện trong thread_day."
@@ -582,3 +752,25 @@ def _build_supporting_message_ids(messages: list[Any]) -> list[str]:
 def _estimate_token_count(messages: list[Any]) -> int:
   text_length = sum(len(message.redacted_text or "") for message in messages)
   return max(1, round(text_length / 4)) if text_length > 0 else 0
+
+
+def _read_float(value: Any, fallback: float) -> float:
+  if isinstance(value, (int, float)):
+    return float(value)
+  if isinstance(value, str):
+    try:
+      return float(value)
+    except ValueError:
+      return fallback
+  return fallback
+
+
+def _read_int(value: Any, fallback: int) -> int:
+  if isinstance(value, (int, float)):
+    return int(value)
+  if isinstance(value, str):
+    try:
+      return int(value)
+    except ValueError:
+      return fallback
+  return fallback

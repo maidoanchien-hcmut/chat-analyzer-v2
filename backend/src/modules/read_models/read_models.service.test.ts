@@ -13,35 +13,64 @@ afterEach(() => {
 
 describe("read models service", () => {
   it("builds overview metrics from fact_thread_day rows resolved by published snapshots", async () => {
-    patchValue(readModelsRepository, "listSnapshotsForPageRange", async () => [createSnapshot()]);
+    patchValue(readModelsRepository, "listSnapshotsForPageRange", async ({ startDate }) => {
+      if (startDate === "2026-04-03") {
+        return [
+          createSnapshot({
+            pipelineRunId: "run-prev",
+            targetDate: "2026-04-03"
+          })
+        ];
+      }
+      return [createSnapshot()];
+    });
     patchValue(readModelsRepository, "listConnectedPagesForCatalog", async () => [createCatalogPage()]);
-    patchValue(readModelsRepository, "listFactThreadDaysByRunIds", async () => [
-      createThreadFact({
-        threadId: "thread-1",
-        isNewInbox: true,
-        officialRevisitLabel: "not_revisit",
-        openingThemeCode: "hoi_gia",
-        primaryNeedCode: "hoi_gia",
-        officialClosingOutcomeCode: "booked",
-        processRiskLevelCode: "low",
-        aiCostMicros: 1500n
-      }),
-      createThreadFact({
-        threadId: "thread-2",
-        isNewInbox: false,
-        officialRevisitLabel: "revisit",
-        openingThemeCode: "dat_lich",
-        primaryNeedCode: "dat_lich",
-        officialClosingOutcomeCode: "follow_up",
-        processRiskLevelCode: "high",
-        aiCostMicros: 2500n
-      })
-    ]);
+    patchValue(readModelsRepository, "listFactThreadDaysByRunIds", async (runIds) => {
+      if (runIds.includes("run-prev")) {
+        return [
+          createThreadFact({
+            pipelineRunId: "run-prev",
+            threadDayId: "thread-day-prev-1",
+            threadId: "thread-prev-1",
+            isNewInbox: true,
+            officialRevisitLabel: "not_revisit",
+            openingThemeCode: "hoi_gia",
+            primaryNeedCode: "hoi_gia",
+            officialClosingOutcomeCode: "booked",
+            processRiskLevelCode: "low",
+            aiCostMicros: 1000n
+          }, "2026-04-03")
+        ];
+      }
+      return [
+        createThreadFact({
+          threadId: "thread-1",
+          isNewInbox: true,
+          officialRevisitLabel: "not_revisit",
+          openingThemeCode: "hoi_gia",
+          primaryNeedCode: "hoi_gia",
+          officialClosingOutcomeCode: "booked",
+          processRiskLevelCode: "low",
+          aiCostMicros: 1500n
+        }),
+        createThreadFact({
+          threadId: "thread-2",
+          isNewInbox: false,
+          officialRevisitLabel: "revisit",
+          openingThemeCode: "dat_lich",
+          primaryNeedCode: "dat_lich",
+          officialClosingOutcomeCode: "follow_up",
+          processRiskLevelCode: "high",
+          aiCostMicros: 2500n
+        })
+      ];
+    });
 
     const overview = await readModelsService.getOverview(baseFilters());
 
     expect(overview.pageLabel).toBe("Page Da Lieu Quan 1");
     expect(overview.metrics[0]?.value).toBe("2");
+    expect(overview.metrics[0]?.delta).toBe("+1");
     expect(overview.metrics[1]?.value).toBe("1");
     expect(overview.metrics[2]?.value).toBe("1");
     expect(overview.metrics[4]?.value).toBe("1");
@@ -83,6 +112,49 @@ describe("read models service", () => {
     expect(staffPerformance.rankingRows[0]?.staff).toBe("Mai");
     expect(staffPerformance.issueMatrix[0]?.need).toBe("Hoi gia");
     expect(staffPerformance.coachingInbox[0]?.issue).toContain("Cham");
+  });
+
+  it("builds exploration rows from runtime builder selections without placeholder summary text", async () => {
+    patchValue(readModelsRepository, "listSnapshotsForPageRange", async () => [createSnapshot()]);
+    patchValue(readModelsRepository, "listConnectedPagesForCatalog", async () => [createCatalogPage()]);
+    patchValue(readModelsRepository, "listFactThreadDaysByRunIds", async () => [
+      createThreadFact({
+        threadDayId: "thread-day-1",
+        threadId: "thread-1",
+        openingThemeCode: "hoi_gia",
+        primaryNeedCode: "hoi_gia",
+        officialClosingOutcomeCode: "booked",
+        isNewInbox: true
+      }),
+      createThreadFact({
+        threadDayId: "thread-day-2",
+        threadId: "thread-2",
+        openingThemeCode: "hoi_gia",
+        primaryNeedCode: "hoi_gia",
+        officialClosingOutcomeCode: "follow_up",
+        isNewInbox: false
+      }),
+      createThreadFact({
+        threadDayId: "thread-day-3",
+        threadId: "thread-3",
+        openingThemeCode: "dat_lich",
+        primaryNeedCode: "dat_lich",
+        officialClosingOutcomeCode: "booked",
+        isNewInbox: true
+      })
+    ]);
+
+    const exploration = await readModelsService.getExploration(baseFilters(), {
+      metric: "thread_count",
+      breakdownBy: "opening_theme",
+      compareBy: "inbox_bucket"
+    });
+
+    expect(exploration.builder.selectedMetric).toBe("thread_count");
+    expect(exploration.builder.selectedBreakdownBy).toBe("opening_theme");
+    expect(exploration.rows[0]?.dimension).toContain("Inbox");
+    expect(exploration.rows[0]?.drillRoute).toContain("?view=thread-history&thread=");
+    expect(exploration.chartSummary).not.toContain("placeholder");
   });
 
   it("applies the staff filter to thread-level business views via fact_staff_thread_day membership", async () => {
@@ -232,6 +304,39 @@ describe("read models service", () => {
           id: "thread-day-1",
           firstMeaningfulMessageId: "msg-1",
           firstMeaningfulMessageTextRedacted: "Khach hoi gia va dat lich",
+          normalizedTagSignalsJson: {
+            journey: [
+              {
+                source_tag_id: "11",
+                source_tag_text: "KH mới",
+                canonical_code: "new_to_clinic",
+                mapping_source: "operator"
+              }
+            ]
+          },
+          openingBlockJson: {
+            explicit_signals: [
+              {
+                signal_role: "journey",
+                signal_code: "revisit",
+                raw_text: "Khách hàng tái khám"
+              }
+            ],
+            messages: [
+              {
+                message_id: "msg-1",
+                sender_role: "customer",
+                message_type: "text",
+                redacted_text: "Cho em hoi gia va lich trong tuan nay"
+              }
+            ]
+          },
+          explicitRevisitSignal: "revisit",
+          explicitNeedSignal: "dat_lich",
+          explicitOutcomeSignal: "booked",
+          sourceThreadJsonRedacted: {
+            tags: ["KH mới"]
+          },
           pipelineRun: {
             targetDate: new Date("2026-04-04T00:00:00.000Z")
           },
@@ -254,10 +359,14 @@ describe("read models service", () => {
           analysisResults: [
             {
               openingThemeCode: "hoi_gia",
+              openingThemeReason: "Khách mở đầu bằng câu hỏi giá.",
               primaryNeedCode: "dat_lich",
+              primaryTopicCode: "tri_mun",
+              journeyCode: "revisit",
               closingOutcomeInferenceCode: "booked",
               customerMoodCode: "positive",
               processRiskLevelCode: "high",
+              processRiskReasonText: "Staff phản hồi chậm so với nhu cầu rõ.",
               staffAssessmentsJson: [
                 {
                   staff_name: "mai",
@@ -288,6 +397,39 @@ describe("read models service", () => {
           id: "thread-day-2",
           firstMeaningfulMessageId: "msg-1",
           firstMeaningfulMessageTextRedacted: "Khach hoi gia va dat lich",
+          normalizedTagSignalsJson: {
+            journey: [
+              {
+                source_tag_id: "11",
+                source_tag_text: "KH mới",
+                canonical_code: "new_to_clinic",
+                mapping_source: "operator"
+              }
+            ]
+          },
+          openingBlockJson: {
+            explicit_signals: [
+              {
+                signal_role: "journey",
+                signal_code: "revisit",
+                raw_text: "Khách hàng tái khám"
+              }
+            ],
+            messages: [
+              {
+                message_id: "msg-1",
+                sender_role: "customer",
+                message_type: "text",
+                redacted_text: "Cho em hoi gia va lich trong tuan nay"
+              }
+            ]
+          },
+          explicitRevisitSignal: "revisit",
+          explicitNeedSignal: "dat_lich",
+          explicitOutcomeSignal: "booked",
+          sourceThreadJsonRedacted: {
+            tags: ["KH mới"]
+          },
           pipelineRun: {
             targetDate: new Date("2026-04-03T00:00:00.000Z")
           },
@@ -310,10 +452,14 @@ describe("read models service", () => {
           analysisResults: [
             {
               openingThemeCode: "hoi_gia",
+              openingThemeReason: "Khách mở đầu bằng câu hỏi giá.",
               primaryNeedCode: "dat_lich",
+              primaryTopicCode: "tri_mun",
+              journeyCode: "revisit",
               closingOutcomeInferenceCode: "booked",
               customerMoodCode: "positive",
               processRiskLevelCode: "high",
+              processRiskReasonText: "Staff phản hồi chậm so với nhu cầu rõ.",
               staffAssessmentsJson: [
                 {
                   staff_name: "mai",
@@ -350,6 +496,10 @@ describe("read models service", () => {
     expect(history.activeThreadDayId).toBe("thread-day-2");
     expect(history.audit.promptVersion).toBe("Prompt A12");
     expect(history.audit.supportingMessageIds).toEqual(["msg-1", "msg-2"]);
+    expect(history.workspace.openingBlockMessages[0]?.messageId).toBe("msg-1");
+    expect(history.workspace.explicitSignals[0]?.signalCode).toBe("revisit");
+    expect(history.workspace.normalizedTagSignals[0]?.sourceTagId).toBe("11");
+    expect(history.audit.structuredOutput[0]?.field).toBe("opening_theme");
     expect(history.crmLink.customer).toContain("KH-7712");
     expect(history.analysisHistory[0]?.quality).toBe("Tot");
     expect(history.transcript.find((message) => message.id === "msg-1")?.isFirstMeaningful).toBe(true);
@@ -471,7 +621,7 @@ describe("read models service", () => {
   });
 });
 
-function patchValue<T extends object, K extends keyof T>(target: T, key: K, value: T[K]) {
+function patchValue<T extends object, K extends keyof T>(target: T, key: K, value: any) {
   const original = target[key];
   target[key] = value;
   restorers.push(() => {
@@ -483,7 +633,7 @@ function baseFilters() {
   return {
     pageId: "page-1",
     startDate: "2026-04-04",
-    endDate: today(),
+    endDate: "2026-04-04",
     publishSnapshot: "official" as const,
     inboxBucket: "all" as const,
     revisit: "all" as const,

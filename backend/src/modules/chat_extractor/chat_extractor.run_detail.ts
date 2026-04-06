@@ -1,8 +1,10 @@
 import type { PipelineRunRecord } from "./chat_extractor.repository.ts";
 
 type RunArtifactCounts = {
+  threadCount: number;
   threadDayCount: number;
   messageCount: number;
+  coveredThreadIds: string[];
 };
 
 export function buildRunDiagnostics(run: PipelineRunRecord, counts: RunArtifactCounts) {
@@ -12,8 +14,10 @@ export function buildRunDiagnostics(run: PipelineRunRecord, counts: RunArtifactC
 
   return {
     artifact_counts: {
+      thread_count: counts.threadCount,
       thread_day_count: counts.threadDayCount,
-      message_count: counts.messageCount
+      message_count: counts.messageCount,
+      covered_thread_ids: counts.coveredThreadIds
     },
     analysis_metrics: analysis
       ? {

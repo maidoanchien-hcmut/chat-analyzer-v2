@@ -220,6 +220,7 @@ function buildThreadHistory(
     activeThreadId,
     activeThreadDayId,
     activeTab: tab,
+    workspace: activeThread?.workspace ?? createThreadWorkspace(),
     transcript: activeThread?.transcript ?? [],
     analysisHistory: (activeThread?.analysisHistory ?? []).map((row) => ({
       ...row,
@@ -232,7 +233,8 @@ function buildThreadHistory(
       taxonomyVersion: "tax-2026-04",
       evidence: [],
       explanations: [],
-      supportingMessageIds: []
+      supportingMessageIds: [],
+      structuredOutput: []
     },
     crmLink: activeThread?.crmLink ?? {
       customer: "Chưa có thread trong scope filter",
@@ -400,11 +402,30 @@ type ThreadFixture = {
   risk: string;
   staff: string;
   badges: string[];
+  workspace: ThreadHistoryViewModel["workspace"];
   transcript: ThreadHistoryViewModel["transcript"];
   analysisHistory: ThreadHistoryViewModel["analysisHistory"];
   audit: ThreadHistoryViewModel["audit"];
   crmLink: ThreadHistoryViewModel["crmLink"];
 };
+
+function createThreadWorkspace(
+  overrides: Partial<ThreadHistoryViewModel["workspace"]> = {}
+): ThreadHistoryViewModel["workspace"] {
+  return {
+    openingBlockMessages: [],
+    explicitSignals: [],
+    normalizedTagSignals: [],
+    sourceSignals: {
+      explicitRevisit: null,
+      explicitNeed: null,
+      explicitOutcome: null
+    },
+    structuredOutput: [],
+    sourceThreadJsonRedacted: {},
+    ...overrides
+  };
+}
 
 const threadFixtures: ThreadFixture[] = [
   {
@@ -420,6 +441,14 @@ const threadFixtures: ThreadFixture[] = [
     risk: "low",
     staff: "mai",
     badges: ["Inbox mới", "Risk thấp"],
+    workspace: createThreadWorkspace({
+      openingBlockMessages: [
+        { messageId: "m-001", senderRole: "customer", messageType: "text", text: "Em muốn đặt lịch treatment mụn tuần này" }
+      ],
+      structuredOutput: [
+        { field: "closing_outcome", code: "booked", label: "Đã chốt hẹn", reason: "Staff đề xuất slot cụ thể." }
+      ]
+    }),
     transcript: [
       { id: "m-001", at: "10:03", author: "Lan Anh", role: "customer", text: "Em muốn đặt lịch treatment mụn tuần này", emphasized: true, isFirstMeaningful: true, isSupportingEvidence: true },
       { id: "m-002", at: "10:08", author: "Mai", role: "staff", text: "Chiều thứ 5 còn 16:00, em xác nhận giúp chị nhé.", isStaffFirstResponse: true, isSupportingEvidence: true }
@@ -439,7 +468,10 @@ const threadFixtures: ThreadFixture[] = [
       explanations: [
         { field: "outcome", explanation: "Có xác nhận slot cụ thể trong cùng nhịp trao đổi." }
       ],
-      supportingMessageIds: ["m-001", "m-002"]
+      supportingMessageIds: ["m-001", "m-002"],
+      structuredOutput: [
+        { field: "closing_outcome", code: "booked", label: "Đã chốt hẹn", reason: "Staff đề xuất slot cụ thể." }
+      ]
     },
     crmLink: {
       customer: "CRM #KH-7712 / Lan Anh",
@@ -461,6 +493,14 @@ const threadFixtures: ThreadFixture[] = [
     risk: "high",
     staff: "mai",
     badges: ["Inbox mới", "Risk cao"],
+    workspace: createThreadWorkspace({
+      openingBlockMessages: [
+        { messageId: "m-010", senderRole: "customer", messageType: "text", text: "Cho em hỏi giá liệu trình 6 buổi" }
+      ],
+      structuredOutput: [
+        { field: "process_risk_level", code: "high", label: "Cao", reason: "Chưa có CTA chốt bước kế tiếp." }
+      ]
+    }),
     transcript: [
       { id: "m-010", at: "09:12", author: "Phương Thảo", role: "customer", text: "Cho em hỏi giá liệu trình 6 buổi", emphasized: true, isFirstMeaningful: true, isSupportingEvidence: true },
       { id: "m-011", at: "09:26", author: "Mai", role: "staff", text: "Combo hiện tại là 5.900.000 đ, chị gửi em chi tiết liệu trình nhé.", isStaffFirstResponse: true, isSupportingEvidence: true }
@@ -480,7 +520,10 @@ const threadFixtures: ThreadFixture[] = [
       explanations: [
         { field: "risk_level", explanation: "Khách có ý định rõ nhưng chưa được chốt bước kế tiếp." }
       ],
-      supportingMessageIds: ["m-010", "m-011"]
+      supportingMessageIds: ["m-010", "m-011"],
+      structuredOutput: [
+        { field: "process_risk_level", code: "high", label: "Cao", reason: "Chưa có CTA chốt bước kế tiếp." }
+      ]
     },
     crmLink: {
       customer: "CRM #KH-9910 / Phương Thảo",
@@ -502,6 +545,23 @@ const threadFixtures: ThreadFixture[] = [
     risk: "medium",
     staff: "linh",
     badges: ["Tái khám", "Risk trung bình"],
+    workspace: createThreadWorkspace({
+      openingBlockMessages: [
+        { messageId: "m-100", senderRole: "system", messageType: "postback", text: "Khách chọn nút Khách hàng tái khám" },
+        { messageId: "m-101", senderRole: "customer", messageType: "text", text: "Em muốn dời lịch tái khám sang chiều mai" }
+      ],
+      explicitSignals: [
+        { signalRole: "journey", signalCode: "revisit", rawText: "Khách hàng tái khám" }
+      ],
+      sourceSignals: {
+        explicitRevisit: "revisit",
+        explicitNeed: "dat_lich",
+        explicitOutcome: null
+      },
+      structuredOutput: [
+        { field: "journey", code: "revisit", label: "Tái khám", reason: "Opening selection xác nhận journey." }
+      ]
+    }),
     transcript: [
       { id: "m-100", at: "08:02", author: "Bot", role: "system", text: "Khách chọn nút Khách hàng tái khám", emphasized: true, isSupportingEvidence: true },
       { id: "m-101", at: "08:03", author: "Bảo Trâm", role: "customer", text: "Em muốn dời lịch tái khám sang chiều mai", emphasized: true, isFirstMeaningful: true, isSupportingEvidence: true },
@@ -526,7 +586,10 @@ const threadFixtures: ThreadFixture[] = [
         { field: "journey", explanation: "Explicit opening selection xác nhận đây là tái khám." },
         { field: "response_quality", explanation: "Staff có xử lý nhưng chậm xác nhận slot cụ thể." }
       ],
-      supportingMessageIds: ["m-100", "m-101", "m-102"]
+      supportingMessageIds: ["m-100", "m-101", "m-102"],
+      structuredOutput: [
+        { field: "journey", code: "revisit", label: "Tái khám", reason: "Opening selection xác nhận journey." }
+      ]
     },
     crmLink: {
       customer: "CRM #KH-8821 / Bảo Trâm",
@@ -551,6 +614,14 @@ const threadFixtures: ThreadFixture[] = [
     risk: "high",
     staff: "khanh",
     badges: ["Inbox mới", "Risk cao"],
+    workspace: createThreadWorkspace({
+      openingBlockMessages: [
+        { messageId: "m-201", senderRole: "customer", messageType: "text", text: "Bác sĩ còn nhận tư vấn răng sứ cuối tuần không ạ" }
+      ],
+      structuredOutput: [
+        { field: "closing_outcome", code: "lost", label: "Mất cơ hội", reason: "Không có next step thay thế." }
+      ]
+    }),
     transcript: [
       { id: "m-201", at: "16:12", author: "Minh Châu", role: "customer", text: "Bác sĩ còn nhận tư vấn răng sứ cuối tuần không ạ", emphasized: true, isFirstMeaningful: true, isSupportingEvidence: true },
       { id: "m-202", at: "16:41", author: "Khánh", role: "staff", text: "Dạ cuối tuần kín lịch rồi chị, em xin phép báo lại khi có slot trống.", isStaffFirstResponse: true, isSupportingEvidence: true }
@@ -570,7 +641,10 @@ const threadFixtures: ThreadFixture[] = [
       explanations: [
         { field: "outcome", explanation: "Không có next step thay thế nên opportunity bị mất." }
       ],
-      supportingMessageIds: ["m-201", "m-202"]
+      supportingMessageIds: ["m-201", "m-202"],
+      structuredOutput: [
+        { field: "closing_outcome", code: "lost", label: "Mất cơ hội", reason: "Không có next step thay thế." }
+      ]
     },
     crmLink: {
       customer: "CRM #KH-7718 / Minh Châu",

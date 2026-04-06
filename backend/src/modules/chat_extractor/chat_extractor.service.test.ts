@@ -350,6 +350,92 @@ describe("chat_extractor service", () => {
     expect(capturedUpsertInput.analysisEnabled).toBe(true);
   });
 
+  it("lists connected pages with backend-owned unchecked token and connection status", async () => {
+    const repositoryModule = await loadChatExtractorRepository();
+
+    patchRepository(repositoryModule.chatExtractorRepository, "listConnectedPages", async () => [
+      createConnectedPageDetail(),
+      createConnectedPageDetail({
+        id: "page-missing-token",
+        pancakeUserAccessToken: "   "
+      })
+    ]);
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService();
+    const result = await service.listConnectedPages();
+
+    expect(result.pages).toHaveLength(2);
+    expect(result.pages[0]).toMatchObject({
+      id: CONNECTED_PAGE_ID,
+      tokenStatus: "not_checked",
+      connectionStatus: "not_checked",
+      tokenPreviewMasked: "user...oken",
+      lastValidatedAt: null
+    });
+    expect(result.pages[1]).toMatchObject({
+      id: "page-missing-token",
+      tokenStatus: "missing",
+      connectionStatus: "not_checked",
+      tokenPreviewMasked: null,
+      lastValidatedAt: null
+    });
+  });
+
+  it("derives connected-page status from live token validation without frontend inference", async () => {
+    const repositoryModule = await loadChatExtractorRepository();
+    const pageDetail = createConnectedPageDetail();
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => pageDetail);
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+
+    const connectedService = new ChatExtractorService({
+      listPagesFromToken: async () => [
+        {
+          pageId: pageDetail.page.pancakePageId,
+          pageName: pageDetail.page.pageName
+        }
+      ]
+    });
+    const connectedResult = await connectedService.getConnectedPage(CONNECTED_PAGE_ID);
+    expect(connectedResult.page).toMatchObject({
+      tokenStatus: "valid",
+      connectionStatus: "connected",
+      tokenPreviewMasked: "user...oken"
+    });
+    expect(typeof connectedResult.page.lastValidatedAt).toBe("string");
+
+    const unavailableService = new ChatExtractorService({
+      listPagesFromToken: async () => [
+        {
+          pageId: "another-page",
+          pageName: "Another"
+        }
+      ]
+    });
+    await expect(unavailableService.getConnectedPage(CONNECTED_PAGE_ID)).resolves.toMatchObject({
+      page: {
+        tokenStatus: "valid",
+        connectionStatus: "page_unavailable",
+        tokenPreviewMasked: "user...oken"
+      }
+    });
+
+    const invalidTokenService = new ChatExtractorService({
+      listPagesFromToken: async () => {
+        throw new Error("token rejected");
+      }
+    });
+    await expect(invalidTokenService.getConnectedPage(CONNECTED_PAGE_ID)).resolves.toMatchObject({
+      page: {
+        tokenStatus: "invalid",
+        connectionStatus: "token_invalid",
+        tokenPreviewMasked: "user...oken"
+      }
+    });
+  });
+
   it("registering a new page seeds activation-safe defaults with scheduler snapshot and built-in opening rules", async () => {
     const { registerPageBodySchema } = await loadChatExtractorTypes();
     const repositoryModule = await loadChatExtractorRepository();
@@ -440,6 +526,58 @@ describe("chat_extractor service", () => {
     expect(parsed.schedulerJson).toBeNull();
     expect(parsed.sampleConversationLimit).toBe(12);
     expect(parsed.sampleMessagePageLimit).toBe(2);
+  });
+
+  it("normalizes tag mapping by real source tag identity even when duplicate text entries are reordered", async () => {
+    const { createConfigVersionBodySchema } = await loadChatExtractorTypes();
+
+    const parsed = createConfigVersionBodySchema.parse({
+      tag_mapping_json: {
+        version: 1,
+        default_role: "noise",
+        entries: [
+          {
+            source_tag_id: "202",
+            source_tag_text: "Khách hàng cũ",
+            role: "need",
+            canonical_code: "consultation",
+            mapping_source: "operator",
+            status: "active"
+          },
+          {
+            source_tag_id: "101",
+            source_tag_text: "Khách hàng cũ",
+            role: "journey",
+            canonical_code: "revisit",
+            mapping_source: "operator",
+            status: "active"
+          }
+        ]
+      }
+    });
+
+    expect(parsed.tagMappingJson).toEqual({
+      version: 1,
+      defaultRole: "noise",
+      entries: [
+        {
+          sourceTagId: "101",
+          sourceTagText: "Khách hàng cũ",
+          role: "journey",
+          canonicalCode: "revisit",
+          mappingSource: "operator",
+          status: "active"
+        },
+        {
+          sourceTagId: "202",
+          sourceTagText: "Khách hàng cũ",
+          role: "need",
+          canonicalCode: "consultation",
+          mappingSource: "operator",
+          status: "active"
+        }
+      ]
+    });
   });
 
   it("rejects invalid IANA timezones for register and onboarding sample contracts", async () => {
@@ -840,7 +978,7 @@ async function loadChatExtractorRepository() {
   return import("./chat_extractor.repository.ts");
 }
 
-function patchRepository<T extends object, K extends keyof T>(module: T, key: K, value: T[K]) {
+function patchRepository<T extends object, K extends keyof T>(module: T, key: K, value: any) {
   const original = module[key];
   module[key] = value;
   repoRestorers.push(() => {
@@ -849,15 +987,18 @@ function patchRepository<T extends object, K extends keyof T>(module: T, key: K,
 }
 
 function createConnectedPageDetail(overrides?: {
+  id?: string;
+  pancakePageId?: string;
+  pancakeUserAccessToken?: string;
   etlEnabled?: boolean;
   analysisEnabled?: boolean;
 }): ConnectedPageDetailRecord {
   return {
     page: {
-      id: CONNECTED_PAGE_ID,
-      pancakePageId: "1406535699642677",
+      id: overrides?.id ?? CONNECTED_PAGE_ID,
+      pancakePageId: overrides?.pancakePageId ?? "1406535699642677",
       pageName: "O2 SKIN",
-      pancakeUserAccessToken: "user-token",
+      pancakeUserAccessToken: overrides?.pancakeUserAccessToken ?? "user-token",
       businessTimezone: "Asia/Ho_Chi_Minh",
       etlEnabled: overrides?.etlEnabled ?? true,
       analysisEnabled: overrides?.analysisEnabled ?? false,
@@ -1000,7 +1141,7 @@ function createPromptWorkspaceSampleOutput() {
   };
 }
 
-function patchValue<T extends object, K extends keyof T>(target: T, key: K, value: T[K]) {
+function patchValue<T extends object, K extends keyof T>(target: T, key: K, value: any) {
   const original = target[key];
   target[key] = value;
   repoRestorers.push(() => {

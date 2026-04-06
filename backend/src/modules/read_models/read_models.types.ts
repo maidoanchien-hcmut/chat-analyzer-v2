@@ -215,6 +215,36 @@ export type ReadModelFilterInput = {
   staff: string;
 };
 
+export type ExplorationMetricKey =
+  | "thread_count"
+  | "new_inbox_count"
+  | "revisit_count"
+  | "booked_rate"
+  | "ai_cost"
+  | "first_response_seconds";
+
+export type ExplorationBreakdownKey =
+  | "day"
+  | "opening_theme"
+  | "primary_need"
+  | "primary_topic"
+  | "closing_outcome"
+  | "customer_mood"
+  | "process_risk_level"
+  | "source";
+
+export type ExplorationCompareKey =
+  | "none"
+  | "page"
+  | "inbox_bucket"
+  | "revisit";
+
+export type ExplorationQueryInput = {
+  metric: ExplorationMetricKey;
+  breakdownBy: ExplorationBreakdownKey;
+  compareBy: ExplorationCompareKey;
+};
+
 export type ExportWorkbookRequest = {
   pageId: string;
   startDate: string;

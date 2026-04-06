@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
+import type { Prisma } from "@prisma/client";
 import { AppError } from "../../core/errors.ts";
 import {
   buildPagePromptIdentityText,
@@ -190,6 +191,26 @@ type PromptPreviewArtifactView = {
   supportingMessageIds: string[];
 };
 
+type ConnectedPageStatusView =
+  | {
+      token_status: "not_checked" | "missing";
+      connection_status: "not_checked";
+      token_preview_masked: string | null;
+      last_validated_at: null;
+    }
+  | {
+      token_status: "valid";
+      connection_status: "connected" | "page_unavailable";
+      token_preview_masked: string | null;
+      last_validated_at: string;
+    }
+  | {
+      token_status: "invalid";
+      connection_status: "token_invalid";
+      token_preview_masked: string | null;
+      last_validated_at: string;
+    };
+
 const PROMPT_WORKSPACE_SAMPLE_TTL_MS = 30 * 60 * 1000;
 const promptWorkspaceSampleStore = new Map<string, StoredPromptWorkspaceSample>();
 
@@ -213,14 +234,15 @@ export class ChatExtractorService {
   async listConnectedPages() {
     const pages = await chatExtractorRepository.listConnectedPages();
     return {
-      pages: pages.map((item) => serializeConnectedPageDetail(item))
+      pages: pages.map((item) => serializeConnectedPageDetail(item, buildUncheckedConnectedPageStatus(item.page.pancakeUserAccessToken)))
     };
   }
 
   async getConnectedPage(id: string) {
     const page = await this.requireConnectedPage(id);
+    const status = await this.resolveConnectedPageStatus(page.page);
     return {
-      page: serializeConnectedPageDetail(page)
+      page: serializeConnectedPageDetail(page, status)
     };
   }
 
@@ -702,7 +724,7 @@ export class ChatExtractorService {
       sampleWindowEndExclusiveAt: new Date(input.sampleScope.windowEndExclusiveAt),
       sampleConversationId: input.sampleConversation.conversationId,
       customerDisplayName: normalizePromptPreviewCustomer(input.sampleConversation.customerDisplayName),
-      runtimeMetadataJson: cloneJsonValue(response.runtimeMetadataJson),
+      runtimeMetadataJson: cloneJsonValue(response.runtimeMetadataJson) as Prisma.InputJsonValue,
       previewResultJson: serializePromptPreviewResult(result),
       evidenceBundleJson: buildPromptPreviewEvidenceBundle(result.evidenceUsedJson),
       fieldExplanationsJson: buildPromptPreviewFieldExplanations(result.fieldExplanationsJson),
@@ -813,6 +835,37 @@ export class ChatExtractorService {
       throw new AppError(400, "CHAT_EXTRACTOR_PAGE_SELECTION_INVALID", `Pancake page ${pancakePageId} không tồn tại với token đã cung cấp.`);
     }
     return selectedPage;
+  }
+
+  private async resolveConnectedPageStatus(page: ConnectedPageRecord): Promise<ConnectedPageStatusView> {
+    const tokenPreviewMasked = maskToken(page.pancakeUserAccessToken);
+    if (!page.pancakeUserAccessToken.trim()) {
+      return {
+        token_status: "missing",
+        connection_status: "not_checked",
+        token_preview_masked: tokenPreviewMasked,
+        last_validated_at: null
+      } as const;
+    }
+
+    const lastValidatedAt = new Date().toISOString();
+    try {
+      const pages = await this.listPagesFromTokenImpl(page.pancakeUserAccessToken);
+      const hasPageAccess = pages.some((item) => item.pageId === page.pancakePageId);
+      return {
+        token_status: "valid",
+        connection_status: hasPageAccess ? "connected" : "page_unavailable",
+        token_preview_masked: tokenPreviewMasked,
+        last_validated_at: lastValidatedAt
+      } as const;
+    } catch {
+      return {
+        token_status: "invalid",
+        connection_status: "token_invalid",
+        token_preview_masked: tokenPreviewMasked,
+        last_validated_at: lastValidatedAt
+      } as const;
+    }
   }
 }
 
@@ -1354,12 +1407,19 @@ function buildWorkerManifest(input: {
   };
 }
 
-function serializeConnectedPageDetail(record: ConnectedPageDetailRecord) {
+function serializeConnectedPageDetail(
+  record: ConnectedPageDetailRecord,
+  status: ConnectedPageStatusView = buildUncheckedConnectedPageStatus(record.page.pancakeUserAccessToken)
+) {
   return {
     id: record.page.id,
     pancakePageId: record.page.pancakePageId,
     pageName: record.page.pageName,
     businessTimezone: record.page.businessTimezone,
+    tokenStatus: status.token_status,
+    connectionStatus: status.connection_status,
+    tokenPreviewMasked: status.token_preview_masked,
+    lastValidatedAt: status.last_validated_at,
     etlEnabled: record.page.etlEnabled,
     analysisEnabled: record.page.analysisEnabled,
     activeConfigVersionId: record.page.activeConfigVersionId,
@@ -1368,6 +1428,26 @@ function serializeConnectedPageDetail(record: ConnectedPageDetailRecord) {
     createdAt: record.page.createdAt,
     updatedAt: record.page.updatedAt
   };
+}
+
+function buildUncheckedConnectedPageStatus(token: string) {
+  return {
+    token_status: token.trim() ? "not_checked" : "missing",
+    connection_status: "not_checked",
+    token_preview_masked: maskToken(token),
+    last_validated_at: null
+  } as const;
+}
+
+function maskToken(token: string) {
+  const trimmed = token.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (trimmed.length <= 8) {
+    return `${trimmed.slice(0, 2)}***${trimmed.slice(-2)}`;
+  }
+  return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
 }
 
 function serializeConfigVersion(record: PageConfigVersionRecord) {

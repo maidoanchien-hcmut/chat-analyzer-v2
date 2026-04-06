@@ -7,6 +7,10 @@ import { readModelsRepository } from "./read_models.repository.ts";
 import { buildThreadHistoryView, resolveActiveThreadId } from "./read_models.thread_history.ts";
 import type {
   ExportWorkbookRequest,
+  ExplorationQueryInput,
+  ExplorationBreakdownKey,
+  ExplorationCompareKey,
+  ExplorationMetricKey,
   ReadModelFilterInput,
   ResolvedSnapshotRow,
   SliceResolution,
@@ -96,6 +100,7 @@ class ReadModelsService {
       slice.snapshots.map((item) => item.pipelineRunId),
       filters
     );
+    const previousThreadFacts = await this.listPreviousThreadFacts(filters);
     const taxonomyJson = slice.snapshots[0]?.taxonomyJson ?? null;
 
     const totalThreads = sum(threadFacts.map((row) => row.threadCount));
@@ -107,19 +112,39 @@ class ReadModelsService {
     const medianFirstResponseSeconds = median(
       threadFacts.map((row) => row.firstStaffResponseSeconds).filter((value): value is number => typeof value === "number")
     );
+    const previousTotalThreads = sum(previousThreadFacts.map((row) => row.threadCount));
+    const previousNewThreads = previousThreadFacts.filter((row) => row.isNewInbox).length;
+    const previousRevisitThreads = previousThreadFacts.filter((row) => row.officialRevisitLabel === "revisit").length;
+    const previousBookedThreads = previousThreadFacts.filter((row) => row.officialClosingOutcomeCode === "booked").length;
+    const previousHighRiskThreads = previousThreadFacts.filter((row) => row.processRiskLevelCode === "high").length;
+    const previousAiCostMicros = sumBigInt(previousThreadFacts.map((row) => row.aiCostMicros));
+    const previousMedianFirstResponseSeconds = median(
+      previousThreadFacts.map((row) => row.firstStaffResponseSeconds).filter((value): value is number => typeof value === "number")
+    );
 
     return {
       pageLabel: slice.pageName,
       snapshot: slice.snapshot,
       warning: slice.warning,
       metrics: [
-        metricCard("Tổng inbox", totalThreads, "Số thread trong slice đã publish."),
-        metricCard("Inbox mới", newThreads, "Deterministic theo thread_first_seen_at."),
-        metricCard("Inbox tái khám", revisitThreads, "Official revisit label từ mart."),
-        metricRateCard("Tỷ lệ chốt hẹn", bookedThreads, totalThreads, "official_closing_outcome = booked."),
-        metricCard("Risk cao", highRiskThreads, "Thread cần ưu tiên kiểm tra."),
-        metricMoneyCard("Chi phí AI", totalAiCostMicros, "Tổng AI cost từ fact_thread_day."),
-        metricDurationCard("Phản hồi đầu tiên", medianFirstResponseSeconds, "Median first_staff_response_seconds.")
+        metricCard("Tổng inbox", totalThreads, "Số thread trong slice đã publish.", formatCountDelta(totalThreads, previousTotalThreads)),
+        metricCard("Inbox mới", newThreads, "Deterministic theo thread_first_seen_at.", formatCountDelta(newThreads, previousNewThreads)),
+        metricCard("Inbox tái khám", revisitThreads, "Official revisit label từ mart.", formatCountDelta(revisitThreads, previousRevisitThreads)),
+        metricRateCard(
+          "Tỷ lệ chốt hẹn",
+          bookedThreads,
+          totalThreads,
+          "official_closing_outcome = booked.",
+          formatRateDelta(bookedThreads, totalThreads, previousBookedThreads, previousTotalThreads)
+        ),
+        metricCard("Risk cao", highRiskThreads, "Thread cần ưu tiên kiểm tra.", formatCountDelta(highRiskThreads, previousHighRiskThreads)),
+        metricMoneyCard("Chi phí AI", totalAiCostMicros, "Tổng AI cost từ fact_thread_day.", formatMoneyDelta(totalAiCostMicros, previousAiCostMicros)),
+        metricDurationCard(
+          "Phản hồi đầu tiên",
+          medianFirstResponseSeconds,
+          "Median first_staff_response_seconds.",
+          formatDurationDelta(medianFirstResponseSeconds, previousMedianFirstResponseSeconds)
+        )
       ],
       openingNew: buildBreakdown(
         groupCounts(threadFacts.filter((row) => row.isNewInbox), (row) => row.openingThemeCode),
@@ -150,31 +175,29 @@ class ReadModelsService {
     };
   }
 
-  async getExploration(filters: ReadModelFilterInput) {
+  async getExploration(filters: ReadModelFilterInput, input: ExplorationQueryInput) {
     const slice = await this.resolveSlice(filters);
     const threadFacts = await this.listFilteredThreadFacts(
       slice.snapshots.map((item) => item.pipelineRunId),
       filters
     );
     const taxonomyJson = slice.snapshots[0]?.taxonomyJson ?? null;
-    const rows = buildBreakdown(
-      groupCounts(threadFacts, (row) => row.openingThemeCode),
-      sum(threadFacts.map((row) => row.threadCount)),
-      taxonomyJson,
-      "opening_theme"
-    ).map((item) => ({
-      dimension: item.label,
-      metricValue: item.value,
-      share: item.share,
-      drillRoute: "?view=thread-history"
-    }));
+    const rows = buildExplorationRows(threadFacts, taxonomyJson, input);
 
     return {
-      metric: "Số thread",
-      breakdownBy: "Opening theme",
-      compareBy: filters.publishSnapshot === "provisional" ? "Same-day provisional vs official history" : "Published official",
+      builder: {
+        metricOptions: buildExplorationMetricOptions(),
+        breakdownOptions: buildExplorationBreakdownOptions(),
+        compareOptions: buildExplorationCompareOptions(),
+        selectedMetric: input.metric,
+        selectedBreakdownBy: input.breakdownBy,
+        selectedCompareBy: input.compareBy
+      },
+      metric: resolveExplorationMetricLabel(input.metric),
+      breakdownBy: resolveExplorationBreakdownLabel(input.breakdownBy),
+      compareBy: resolveExplorationCompareLabel(input.compareBy),
       chartSummary: rows[0]
-        ? `Nhóm ${rows[0].dimension.toLowerCase()} đang chiếm tỷ trọng lớn nhất trong slice đã chọn.`
+        ? `Nhóm ${rows[0].dimension.toLowerCase()} đang nổi bật nhất theo ${resolveExplorationMetricLabel(input.metric).toLowerCase()} trong slice đã chọn.`
         : "Chưa có row mart nào khớp slice đã chọn.",
       rows,
       warning: slice.warning
@@ -488,6 +511,23 @@ class ReadModelsService {
     const allowedThreadDayIds = new Set(staffFacts.map((row) => row.threadDayId));
     return threadFacts.filter((row) => allowedThreadDayIds.has(row.threadDayId));
   }
+
+  private async listPreviousThreadFacts(filters: ReadModelFilterInput) {
+    const previousRange = shiftRangeBack(filters.startDate, filters.endDate);
+    const previousSlice = await this.resolveSlice({
+      ...filters,
+      startDate: previousRange.startDate,
+      endDate: previousRange.endDate
+    });
+    return this.listFilteredThreadFacts(
+      previousSlice.snapshots.map((item) => item.pipelineRunId),
+      {
+        ...filters,
+        startDate: previousRange.startDate,
+        endDate: previousRange.endDate
+      }
+    );
+  }
 }
 
 function sanitizePageComparisonFilters(filters: ReadModelFilterInput): ReadModelFilterInput {
@@ -517,38 +557,38 @@ function buildOptions(items: Array<{ value: string; label: string }>, allLabel: 
   ];
 }
 
-function metricCard(label: string, value: number, hint: string): MetricCard {
+function metricCard(label: string, value: number, hint: string, delta = "0"): MetricCard {
   return {
     label,
     value: String(value),
-    delta: "-",
+    delta,
     hint
   };
 }
 
-function metricRateCard(label: string, numerator: number, denominator: number, hint: string): MetricCard {
+function metricRateCard(label: string, numerator: number, denominator: number, hint: string, delta = "0"): MetricCard {
   return {
     label,
     value: formatPercent(numerator, denominator),
-    delta: "-",
+    delta,
     hint
   };
 }
 
-function metricMoneyCard(label: string, micros: bigint, hint: string): MetricCard {
+function metricMoneyCard(label: string, micros: bigint, hint: string, delta = "0"): MetricCard {
   return {
     label,
     value: formatMoney(micros),
-    delta: "-",
+    delta,
     hint
   };
 }
 
-function metricDurationCard(label: string, seconds: number | null, hint: string): MetricCard {
+function metricDurationCard(label: string, seconds: number | null, hint: string, delta = "0"): MetricCard {
   return {
     label,
     value: formatDuration(seconds),
-    delta: "-",
+    delta,
     hint
   };
 }
@@ -598,6 +638,218 @@ function buildPriorities(threadFacts: ThreadFactRow[], taxonomyJson: unknown) {
     })
     .sort((left, right) => right.threadCount - left.threadCount)
     .slice(0, 6);
+}
+
+function buildExplorationRows(
+  threadFacts: ThreadFactRow[],
+  taxonomyJson: unknown,
+  input: ExplorationQueryInput
+) {
+  const grouped = groupBy(threadFacts, (row) => buildExplorationGroupKey(row, taxonomyJson, input.breakdownBy, input.compareBy));
+  const total = Math.max(sum(threadFacts.map((row) => row.threadCount)), 1);
+
+  return Object.entries(grouped)
+    .map(([dimension, rows]) => ({
+      dimension,
+      metricValue: formatExplorationMetricValue(rows, input.metric),
+      metricNumber: toExplorationMetricNumber(rows, input.metric),
+      share: formatPercent(sum(rows.map((row) => row.threadCount)), total),
+      drillRoute: buildExplorationDrillRoute(rows)
+    }))
+    .sort((left, right) => right.metricNumber - left.metricNumber || left.dimension.localeCompare(right.dimension))
+    .slice(0, 12)
+    .map(({ metricNumber: _metricNumber, ...row }) => row);
+}
+
+function buildExplorationGroupKey(
+  row: ThreadFactRow,
+  taxonomyJson: unknown,
+  breakdownBy: ExplorationBreakdownKey,
+  compareBy: ExplorationCompareKey
+) {
+  const breakdownLabel = resolveExplorationBreakdownValue(row, taxonomyJson, breakdownBy);
+  const compareLabel = resolveExplorationCompareValue(row, compareBy);
+  return compareLabel ? `${breakdownLabel} / ${compareLabel}` : breakdownLabel;
+}
+
+function resolveExplorationBreakdownValue(
+  row: ThreadFactRow,
+  taxonomyJson: unknown,
+  breakdownBy: ExplorationBreakdownKey
+) {
+  switch (breakdownBy) {
+    case "day":
+      return row.date.fullDate.toISOString().slice(0, 10);
+    case "primary_need":
+      return resolveBusinessLabel(taxonomyJson, "primary_need", row.primaryNeedCode);
+    case "primary_topic":
+      return resolveBusinessLabel(taxonomyJson, "primary_topic", row.primaryTopicCode);
+    case "closing_outcome":
+      return resolveBusinessLabel(taxonomyJson, "closing_outcome", row.officialClosingOutcomeCode);
+    case "customer_mood":
+      return resolveBusinessLabel(null, "customer_mood", row.customerMoodCode);
+    case "process_risk_level":
+      return resolveBusinessLabel(null, "process_risk_level", row.processRiskLevelCode);
+    case "source":
+      return buildSourceKey(row);
+    case "opening_theme":
+    default:
+      return resolveBusinessLabel(taxonomyJson, "opening_theme", row.openingThemeCode);
+  }
+}
+
+function resolveExplorationCompareValue(row: ThreadFactRow, compareBy: ExplorationCompareKey) {
+  switch (compareBy) {
+    case "page":
+      return row.page.pageName;
+    case "inbox_bucket":
+      return row.isNewInbox ? "Inbox mới" : "Inbox cũ";
+    case "revisit":
+      return row.officialRevisitLabel === "revisit" ? "Tái khám" : "Không tái khám";
+    case "none":
+    default:
+      return "";
+  }
+}
+
+function formatExplorationMetricValue(rows: ThreadFactRow[], metric: ExplorationMetricKey) {
+  switch (metric) {
+    case "new_inbox_count":
+      return String(rows.filter((row) => row.isNewInbox).length);
+    case "revisit_count":
+      return String(rows.filter((row) => row.officialRevisitLabel === "revisit").length);
+    case "booked_rate":
+      return formatPercent(rows.filter((row) => row.officialClosingOutcomeCode === "booked").length, Math.max(rows.length, 1));
+    case "ai_cost":
+      return formatMoney(sumBigInt(rows.map((row) => row.aiCostMicros)));
+    case "first_response_seconds":
+      return formatDuration(median(rows.map((row) => row.firstStaffResponseSeconds).filter((value): value is number => typeof value === "number")));
+    case "thread_count":
+    default:
+      return String(sum(rows.map((row) => row.threadCount)));
+  }
+}
+
+function toExplorationMetricNumber(rows: ThreadFactRow[], metric: ExplorationMetricKey) {
+  switch (metric) {
+    case "new_inbox_count":
+      return rows.filter((row) => row.isNewInbox).length;
+    case "revisit_count":
+      return rows.filter((row) => row.officialRevisitLabel === "revisit").length;
+    case "booked_rate":
+      return rows.length > 0 ? (rows.filter((row) => row.officialClosingOutcomeCode === "booked").length / rows.length) * 100 : 0;
+    case "ai_cost":
+      return Number(sumBigInt(rows.map((row) => row.aiCostMicros)));
+    case "first_response_seconds":
+      return median(rows.map((row) => row.firstStaffResponseSeconds).filter((value): value is number => typeof value === "number")) ?? 0;
+    case "thread_count":
+    default:
+      return sum(rows.map((row) => row.threadCount));
+  }
+}
+
+function buildExplorationDrillRoute(rows: ThreadFactRow[]) {
+  const representativeThreadId = rows[0]?.threadId;
+  return representativeThreadId
+    ? `?view=thread-history&thread=${encodeURIComponent(representativeThreadId)}`
+    : "?view=thread-history";
+}
+
+function buildExplorationMetricOptions() {
+  return [
+    { value: "thread_count", label: "Số thread" },
+    { value: "new_inbox_count", label: "Số inbox mới" },
+    { value: "revisit_count", label: "Số tái khám" },
+    { value: "booked_rate", label: "Tỷ lệ chốt hẹn" },
+    { value: "ai_cost", label: "Chi phí AI" },
+    { value: "first_response_seconds", label: "Phản hồi đầu tiên" }
+  ];
+}
+
+function buildExplorationBreakdownOptions() {
+  return [
+    { value: "day", label: "Ngày" },
+    { value: "opening_theme", label: "Opening theme" },
+    { value: "primary_need", label: "Nhu cầu" },
+    { value: "primary_topic", label: "Chủ đề" },
+    { value: "closing_outcome", label: "Outcome" },
+    { value: "customer_mood", label: "Mood" },
+    { value: "process_risk_level", label: "Risk" },
+    { value: "source", label: "Nguồn khách" }
+  ];
+}
+
+function buildExplorationCompareOptions() {
+  return [
+    { value: "none", label: "Không so sánh" },
+    { value: "page", label: "Page" },
+    { value: "inbox_bucket", label: "Inbox mới/cũ" },
+    { value: "revisit", label: "Tái khám" }
+  ];
+}
+
+function resolveExplorationMetricLabel(metric: ExplorationMetricKey) {
+  return buildExplorationMetricOptions().find((item) => item.value === metric)?.label ?? "Số thread";
+}
+
+function resolveExplorationBreakdownLabel(breakdownBy: ExplorationBreakdownKey) {
+  return buildExplorationBreakdownOptions().find((item) => item.value === breakdownBy)?.label ?? "Opening theme";
+}
+
+function resolveExplorationCompareLabel(compareBy: ExplorationCompareKey) {
+  return buildExplorationCompareOptions().find((item) => item.value === compareBy)?.label ?? "Không so sánh";
+}
+
+function shiftRangeBack(startDate: string, endDate: string) {
+  const start = parseDateOnlyUtc(startDate);
+  const end = parseDateOnlyUtc(endDate);
+  const dayCount = Math.max(1, Math.round((end.getTime() - start.getTime()) / 86_400_000) + 1);
+  const previousEnd = new Date(start.getTime() - 86_400_000);
+  const previousStart = new Date(previousEnd.getTime() - (dayCount - 1) * 86_400_000);
+  return {
+    startDate: previousStart.toISOString().slice(0, 10),
+    endDate: previousEnd.toISOString().slice(0, 10)
+  };
+}
+
+function formatCountDelta(current: number, previous: number) {
+  return formatSignedDelta(current - previous);
+}
+
+function formatRateDelta(currentNumerator: number, currentDenominator: number, previousNumerator: number, previousDenominator: number) {
+  const currentRate = currentDenominator > 0 ? (currentNumerator / currentDenominator) * 100 : 0;
+  const previousRate = previousDenominator > 0 ? (previousNumerator / previousDenominator) * 100 : 0;
+  const delta = currentRate - previousRate;
+  const signed = delta > 0 ? "+" : delta < 0 ? "-" : "";
+  return `${signed}${Math.abs(delta).toFixed(1)}đ`;
+}
+
+function formatMoneyDelta(current: bigint, previous: bigint) {
+  const delta = current - previous;
+  return formatSignedMoneyDelta(delta);
+}
+
+function formatDurationDelta(current: number | null, previous: number | null) {
+  if (current == null || previous == null) {
+    return "-";
+  }
+  const delta = current - previous;
+  const signed = delta > 0 ? "+" : delta < 0 ? "-" : "";
+  return `${signed}${formatDuration(Math.abs(delta))}`;
+}
+
+function formatSignedDelta(value: number) {
+  if (value === 0) {
+    return "0";
+  }
+  return `${value > 0 ? "+" : ""}${value}`;
+}
+
+function formatSignedMoneyDelta(value: bigint) {
+  if (value === 0n) {
+    return "0 đ";
+  }
+  return `${value > 0n ? "+" : "-"}${formatMoney(value > 0n ? value : -value)}`;
 }
 
 function resolveSnapshotsForRange(snapshots: ResolvedSnapshotRow[], requested: ReadModelFilterInput["publishSnapshot"], today: string) {
@@ -666,6 +918,10 @@ function buildSourceKey(row: ThreadFactRow) {
 
 function formatCoverage(snapshot: ResolvedSnapshotRow, businessTimezone: string) {
   return `${formatClock(snapshot.windowStartAt, businessTimezone)}-${formatClock(snapshot.windowEndExclusiveAt, businessTimezone)}`;
+}
+
+function parseDateOnlyUtc(value: string) {
+  return new Date(`${value}T00:00:00.000Z`);
 }
 
 function formatClock(value: Date, timeZone: string) {

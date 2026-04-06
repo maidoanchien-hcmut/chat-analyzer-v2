@@ -36,6 +36,7 @@ export function buildThreadHistoryView(input: BuildThreadHistoryViewInput) {
     activeThreadId,
     activeThreadDayId: activeThreadDay?.id ?? null,
     activeTab: input.activeTab,
+    workspace: buildWorkspace(activeThreadDay, activeResult, input.taxonomyJson),
     transcript: (activeThreadDay?.messages ?? []).map((message) => ({
       id: message.id,
       at: formatDateTime(message.insertedAt, input.businessTimezone),
@@ -52,7 +53,7 @@ export function buildThreadHistoryView(input: BuildThreadHistoryViewInput) {
     analysisHistory: threadDays
       .filter((threadDay) => threadDay.analysisResults.length > 0)
       .map((threadDay) => buildAnalysisHistoryRow(threadDay, input.taxonomyJson, activeThreadDay?.id ?? null)),
-    audit: buildAudit(activeResult, activeThreadDay?.firstMeaningfulMessageTextRedacted),
+    audit: buildAudit(activeResult, activeThreadDay?.firstMeaningfulMessageTextRedacted, input.taxonomyJson),
     crmLink: buildCrmLink(input.workspace)
   };
 }
@@ -141,7 +142,8 @@ function buildAnalysisHistoryRow(
 
 function buildAudit(
   result: NonNullable<NonNullable<NonNullable<ThreadWorkspaceRow>["threadDays"]>[number]["analysisResults"]>[number] | null,
-  firstMeaningfulMessageText: string | null | undefined
+  firstMeaningfulMessageText: string | null | undefined,
+  taxonomyJson?: unknown
 ) {
   const evidence = uniqueValues([
     ...extractStrings(result?.evidenceUsedJson),
@@ -155,7 +157,8 @@ function buildAudit(
     taxonomyVersion: result?.analysisRun.taxonomyVersion.versionCode ?? "Khong co du lieu",
     evidence,
     explanations: buildFieldExplanations(result?.fieldExplanationsJson),
-    supportingMessageIds: extractStrings(result?.supportingMessageIdsJson)
+    supportingMessageIds: extractStrings(result?.supportingMessageIdsJson),
+    structuredOutput: buildStructuredOutput(result, taxonomyJson ?? null)
   };
 }
 
@@ -338,6 +341,146 @@ function formatConfidence(value: unknown) {
   }
   const numeric = Number(String(value));
   return Number.isFinite(numeric) ? numeric.toFixed(2) : String(value);
+}
+
+function buildWorkspace(
+  threadDay: NonNullable<NonNullable<ThreadWorkspaceRow>["threadDays"]>[number] | null,
+  result: NonNullable<NonNullable<NonNullable<ThreadWorkspaceRow>["threadDays"]>[number]["analysisResults"]>[number] | null,
+  taxonomyJson: unknown
+) {
+  return {
+    openingBlockMessages: readOpeningBlockMessages(threadDay?.openingBlockJson),
+    explicitSignals: readOpeningExplicitSignals(threadDay?.openingBlockJson),
+    normalizedTagSignals: readNormalizedTagSignals(threadDay?.normalizedTagSignalsJson),
+    sourceSignals: {
+      explicitRevisit: threadDay?.explicitRevisitSignal ?? null,
+      explicitNeed: threadDay?.explicitNeedSignal ?? null,
+      explicitOutcome: threadDay?.explicitOutcomeSignal ?? null
+    },
+    structuredOutput: buildStructuredOutput(result, taxonomyJson),
+    sourceThreadJsonRedacted: threadDay?.sourceThreadJsonRedacted ?? {}
+  };
+}
+
+function buildStructuredOutput(
+  result: NonNullable<NonNullable<NonNullable<ThreadWorkspaceRow>["threadDays"]>[number]["analysisResults"]>[number] | null,
+  taxonomyJson: unknown
+) {
+  if (!result) {
+    return [];
+  }
+
+  return [
+    buildStructuredOutputRow("opening_theme", result.openingThemeCode, taxonomyJson, "opening_theme", result.openingThemeReason),
+    buildStructuredOutputRow("primary_need", result.primaryNeedCode, taxonomyJson, "primary_need"),
+    buildStructuredOutputRow("primary_topic", result.primaryTopicCode, taxonomyJson, "primary_topic"),
+    buildStructuredOutputRow("journey", result.journeyCode, taxonomyJson, "journey"),
+    buildStructuredOutputRow("closing_outcome", result.closingOutcomeInferenceCode, taxonomyJson, "closing_outcome"),
+    buildStructuredOutputRow("customer_mood", result.customerMoodCode, null, "customer_mood"),
+    buildStructuredOutputRow("process_risk_level", result.processRiskLevelCode, null, "process_risk_level", result.processRiskReasonText)
+  ];
+}
+
+function buildStructuredOutputRow(
+  field: string,
+  code: string,
+  taxonomyJson: unknown,
+  categoryKey: string,
+  reason?: string | null
+) {
+  const normalizedCode = code.trim() || "unknown";
+  return {
+    field,
+    code: normalizedCode,
+    label: resolveBusinessLabel(taxonomyJson, categoryKey, normalizedCode),
+    reason: reason?.trim() || null
+  };
+}
+
+function readOpeningBlockMessages(value: unknown) {
+  const record = asRecord(value);
+  const messages = Array.isArray(record?.messages) ? record.messages : [];
+  return messages
+    .map((item) => {
+      const message = asRecord(item);
+      const text = readStringValue(message?.redacted_text ?? message?.redactedText);
+      const senderRole = readStringValue(message?.sender_role ?? message?.senderRole);
+      const messageType = readStringValue(message?.message_type ?? message?.messageType);
+      const messageId = readStringValue(message?.message_id ?? message?.messageId);
+      if (!text && !senderRole && !messageType && !messageId) {
+        return null;
+      }
+      return {
+        messageId: messageId || null,
+        senderRole: senderRole || "unknown",
+        messageType: messageType || "text",
+        text: text || "(message redacted)"
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
+function readOpeningExplicitSignals(value: unknown) {
+  const record = asRecord(value);
+  const signals = Array.isArray(record?.explicit_signals) ? record.explicit_signals : [];
+  return signals
+    .map((item) => {
+      const signal = asRecord(item);
+      const signalRole = readStringValue(signal?.signal_role ?? signal?.signalRole);
+      const signalCode = readStringValue(signal?.signal_code ?? signal?.signalCode);
+      const rawText = readStringValue(signal?.raw_text ?? signal?.rawText);
+      if (!signalRole && !signalCode && !rawText) {
+        return null;
+      }
+      return {
+        signalRole,
+        signalCode,
+        rawText
+      };
+    })
+    .filter((item): item is NonNullable<typeof item> => item !== null);
+}
+
+function readNormalizedTagSignals(value: unknown) {
+  const record = asRecord(value);
+  if (!record) {
+    return [];
+  }
+
+  return Object.entries(record).flatMap(([role, rawEntries]) => {
+    if (!Array.isArray(rawEntries)) {
+      return [];
+    }
+    return rawEntries
+      .map((item) => {
+        const entry = asRecord(item);
+        const sourceTagId = readStringValue(entry?.source_tag_id ?? entry?.sourceTagId);
+        const sourceTagText = readStringValue(entry?.source_tag_text ?? entry?.sourceTagText);
+        const canonicalCode = readStringValue(entry?.canonical_code ?? entry?.canonicalCode);
+        const mappingSource = readStringValue(entry?.mapping_source ?? entry?.mappingSource);
+        if (!sourceTagId && !sourceTagText && !canonicalCode && !mappingSource) {
+          return null;
+        }
+        return {
+          role,
+          sourceTagId,
+          sourceTagText,
+          canonicalCode,
+          mappingSource
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+  });
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readStringValue(value: unknown) {
+  return typeof value === "string" ? value.trim() : "";
 }
 
 function groupBy<T>(rows: T[], keySelector: (row: T) => string) {

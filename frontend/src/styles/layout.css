@@ -36,17 +36,23 @@
 
 .configuration-shell {
   display: grid;
-  grid-template-columns: 296px minmax(0, 1fr);
-  gap: var(--space-2);
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: var(--space-3);
   align-items: start;
 }
 
-.configuration-sidebar {
+.configuration-sidebar,
+.configuration-main-stack {
   display: grid;
   gap: var(--space-2);
 }
 
 .configuration-main {
+  min-width: 0;
+}
+
+.configuration-main-stack,
+.configuration-panel-grid {
   min-width: 0;
 }
 

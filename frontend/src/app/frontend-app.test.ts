@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
-import { FrontendApp } from "./frontend-app.ts";
+import { FrontendApp, shouldRerenderConfigurationChange } from "./frontend-app.ts";
 import { DEFAULT_PAGE_LOCAL_PROMPT } from "../features/configuration/state.ts";
 
 let server: ReturnType<typeof Bun.serve> | null = null;
@@ -19,6 +19,10 @@ beforeEach(() => {
       pageName: "Page Da Lieu Quan 1",
       pancakePageId: "pk_101",
       businessTimezone: "Asia/Ho_Chi_Minh",
+      tokenStatus: "not_checked",
+      connectionStatus: "not_checked",
+      tokenPreviewMasked: null,
+      lastValidatedAt: null,
       etlEnabled: true,
       analysisEnabled: false,
       activeConfigVersionId: null,
@@ -76,6 +80,10 @@ beforeEach(() => {
             pageName: "Page Da Lieu Quan 1",
             pancakePageId: "pk_101",
             businessTimezone: "Asia/Ho_Chi_Minh",
+            tokenStatus: "valid",
+            connectionStatus: "connected",
+            tokenPreviewMasked: "abc***xyz",
+            lastValidatedAt: "2026-04-05T09:10:00.000Z",
             etlEnabled: true,
             analysisEnabled: false,
             activeConfigVersionId: "cfg-101",
@@ -142,7 +150,7 @@ beforeEach(() => {
                 customerDisplayName: "Khách A",
                 firstMeaningfulMessageText: "Cho mình hỏi lịch tái khám.",
                 observedTagsJson: [{ source_tag_id: "11", source_tag_text: "KH mới" }],
-                normalizedTagSignalsJson: { journey: [{ source_tag_text: "KH mới", canonical_code: "new_to_clinic", mapping_source: "operator" }], need: [], outcome: [], branch: [], staff: [], noise: [] },
+                normalizedTagSignalsJson: { journey: [{ source_tag_id: "11", source_tag_text: "KH mới", canonical_code: "new_to_clinic", mapping_source: "operator" }], need: [], outcome: [], branch: [], staff: [], noise: [] },
                 openingBlockJson: {
                   explicit_signals: [{ signal_role: "journey", signal_code: "revisit", raw_text: "Khách hàng tái khám" }],
                   messages: [{ sender_role: "customer", message_type: "text", redacted_text: "Cho mình hỏi lịch tái khám." }],
@@ -215,7 +223,7 @@ describe("frontend app", () => {
       sampleMessagePageLimit: 2,
       promptText: "Prompt đang chỉnh từ sample",
       tagMappings: [
-        { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+        { sourceTagId: "", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
       ]
     };
     (app as any).configuration.onboardingSamplePreview = {
@@ -253,6 +261,7 @@ describe("frontend app", () => {
     expect((app as any).configuration.pageDetail?.activeConfigVersionId).toBe("cfg-101");
     expect((app as any).configuration.workspace.promptText).toBe("Prompt đang chỉnh từ sample");
     expect((app as any).configuration.workspace.tagMappings[0]).toEqual({
+      sourceTagId: "",
       rawTag: "KH mới",
       role: "customer_journey",
       canonicalValue: "new_to_clinic",
@@ -284,6 +293,7 @@ describe("frontend app", () => {
     expect((app as any).configuration.onboardingSamplePreview?.pageName).toBe("Page Da Lieu Quan 1");
     expect((app as any).configuration.onboardingSamplePreview?.conversations[0]?.normalizedTagSignals[0]?.canonicalCode).toBe("new_to_clinic");
     expect((app as any).configuration.workspace.tagMappings[0]).toEqual({
+      sourceTagId: "11",
       rawTag: "KH mới",
       role: "customer_journey",
       canonicalValue: "new_to_clinic",
@@ -326,7 +336,10 @@ describe("frontend app", () => {
       sampleConversationLimit: 5,
       sampleMessagePageLimit: 4
     };
-    let capturedPreviewInput: Record<string, unknown> | null = null;
+    let capturedPreviewInput: {
+      sampleConversationLimit?: number;
+      sampleMessagePageLimit?: number;
+    } | null = null;
     Object.assign((app as any).controlPlaneAdapter, {
       async previewOnboardingSample(input: Record<string, unknown>) {
         capturedPreviewInput = input;
@@ -351,8 +364,10 @@ describe("frontend app", () => {
 
     await (app as any).loadOnboardingSamplePreview(null);
 
-    expect(capturedPreviewInput?.sampleConversationLimit).toBe(5);
-    expect(capturedPreviewInput?.sampleMessagePageLimit).toBe(4);
+    expect(capturedPreviewInput).toEqual(expect.objectContaining({
+      sampleConversationLimit: 5,
+      sampleMessagePageLimit: 4
+    }));
   });
 
   it("keeps the token in the shared workspace draft after listing pages", async () => {
@@ -381,6 +396,26 @@ describe("frontend app", () => {
 
     expect((app as any).configuration.workspace.token).toBe("user-token");
     expect((app as any).configuration.workspace.selectedPancakePageId).toBe("pk_101");
+  });
+
+  it("rerenders configuration when selected config version changes", () => {
+    const form = {
+      dataset: { form: "configuration-create" }
+    } as unknown as HTMLFormElement;
+    const event = {
+      target: {
+        name: "selectedConfigVersionId",
+        closest: () => form
+      }
+    } as unknown as Event;
+
+    expect(shouldRerenderConfigurationChange(event, form)).toBe(true);
+    expect(shouldRerenderConfigurationChange({
+      target: {
+        name: "tagRawTag",
+        closest: () => form
+      }
+    } as unknown as Event, form)).toBe(false);
   });
 });
 

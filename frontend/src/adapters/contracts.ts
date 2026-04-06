@@ -179,6 +179,18 @@ export type ThreadHistoryViewModel = {
   activeThreadId: string;
   activeThreadDayId: string | null;
   activeTab: "conversation" | "analysis-history" | "ai-audit" | "crm-link";
+  workspace: {
+    openingBlockMessages: Array<{ messageId: string | null; senderRole: string; messageType: string; text: string }>;
+    explicitSignals: Array<{ signalRole: string; signalCode: string; rawText: string }>;
+    normalizedTagSignals: Array<{ role: string; sourceTagId: string; sourceTagText: string; canonicalCode: string; mappingSource: string }>;
+    sourceSignals: {
+      explicitRevisit: string | null;
+      explicitNeed: string | null;
+      explicitOutcome: string | null;
+    };
+    structuredOutput: Array<{ field: string; code: string; label: string; reason: string | null }>;
+    sourceThreadJsonRedacted: unknown;
+  };
   transcript: ThreadMessage[];
   analysisHistory: Array<{ threadDayId: string; date: string; openingTheme: string; need: string; outcome: string; mood: string; risk: string; quality: string; aiCost: string; active: boolean }>;
   audit: {
@@ -189,6 +201,7 @@ export type ThreadHistoryViewModel = {
     evidence: string[];
     explanations: FieldExplanation[];
     supportingMessageIds: string[];
+    structuredOutput: Array<{ field: string; code: string; label: string; reason: string | null }>;
   };
   crmLink: {
     customer: string;
@@ -249,6 +262,10 @@ export type ConnectedPageSummary = {
   pageName: string;
   pancakePageId: string;
   businessTimezone: string;
+  tokenStatus: "missing" | "not_checked" | "valid" | "invalid";
+  connectionStatus: "not_checked" | "connected" | "token_invalid" | "page_unavailable";
+  tokenPreviewMasked: string | null;
+  lastValidatedAt: string | null;
   etlEnabled: boolean;
   analysisEnabled: boolean;
   activeConfigVersionId: string | null;
@@ -297,7 +314,7 @@ export type OnboardingSamplePreviewViewModel = {
     customerDisplayName: string;
     firstMeaningfulMessageText: string;
     observedTags: Array<{ sourceTagId: string; sourceTagText: string }>;
-    normalizedTagSignals: Array<{ role: string; sourceTagText: string; canonicalCode: string; mappingSource: string }>;
+    normalizedTagSignals: Array<{ role: string; sourceTagId: string; sourceTagText: string; canonicalCode: string; mappingSource: string }>;
     openingMessages: Array<{ senderRole: string; messageType: string; redactedText: string }>;
     explicitSignals: Array<{ signalRole: string; signalCode: string; rawText: string }>;
     cutReason: string;
@@ -418,8 +435,10 @@ export type RunMartMetricsViewModel = {
 
 export type RunDetailViewModel = {
   run: RunSummaryViewModel;
+  threadCount: number;
   threadDayCount: number;
   messageCount: number;
+  coveredThreadIds: string[];
   analysisMetrics: RunAnalysisMetricsViewModel | null;
   martMetrics: RunMartMetricsViewModel | null;
   publishWarning: string | null;

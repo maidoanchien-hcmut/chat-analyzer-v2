@@ -671,7 +671,7 @@ class ChatExtractorRepository {
   }
 
   async getRunArtifactCounts(runId: string) {
-    const [threadDayCount, messageCount] = await Promise.all([
+    const [threadDayCount, messageCount, threadRows] = await Promise.all([
       prisma.threadDay.count({
         where: {
           pipelineRunId: runId
@@ -683,12 +683,24 @@ class ChatExtractorRepository {
             pipelineRunId: runId
           }
         }
+      }),
+      prisma.threadDay.findMany({
+        where: {
+          pipelineRunId: runId
+        },
+        distinct: ["threadId"],
+        orderBy: [{ threadId: "asc" }],
+        select: {
+          threadId: true
+        }
       })
     ]);
 
     return {
+      threadCount: threadRows.length,
       threadDayCount,
-      messageCount
+      messageCount,
+      coveredThreadIds: threadRows.map((row) => row.threadId)
     };
   }
 

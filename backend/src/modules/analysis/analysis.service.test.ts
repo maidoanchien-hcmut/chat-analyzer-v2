@@ -42,7 +42,14 @@ describe("analysis service", () => {
           })),
           runtimeMetadataJson: {
             effective_prompt_hash: "service-effective-hash",
-            system_prompt_version: "service_system.v1"
+            system_prompt_version: "service_system.v2",
+            provider: "openai_compatible",
+            model_name: "gpt-live",
+            generation_config: {
+              temperature: 0.1,
+              top_p: 1,
+              max_output_tokens: 900
+            }
           }
         })
       },
@@ -52,17 +59,25 @@ describe("analysis service", () => {
     const summary = await service.executeLoadedRun("pipeline-run-1");
 
     expect(repository.createdAnalysisRunInputs).toHaveLength(1);
-    expect(repository.createdAnalysisRunInputs[0]?.promptHash).toBe("backend-page-prompt-hash");
+    expect(repository.createdAnalysisRunInputs[0]?.promptHash).toBe("service-effective-hash");
+    expect(repository.createdAnalysisRunInputs[0]?.modelName).toBe("gpt-live");
     expect(repository.updatedRuntimeSnapshots).toHaveLength(1);
     expect(repository.updatedRuntimeSnapshots[0]?.runtimeSnapshotJson).toMatchObject({
       service_runtime: {
         effective_prompt_hash: "service-effective-hash",
-        system_prompt_version: "service_system.v1"
+        system_prompt_version: "service_system.v2",
+        provider: "openai_compatible",
+        model_name: "gpt-live",
+        generation_config: {
+          temperature: 0.1,
+          top_p: 1,
+          max_output_tokens: 900
+        }
       },
       backend_runtime: {
         profile_id: "conversation-analysis",
         version_no: 1,
-        model_name: "service-managed",
+        requested_model_name: "resolved-by-service",
         page_prompt_hash: "backend-page-prompt-hash",
         page_prompt_version: "A",
         taxonomy_version_id: "taxonomy-version-1",
@@ -75,6 +90,12 @@ describe("analysis service", () => {
       {
         analysisRunId: "analysis-run-1",
         promptHash: "service-effective-hash"
+      }
+    ]);
+    expect(repository.updatedAnalysisRunModelNames).toEqual([
+      {
+        analysisRunId: "analysis-run-1",
+        modelName: "gpt-live"
       }
     ]);
     expect(summary.promptHash).toBe("service-effective-hash");
@@ -127,7 +148,7 @@ describe("analysis service", () => {
             ],
             runtimeMetadataJson: {
               effective_prompt_hash: "service-effective-hash",
-              system_prompt_version: "service_system.v1"
+              system_prompt_version: "service_system.v2"
             }
           };
         }
@@ -137,9 +158,10 @@ describe("analysis service", () => {
 
     const summary = await service.executeLoadedRun("pipeline-run-1");
 
-    expect(clientCalls).toHaveLength(1);
-    expect(clientCalls[0]?.bundles).toHaveLength(1);
-    expect(clientCalls[0]?.bundles[0]?.threadDayId).toBe("thread-day-2");
+    expect(clientCalls).toHaveLength(2);
+    expect(clientCalls[0]?.bundles).toHaveLength(0);
+    expect(clientCalls[1]?.bundles).toHaveLength(1);
+    expect(clientCalls[1]?.bundles[0]?.threadDayId).toBe("thread-day-2");
     expect(repository.markAnalysisRunRunningCalls).toEqual(["analysis-run-1"]);
     expect(repository.upsertedResults).toHaveLength(1);
     expect(repository.upsertedResults[0]?.threadDayId).toBe("thread-day-2");
@@ -204,7 +226,7 @@ describe("analysis service", () => {
             })),
             runtimeMetadataJson: {
               effective_prompt_hash: "service-effective-hash",
-              system_prompt_version: "service_system.v1"
+              system_prompt_version: "service_system.v2"
             }
           };
         }
@@ -214,8 +236,9 @@ describe("analysis service", () => {
 
     const summary = await service.executeLoadedRun("pipeline-run-1");
 
-    expect(clientCalls).toHaveLength(1);
-    expect(clientCalls[0]?.bundles.map((bundle) => bundle.threadDayId)).toEqual(["thread-day-1", "thread-day-2"]);
+    expect(clientCalls).toHaveLength(2);
+    expect(clientCalls[0]?.bundles).toHaveLength(0);
+    expect(clientCalls[1]?.bundles.map((bundle) => bundle.threadDayId)).toEqual(["thread-day-1", "thread-day-2"]);
     expect(repository.updatedPipelineMetrics?.resumed).toBe(false);
     expect(repository.updatedPipelineMetrics?.skippedThreadDayIds).toEqual([]);
     expect(summary.skippedThreadDayIds).toEqual([]);
@@ -274,7 +297,8 @@ function createRepositoryStub(overrides?: {
     markAnalysisRunRunningCalls: [] as string[],
     updatedRuntimeSnapshots: [] as Array<{ analysisRunId: string; runtimeSnapshotJson: Record<string, unknown> }>,
     updatedAnalysisRunPromptHashes: [] as Array<{ analysisRunId: string; promptHash: string }>,
-    createdAnalysisRunInputs: [] as Array<{ promptHash: string; promptVersion: string; runtimeSnapshotJson: Record<string, unknown> }>,
+    updatedAnalysisRunModelNames: [] as Array<{ analysisRunId: string; modelName: string }>,
+    createdAnalysisRunInputs: [] as Array<{ modelName: string; promptHash: string; promptVersion: string; runtimeSnapshotJson: Record<string, unknown> }>,
     upsertedResults: [] as any[],
     updatedPipelineMetrics: null as AnalysisExecutionSummary | null,
     restorePipelineRunLoadedCalls: [] as string[],
@@ -288,8 +312,9 @@ function createRepositoryStub(overrides?: {
     async findLatestMatchingAnalysisRun() {
       return hasExistingAnalysisRun ? analysisRun : null;
     },
-    async createAnalysisRun(input: { promptHash: string; promptVersion: string; runtimeSnapshotJson: Record<string, unknown> }) {
+    async createAnalysisRun(input: { modelName: string; promptHash: string; promptVersion: string; runtimeSnapshotJson: Record<string, unknown> }) {
       repository.createdAnalysisRunInputs.push(input);
+      analysisRun.modelName = input.modelName;
       analysisRun.promptHash = input.promptHash;
       analysisRun.promptVersion = input.promptVersion;
       analysisRun.runtimeSnapshotJson = input.runtimeSnapshotJson;
@@ -305,12 +330,19 @@ function createRepositoryStub(overrides?: {
     async updateAnalysisRunRuntimeSnapshot(
       analysisRunId: string,
       runtimeSnapshotJson: Record<string, unknown>,
-      promptHash?: string
+      options?: {
+        promptHash?: string;
+        modelName?: string;
+      }
     ) {
       repository.updatedRuntimeSnapshots.push({ analysisRunId, runtimeSnapshotJson });
-      if (promptHash) {
-        repository.updatedAnalysisRunPromptHashes.push({ analysisRunId, promptHash });
-        analysisRun.promptHash = promptHash;
+      if (options?.promptHash) {
+        repository.updatedAnalysisRunPromptHashes.push({ analysisRunId, promptHash: options.promptHash });
+        analysisRun.promptHash = options.promptHash;
+      }
+      if (options?.modelName) {
+        repository.updatedAnalysisRunModelNames.push({ analysisRunId, modelName: options.modelName });
+        analysisRun.modelName = options.modelName;
       }
       analysisRun.runtimeSnapshotJson = runtimeSnapshotJson;
       return analysisRun;
@@ -365,7 +397,7 @@ function createAnalysisRun() {
     configVersionId: "config-version-1",
     taxonomyVersionId: "taxonomy-version-1",
     snapshotIdentityKey: "snapshot-key-1",
-    modelName: "service-managed",
+    modelName: "resolved-by-service",
     promptHash: "backend-page-prompt-hash",
     promptVersion: "A",
     runtimeSnapshotJson: {},
