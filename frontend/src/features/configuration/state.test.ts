@@ -1,7 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import type { ConfigurationState, OnboardingState } from "../../app/screen-state.ts";
 import { renderConfiguration } from "./render.ts";
-import { buildCreateConfigVersionInput, configVersionToDraft } from "./state.ts";
+import { buildCreateConfigVersionInput, buildOnboardingSamplePreviewInput, configVersionToDraft } from "./state.ts";
 
 describe("configuration workflow", () => {
   it("serializes structured configuration editors into the control-plane contract", () => {
@@ -13,7 +13,7 @@ describe("configuration workflow", () => {
       openingRules: [
         { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
       ],
-      scheduler: { useSystemDefaults: false, officialDailyTime: "00:30", lookbackHours: 3 },
+      scheduler: { useSystemDefaults: false, timezone: "Asia/Saigon", officialDailyTime: "00:30", lookbackHours: 3 },
       notificationTargets: [
         { channel: "telegram", value: "@ops-alert" }
       ],
@@ -53,7 +53,7 @@ describe("configuration workflow", () => {
     });
     expect(payload.schedulerJson).toEqual({
       version: 1,
-      timezone: "Asia/Ho_Chi_Minh",
+      timezone: "Asia/Saigon",
       officialDailyTime: "00:30",
       lookbackHours: 3,
       maxConversationsPerRun: 0,
@@ -136,6 +136,7 @@ describe("configuration workflow", () => {
     ]);
     expect(draft.scheduler).toEqual({
       useSystemDefaults: false,
+      timezone: "Asia/Ho_Chi_Minh",
       officialDailyTime: "00:30",
       lookbackHours: 3
     });
@@ -173,6 +174,7 @@ describe("configuration workflow", () => {
     ]);
     expect(draft.scheduler).toEqual({
       useSystemDefaults: true,
+      timezone: "Asia/Ho_Chi_Minh",
       officialDailyTime: "00:00",
       lookbackHours: 2
     });
@@ -210,16 +212,95 @@ describe("configuration workflow", () => {
     expect(html).toContain("risk_level");
   });
 
-  it("renders onboarding timezone as a select and shows a dedicated lane for normal operators", () => {
+  it("renders onboarding timezone as an owner-clean input and shows a dedicated lane for normal operators", () => {
     const configuration = createConfigurationState();
     const onboarding = createOnboardingState();
 
     const html = renderConfiguration(configuration, onboarding);
 
-    expect(html).toContain("<select name=\"timezone\"");
-    expect(html).not.toContain("<input name=\"timezone\"");
+    expect(html).toContain("<input name=\"timezone\"");
+    expect(html).toContain("onboarding-timezone-options");
     expect(html).toContain("Page đang vận hành");
     expect(html).toContain("Tải cấu hình page đã chọn");
+  });
+
+  it("builds onboarding sample preview input from the current draft without mock-only fields", () => {
+    const payload = buildOnboardingSamplePreviewInput({
+      pancakePageId: "pk_101",
+      userAccessToken: "user-token",
+      pageName: "Page Da Lieu Quan 1",
+      businessTimezone: "Asia/Saigon",
+      tagMappings: [
+        { rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+      ],
+      openingRules: [
+        { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
+      ],
+      scheduler: { useSystemDefaults: true, timezone: "Asia/Bangkok", officialDailyTime: "00:00", lookbackHours: 2 },
+      sampleConversationLimit: 9,
+      sampleMessagePageLimit: 3
+    });
+
+    expect(payload).toMatchObject({
+      pancakePageId: "pk_101",
+      userAccessToken: "user-token",
+      businessTimezone: "Asia/Saigon",
+      sampleConversationLimit: 9,
+      sampleMessagePageLimit: 3
+    });
+    expect(payload.schedulerJson).toMatchObject({
+      timezone: "Asia/Saigon"
+    });
+  });
+
+  it("renders onboarding sample workspace from raw HTTP preview payload", () => {
+    const configuration = {
+      ...createConfigurationState(),
+      onboardingSamplePreview: {
+        pageId: "pk_101",
+        pageName: "Page Da Lieu Quan 1",
+        targetDate: "2026-04-05",
+        businessTimezone: "Asia/Saigon",
+        windowStartAt: "2026-04-04T17:00:00.000Z",
+        windowEndExclusiveAt: "2026-04-05T09:30:00.000Z",
+        summary: {
+          conversationsScanned: 6,
+          threadDaysBuilt: 4,
+          messagesSeen: 22,
+          messagesSelected: 11
+        },
+        pageTags: [
+          { pancakeTagId: "11", text: "KH mới", isDeactive: false }
+        ],
+        conversations: [
+          {
+            conversationId: "c-1",
+            customerDisplayName: "Khách A",
+            firstMeaningfulMessageText: "Em muốn tái khám chiều nay",
+            observedTags: [
+              { sourceTagId: "11", sourceTagText: "KH mới" }
+            ],
+            normalizedTagSignals: [
+              { role: "journey", sourceTagText: "KH mới", canonicalCode: "new_to_clinic", mappingSource: "operator" }
+            ],
+            openingMessages: [
+              { senderRole: "customer", messageType: "text", redactedText: "Em muốn tái khám chiều nay" }
+            ],
+            explicitSignals: [
+              { signalRole: "journey", signalCode: "revisit", rawText: "Khách hàng tái khám" }
+            ],
+            cutReason: "first_meaningful_message"
+          }
+        ]
+      }
+    };
+
+    const html = renderConfiguration(configuration, createOnboardingState());
+
+    expect(html).toContain("Sample dữ liệu thật");
+    expect(html).toContain("KH mới");
+    expect(html).toContain("first_meaningful_message");
+    expect(html).toContain("Khách hàng tái khám");
   });
 
   it("renders prompt editor empty until a backend config is loaded", () => {
@@ -335,13 +416,13 @@ function createConfigurationState(): ConfigurationState {
     promptText: "Prompt sample",
     tagMappings: [],
     openingRules: [],
-    scheduler: { useSystemDefaults: true, officialDailyTime: "00:00", lookbackHours: 2 },
+    scheduler: { useSystemDefaults: true, timezone: "Asia/Ho_Chi_Minh", officialDailyTime: "00:00", lookbackHours: 2 },
     notificationTargets: [],
     notes: "",
     activateAfterCreate: true,
     etlEnabled: true,
     analysisEnabled: false,
-    promptPreview: null,
+    onboardingSamplePreview: null,
     promptCloneSourceVersionId: "",
     promptCloneSourcePageId: "",
     promptCompareLeftVersionId: "cfg-18",
@@ -356,6 +437,8 @@ function createOnboardingState(): OnboardingState {
     selectedPancakePageId: "",
     timezone: "Asia/Ho_Chi_Minh",
     etlEnabled: true,
-    analysisEnabled: false
+    analysisEnabled: false,
+    sampleConversationLimit: 12,
+    sampleMessagePageLimit: 2
   };
 }

@@ -6,15 +6,11 @@ import type {
   ExplorationViewModel,
   OverviewViewModel,
   PageComparisonViewModel,
-  PromptPreviewViewModel,
   StaffPerformanceViewModel,
   ThreadHistoryViewModel
 } from "../contracts.ts";
 import type { BusinessFilters } from "../../core/types.ts";
-import { createBusinessAdapter as createDemoBusinessAdapter } from "../demo/business-adapter.ts";
 import { requestJson } from "./client.ts";
-
-const demoAdapter = createDemoBusinessAdapter();
 
 export function createHttpBusinessAdapter(getBaseUrl: () => string): BusinessAdapter {
   return {
@@ -85,9 +81,6 @@ export function createHttpBusinessAdapter(getBaseUrl: () => string): BusinessAda
         `/read-models/export-workbook?${buildExportQuery(input)}`
       );
       return result.workbook;
-    },
-    async getPromptPreview(): Promise<PromptPreviewViewModel> {
-      return demoAdapter.getPromptPreview();
     }
   };
 }

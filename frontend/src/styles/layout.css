@@ -1,16 +1,16 @@
 .app-shell {
   min-height: 100dvh;
   display: grid;
-  grid-template-columns: 248px minmax(0, 1fr);
-  gap: 12px;
-  padding: 12px;
+  grid-template-columns: 228px minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-3);
 }
 
 .shell-sidebar,
 .shell-main {
   min-height: 0;
   display: grid;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .shell-main {
@@ -23,11 +23,11 @@
 .two-column-grid,
 .metric-grid {
   display: grid;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .history-layout {
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: 288px minmax(0, 1fr);
 }
 
 .two-column-grid {
@@ -36,14 +36,14 @@
 
 .configuration-shell {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
-  gap: 10px;
+  grid-template-columns: 296px minmax(0, 1fr);
+  gap: var(--space-2);
   align-items: start;
 }
 
 .configuration-sidebar {
   display: grid;
-  gap: 10px;
+  gap: var(--space-2);
 }
 
 .configuration-main {
@@ -65,7 +65,7 @@
 .list-grid,
 .audit-grid {
   display: grid;
-  gap: 16px;
+  gap: var(--space-3);
 }
 
 .list-grid {

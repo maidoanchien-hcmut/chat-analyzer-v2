@@ -3,6 +3,7 @@ import {
   createConfigVersionBodySchema,
   executeJobBodySchema,
   listPagesBodySchema,
+  onboardingSamplePreviewBodySchema,
   previewJobBodySchema,
   publishRunBodySchema,
   registerPageBodySchema
@@ -33,6 +34,15 @@ export const chatExtractorController = new Elysia({ prefix: "/chat-extractor" })
   .post("/control-center/pages/register", async ({ body }) => {
     const parsed = registerPageBodySchema.parse(normalizeBodyKeys(body));
     return chatExtractorService.registerPageConfig(parsed);
+  }, {
+    body: t.Any(),
+    response: t.Any()
+  })
+  .post("/control-center/pages/onboarding-sample/preview", async ({ body }) => {
+    const parsed = onboardingSamplePreviewBodySchema.parse(normalizeBodyKeys(body));
+    return {
+      samplePreview: await chatExtractorService.previewOnboardingSample(parsed)
+    };
   }, {
     body: t.Any(),
     response: t.Any()

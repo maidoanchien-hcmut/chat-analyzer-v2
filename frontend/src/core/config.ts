@@ -26,5 +26,5 @@ export const FEATURE_SOURCE_MATRIX: Record<AppView | "onboarding" | "prompt-prof
   operations: "http",
   configuration: "http",
   onboarding: "http",
-  "prompt-profile-preview": "hybrid"
+  "prompt-profile-preview": "http"
 };

@@ -199,14 +199,30 @@ export type ConnectedPageDetailViewModel = ConnectedPageSummary & {
   activeConfigVersion: ConnectedPageConfigVersion | null;
 };
 
-export type PromptPreviewViewModel = {
-  activeVersionLabel: string;
-  draftVersionLabel: string;
-  beforeSummary: string;
-  afterSummary: string;
-  structuredOutput: Array<{ field: string; value: string }>;
-  evidence: string[];
-  explanations: FieldExplanation[];
+export type OnboardingSamplePreviewViewModel = {
+  pageId: string;
+  pageName: string;
+  targetDate: string;
+  businessTimezone: string;
+  windowStartAt: string;
+  windowEndExclusiveAt: string;
+  summary: {
+    conversationsScanned: number;
+    threadDaysBuilt: number;
+    messagesSeen: number;
+    messagesSelected: number;
+  };
+  pageTags: Array<{ pancakeTagId: string; text: string; isDeactive: boolean }>;
+  conversations: Array<{
+    conversationId: string;
+    customerDisplayName: string;
+    firstMeaningfulMessageText: string;
+    observedTags: Array<{ sourceTagId: string; sourceTagText: string }>;
+    normalizedTagSignals: Array<{ role: string; sourceTagText: string; canonicalCode: string; mappingSource: string }>;
+    openingMessages: Array<{ senderRole: string; messageType: string; redactedText: string }>;
+    explicitSignals: Array<{ signalRole: string; signalCode: string; rawText: string }>;
+    cutReason: string;
+  }>;
 };
 
 export type HistoricalOverwriteViewModel = {
@@ -357,6 +373,18 @@ export type RegisterPageInput = {
   analysisEnabled: boolean;
 };
 
+export type OnboardingSamplePreviewInput = {
+  pancakePageId: string;
+  userAccessToken: string;
+  pageName: string;
+  businessTimezone: string;
+  tagMappingJson: unknown;
+  openingRulesJson: unknown;
+  schedulerJson: unknown;
+  sampleConversationLimit: number;
+  sampleMessagePageLimit: number;
+};
+
 export type ManualRunInput = {
   connectedPageId: string;
   processingMode: "etl_only" | "etl_and_ai";
@@ -378,12 +406,12 @@ export interface BusinessAdapter {
   ): Promise<ThreadHistoryViewModel>;
   getPageComparison(filters: BusinessFilters, comparePageIds: string[]): Promise<PageComparisonViewModel>;
   getExportWorkbook(input: ExportRequestInput): Promise<ExportWorkbookViewModel>;
-  getPromptPreview(): Promise<PromptPreviewViewModel>;
 }
 
 export interface ControlPlaneAdapter {
   listPagesFromToken(userAccessToken: string): Promise<OnboardingPageCandidate[]>;
   registerPage(input: RegisterPageInput): Promise<ConnectedPageDetailViewModel>;
+  previewOnboardingSample(input: OnboardingSamplePreviewInput): Promise<OnboardingSamplePreviewViewModel>;
   listConnectedPages(): Promise<ConnectedPageSummary[]>;
   getConnectedPage(pageId: string): Promise<ConnectedPageDetailViewModel>;
   createConfigVersion(pageId: string, input: CreateConfigVersionInput): Promise<void>;

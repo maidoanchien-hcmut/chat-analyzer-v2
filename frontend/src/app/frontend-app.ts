@@ -4,6 +4,7 @@ import { DEFAULT_API_BASE_URL, FEATURE_SOURCE_MATRIX, NAV_ITEMS, STORAGE_API_BAS
 import type { AppToast, AsyncStatus, BusinessFilters, RouteState } from "../core/types.ts";
 import { renderConfiguration } from "../features/configuration/render.ts";
 import {
+  buildOnboardingSamplePreviewInput,
   buildCreateConfigVersionInput,
   configVersionToDraft,
   createDefaultScheduler,
@@ -41,7 +42,16 @@ export class FrontendApp {
   private catalog: Awaited<ReturnType<typeof this.businessAdapter.loadCatalog>> | null = null;
   private currentViewHtml = "";
   private exportWorkflow: ExportWorkflowState = createDefaultExportWorkflowState();
-  private onboarding: OnboardingState = { token: "", tokenPages: [], selectedPancakePageId: "", timezone: "Asia/Ho_Chi_Minh", etlEnabled: true, analysisEnabled: false };
+  private onboarding: OnboardingState = {
+    token: "",
+    tokenPages: [],
+    selectedPancakePageId: "",
+    timezone: "Asia/Ho_Chi_Minh",
+    etlEnabled: true,
+    analysisEnabled: false,
+    sampleConversationLimit: 12,
+    sampleMessagePageLimit: 2
+  };
   private configuration: ConfigurationState = {
     activeTab: "page-info",
     connectedPages: [],
@@ -57,7 +67,7 @@ export class FrontendApp {
     activateAfterCreate: true,
     etlEnabled: true,
     analysisEnabled: false,
-    promptPreview: null,
+    onboardingSamplePreview: null,
     promptCloneSourceVersionId: "",
     promptCloneSourcePageId: "",
     promptCompareLeftVersionId: "",
@@ -149,9 +159,8 @@ export class FrontendApp {
       } else if (action === "use-active-config" && this.configuration.pageDetail?.activeConfigVersion) {
         this.hydrateConfig(this.configuration.pageDetail.activeConfigVersion);
         this.toast = { kind: "info", message: "Đã nạp active config." };
-      } else if (action === "load-prompt-preview") {
-        this.configuration.promptPreview = await this.businessAdapter.getPromptPreview();
-        this.toast = { kind: "info", message: "Đã nạp sample preview cho prompt profile." };
+      } else if (action === "load-onboarding-sample") {
+        await this.loadOnboardingSamplePreview();
       } else if (action === "activate-config-version") {
         await this.activateConfigVersion();
       } else if (action === "execute-manual-run") {
@@ -309,6 +318,10 @@ export class FrontendApp {
         });
         window.history.replaceState({}, "", `?${serializeRouteState(this.route)}`);
         await this.loadCurrentView();
+      } else if (form.dataset.form === "onboarding-token") {
+        this.syncOnboardingTokenDraft(form);
+      } else if (form.dataset.form === "onboarding-register") {
+        this.syncOnboardingSelectionDraft(form);
       } else if (form.dataset.form === "configuration-create") {
         this.syncConfigurationDraftFromForm(form);
       } else if (form.dataset.form === "operations-publish") {
@@ -387,21 +400,20 @@ export class FrontendApp {
   }
 
   private async listFromToken(form: HTMLFormElement) {
-    const data = new FormData(form);
-    this.onboarding.token = String(data.get("token") ?? "");
-    this.onboarding.timezone = String(data.get("timezone") ?? "Asia/Ho_Chi_Minh");
-    this.onboarding.etlEnabled = data.get("etlEnabled") !== null;
-    this.onboarding.analysisEnabled = data.get("analysisEnabled") !== null;
+    this.syncOnboardingTokenDraft(form);
     await this.withPending("list-from-token", async () => {
       this.onboarding.tokenPages = await this.controlPlaneAdapter.listPagesFromToken(this.onboarding.token.trim());
       this.onboarding.selectedPancakePageId = this.onboarding.tokenPages[0]?.pageId ?? "";
+      this.configuration.onboardingSamplePreview = null;
+      this.configuration.scheduler.timezone = this.onboarding.timezone || this.configuration.scheduler.timezone;
       this.toast = { kind: "info", message: `Đã tải ${this.onboarding.tokenPages.length} page từ token.` };
     });
   }
 
   private async registerPage(form: HTMLFormElement) {
-    const data = new FormData(form);
-    const pancakePageId = String(data.get("pancakePageId") ?? this.onboarding.selectedPancakePageId).trim();
+    this.syncOnboardingTokenDraft(this.root.querySelector<HTMLFormElement>("[data-form='onboarding-token']"));
+    this.syncOnboardingSelectionDraft(form);
+    const pancakePageId = this.onboarding.selectedPancakePageId.trim();
     if (!pancakePageId) {
       throw new Error("Cần chọn Pancake page.");
     }
@@ -414,6 +426,7 @@ export class FrontendApp {
         analysisEnabled: this.onboarding.analysisEnabled
       });
       this.applyLoadedConnectedPage(detail);
+      this.configuration.onboardingSamplePreview = null;
       await this.refreshControlPages({ reloadView: false });
       this.toast = { kind: "info", message: "Đã register page qua HTTP thật." };
     });
@@ -596,8 +609,40 @@ export class FrontendApp {
     });
   }
 
+  private async loadOnboardingSamplePreview() {
+    this.syncOnboardingTokenDraft(this.root.querySelector<HTMLFormElement>("[data-form='onboarding-token']"));
+    this.syncOnboardingSelectionDraft(this.root.querySelector<HTMLFormElement>("[data-form='onboarding-register']"));
+    this.syncConfigurationDraftFromForm(this.root.querySelector<HTMLFormElement>("[data-form='configuration-create']"));
+
+    if (!this.onboarding.token.trim()) {
+      throw new Error("Cần nhập user access token trước khi lấy sample.");
+    }
+    if (!this.onboarding.selectedPancakePageId.trim()) {
+      throw new Error("Cần chọn Pancake page trước khi lấy sample.");
+    }
+
+    await this.withPending("load-onboarding-sample", async () => {
+      const selectedPage = this.onboarding.tokenPages.find((page) => page.pageId === this.onboarding.selectedPancakePageId);
+      this.configuration.onboardingSamplePreview = await this.controlPlaneAdapter.previewOnboardingSample(
+        buildOnboardingSamplePreviewInput({
+          pancakePageId: this.onboarding.selectedPancakePageId,
+          userAccessToken: this.onboarding.token.trim(),
+          pageName: selectedPage?.pageName ?? this.onboarding.selectedPancakePageId,
+          businessTimezone: this.onboarding.timezone,
+          tagMappings: this.configuration.tagMappings,
+          openingRules: this.configuration.openingRules,
+          scheduler: this.configuration.scheduler,
+          sampleConversationLimit: this.onboarding.sampleConversationLimit,
+          sampleMessagePageLimit: this.onboarding.sampleMessagePageLimit
+        })
+      );
+      this.toast = { kind: "info", message: "Đã nạp sample dữ liệu thật cho workspace cấu hình." };
+    });
+  }
+
   private hydrateConfig(configVersion: NonNullable<ConfigurationState["pageDetail"]>["activeConfigVersion"] | NonNullable<ConfigurationState["pageDetail"]>["configVersions"][number] | null) {
-    const draft = configVersionToDraft(configVersion);
+    const fallbackTimezone = this.configuration.pageDetail?.businessTimezone ?? this.onboarding.timezone;
+    const draft = configVersionToDraft(configVersion, fallbackTimezone);
     this.configuration.promptText = draft.promptText;
     this.configuration.tagMappings = draft.tagMappings;
     this.configuration.openingRules = draft.openingRules;
@@ -609,6 +654,7 @@ export class FrontendApp {
   private applyLoadedConnectedPage(detail: NonNullable<ConfigurationState["pageDetail"]>) {
     this.configuration.selectedPageId = detail.id;
     this.configuration.pageDetail = detail;
+    this.configuration.onboardingSamplePreview = null;
     this.configuration.selectedConfigVersionId = detail.activeConfigVersionId ?? detail.configVersions[0]?.id ?? "";
     this.configuration.etlEnabled = detail.etlEnabled;
     this.configuration.analysisEnabled = detail.analysisEnabled;
@@ -617,6 +663,39 @@ export class FrontendApp {
     this.configuration.promptCompareLeftVersionId = detail.configVersions[0]?.id ?? "";
     this.configuration.promptCompareRightVersionId = detail.configVersions[1]?.id ?? detail.configVersions[0]?.id ?? "";
     this.hydrateConfig(detail.activeConfigVersion ?? detail.configVersions[0] ?? null);
+  }
+
+  private syncOnboardingTokenDraft(form: HTMLFormElement | null) {
+    if (!form) {
+      return;
+    }
+    const data = new FormData(form);
+    this.onboarding.token = String(data.get("token") ?? this.onboarding.token);
+    this.onboarding.timezone = String(data.get("timezone") ?? this.onboarding.timezone).trim() || "Asia/Ho_Chi_Minh";
+    this.onboarding.etlEnabled = data.get("etlEnabled") !== null;
+    this.onboarding.analysisEnabled = data.get("analysisEnabled") !== null;
+  }
+
+  private syncOnboardingSelectionDraft(form: HTMLFormElement | null) {
+    if (!form) {
+      return;
+    }
+    const data = new FormData(form);
+    this.onboarding.selectedPancakePageId = String(data.get("pancakePageId") ?? this.onboarding.selectedPancakePageId).trim();
+    this.onboarding.sampleConversationLimit = readBoundedIntegerField(
+      data,
+      "sampleConversationLimit",
+      this.onboarding.sampleConversationLimit,
+      1,
+      100
+    );
+    this.onboarding.sampleMessagePageLimit = readBoundedIntegerField(
+      data,
+      "sampleMessagePageLimit",
+      this.onboarding.sampleMessagePageLimit,
+      1,
+      20
+    );
   }
 
   private syncConfigurationDraftFromForm(form: HTMLFormElement | null) {
@@ -647,6 +726,7 @@ export class FrontendApp {
     );
     this.configuration.scheduler = {
       useSystemDefaults: data.get("schedulerUseSystemDefaults") !== null,
+      timezone: String(data.get("schedulerTimezone") ?? this.configuration.scheduler.timezone).trim() || this.onboarding.timezone,
       officialDailyTime: String(data.get("schedulerOfficialDailyTime") ?? this.configuration.scheduler.officialDailyTime).trim() || "00:00",
       lookbackHours: Number(String(data.get("schedulerLookbackHours") ?? this.configuration.scheduler.lookbackHours).trim() || "2")
     };
@@ -877,4 +957,24 @@ function normalizeComparePageIds(comparePageIds: string[], pages: Array<{ id: st
     return fallbackPageId ? [uniqueSelected[0], fallbackPageId] : uniqueSelected;
   }
   return availablePageIds.slice(0, 2);
+}
+
+function readBoundedIntegerField(
+  data: FormData,
+  key: string,
+  fallback: number,
+  min: number,
+  max: number
+) {
+  const rawValue = data.get(key);
+  if (rawValue === null) {
+    return fallback;
+  }
+
+  const parsed = Number.parseInt(String(rawValue).trim(), 10);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+
+  return Math.min(max, Math.max(min, parsed));
 }

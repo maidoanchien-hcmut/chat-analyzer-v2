@@ -35,6 +35,7 @@ Schema extraction hiện theo owner-clean seam:
 
 - `POST /chat-extractor/control-center/pages/list-from-token`
 - `POST /chat-extractor/control-center/pages/register`
+- `POST /chat-extractor/control-center/pages/onboarding-sample/preview`
 - `GET /chat-extractor/control-center/pages`
 - `GET /chat-extractor/control-center/pages/:id`
 - `POST /chat-extractor/control-center/pages/:id/config-versions`

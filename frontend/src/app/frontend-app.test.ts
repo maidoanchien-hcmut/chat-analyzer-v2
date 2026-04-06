@@ -107,6 +107,41 @@ beforeEach(() => {
         });
       }
 
+      if (url.pathname === "/chat-extractor/control-center/pages/onboarding-sample/preview" && request.method === "POST") {
+        return json({
+          samplePreview: {
+            pageId: "pk_101",
+            targetDate: "2026-04-05",
+            businessTimezone: "Asia/Ho_Chi_Minh",
+            windowStartAt: "2026-04-04T17:00:00.000Z",
+            windowEndExclusiveAt: "2026-04-05T06:00:00.000Z",
+            summary: {
+              conversations_scanned: 3,
+              thread_days_built: 2,
+              messages_seen: 10,
+              messages_selected: 6
+            },
+            pageTags: [
+              { pancakeTagId: "11", text: "KH mới", isDeactive: false }
+            ],
+            conversations: [
+              {
+                conversationId: "c-1",
+                customerDisplayName: "Khách A",
+                firstMeaningfulMessageText: "Cho mình hỏi lịch tái khám.",
+                observedTagsJson: [{ source_tag_id: "11", source_tag_text: "KH mới" }],
+                normalizedTagSignalsJson: { journey: [{ source_tag_text: "KH mới", canonical_code: "new_to_clinic", mapping_source: "operator" }], need: [], outcome: [], branch: [], staff: [], noise: [] },
+                openingBlockJson: {
+                  explicit_signals: [{ signal_role: "journey", signal_code: "revisit", raw_text: "Khách hàng tái khám" }],
+                  messages: [{ sender_role: "customer", message_type: "text", redacted_text: "Cho mình hỏi lịch tái khám." }],
+                  cut_reason: "first_meaningful_message"
+                }
+              }
+            ]
+          }
+        });
+      }
+
       if (url.pathname === "/read-models/health") {
         return json({
           healthSummary: {
@@ -161,7 +196,9 @@ describe("frontend app", () => {
       selectedPancakePageId: "pk_101",
       timezone: "Asia/Ho_Chi_Minh",
       etlEnabled: true,
-      analysisEnabled: false
+      analysisEnabled: false,
+      sampleConversationLimit: 12,
+      sampleMessagePageLimit: 2
     };
 
     const form = {
@@ -178,6 +215,103 @@ describe("frontend app", () => {
     expect((app as any).configuration.selectedPageId).toBe("11111111-1111-4111-8111-111111111111");
     expect((app as any).configuration.pageDetail?.activeConfigVersionId).toBe("cfg-101");
     expect((app as any).configuration.promptText).toBe("Prompt default từ backend.");
+  });
+
+  it("loads real onboarding sample preview into configuration state", async () => {
+    installBrowserGlobals("?view=configuration", baseUrl);
+    const root = createRoot();
+    const app = new FrontendApp(root);
+    await app.init();
+
+    (app as any).onboarding = {
+      token: "user-token",
+      tokenPages: [{ pageId: "pk_101", pageName: "Page Da Lieu Quan 1" }],
+      selectedPancakePageId: "pk_101",
+      timezone: "Asia/Ho_Chi_Minh",
+      etlEnabled: true,
+      analysisEnabled: false,
+      sampleConversationLimit: 12,
+      sampleMessagePageLimit: 2
+    };
+
+    await (app as any).loadOnboardingSamplePreview();
+
+    expect((app as any).configuration.onboardingSamplePreview?.pageName).toBe("Page Da Lieu Quan 1");
+    expect((app as any).configuration.onboardingSamplePreview?.conversations[0]?.normalizedTagSignals[0]?.canonicalCode).toBe("new_to_clinic");
+  });
+
+  it("uses custom onboarding sample limits from the register form", async () => {
+    installBrowserGlobals("?view=configuration", baseUrl);
+    const tokenForm = { kind: "token" };
+    const registerForm = { kind: "register" };
+    const root = createRoot({
+      querySelector(selector: string) {
+        if (selector === "[data-form='onboarding-token']") {
+          return tokenForm as unknown as HTMLFormElement;
+        }
+        if (selector === "[data-form='onboarding-register']") {
+          return registerForm as unknown as HTMLFormElement;
+        }
+        return null;
+      }
+    });
+    const app = new FrontendApp(root);
+    await app.init();
+
+    (app as any).onboarding.tokenPages = [{ pageId: "pk_101", pageName: "Page Da Lieu Quan 1" }];
+    let capturedPreviewInput: Record<string, unknown> | null = null;
+    Object.assign((app as any).controlPlaneAdapter, {
+      async previewOnboardingSample(input: Record<string, unknown>) {
+        capturedPreviewInput = input;
+        return {
+          pageId: "pk_101",
+          pageName: "Page Da Lieu Quan 1",
+          targetDate: "2026-04-05",
+          businessTimezone: "Asia/Ho_Chi_Minh",
+          windowStartAt: "2026-04-04T17:00:00.000Z",
+          windowEndExclusiveAt: "2026-04-05T06:00:00.000Z",
+          summary: {
+            conversationsScanned: 0,
+            threadDaysBuilt: 0,
+            messagesSeen: 0,
+            messagesSelected: 0
+          },
+          pageTags: [],
+          conversations: []
+        };
+      }
+    });
+    (globalThis as Record<string, unknown>).FormData = class {
+      constructor(private readonly form: unknown) {}
+
+      get(name: string) {
+        if (this.form === tokenForm) {
+          const tokenValues: Record<string, string> = {
+            token: "user-token",
+            timezone: "Asia/Ho_Chi_Minh"
+          };
+          return tokenValues[name] ?? null;
+        }
+        if (this.form === registerForm) {
+          const registerValues: Record<string, string> = {
+            pancakePageId: "pk_101",
+            sampleConversationLimit: "5",
+            sampleMessagePageLimit: "4"
+          };
+          return registerValues[name] ?? null;
+        }
+        return null;
+      }
+
+      getAll() {
+        return [];
+      }
+    };
+
+    await (app as any).loadOnboardingSamplePreview();
+
+    expect(capturedPreviewInput?.sampleConversationLimit).toBe(5);
+    expect(capturedPreviewInput?.sampleMessagePageLimit).toBe(4);
   });
 });
 
@@ -200,10 +334,14 @@ function installBrowserGlobals(search: string, apiBaseUrl: string) {
   };
 }
 
-function createRoot() {
+function createRoot(overrides?: Partial<HTMLDivElement>) {
   return {
     innerHTML: "",
-    addEventListener() {}
+    addEventListener() {},
+    querySelector() {
+      return null;
+    },
+    ...overrides
   } as unknown as HTMLDivElement;
 }
 

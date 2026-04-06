@@ -202,18 +202,24 @@ type runtimePreviewTag struct {
 }
 
 type runtimePreviewConversation struct {
-	ConversationID   string          `json:"conversationId"`
-	ObservedTagsJSON json.RawMessage `json:"observedTagsJson"`
-	OpeningBlockJSON json.RawMessage `json:"openingBlockJson"`
+	ConversationID           string          `json:"conversationId"`
+	CustomerDisplayName      string          `json:"customerDisplayName"`
+	FirstMeaningfulMessage   string          `json:"firstMeaningfulMessageText"`
+	ObservedTagsJSON         json.RawMessage `json:"observedTagsJson"`
+	NormalizedTagSignalsJSON json.RawMessage `json:"normalizedTagSignalsJson"`
+	OpeningBlockJSON         json.RawMessage `json:"openingBlockJson"`
 }
 
 func buildRuntimePreviewConversations(days []transform.ConversationDaySource) []runtimePreviewConversation {
 	conversations := make([]runtimePreviewConversation, 0, len(days))
 	for _, day := range days {
 		conversations = append(conversations, runtimePreviewConversation{
-			ConversationID:   day.ConversationID,
-			ObservedTagsJSON: day.ObservedTagsJSON,
-			OpeningBlockJSON: day.OpeningBlockJSON,
+			ConversationID:           day.ConversationID,
+			CustomerDisplayName:      day.CustomerDisplayName,
+			FirstMeaningfulMessage:   day.FirstMeaningfulMessageText,
+			ObservedTagsJSON:         day.ObservedTagsJSON,
+			NormalizedTagSignalsJSON: day.NormalizedTagSignalsJSON,
+			OpeningBlockJSON:         day.OpeningBlockJSON,
 		})
 	}
 	return conversations

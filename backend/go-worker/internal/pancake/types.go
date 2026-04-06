@@ -1,6 +1,9 @@
 package pancake
 
-import "encoding/json"
+import (
+	"bytes"
+	"encoding/json"
+)
 
 type Page struct {
 	ID   string `json:"id"`
@@ -57,6 +60,29 @@ type SourceRef struct {
 	AdID       string `json:"ad_id"`
 	PostID     string `json:"post_id"`
 	InsertedAt string `json:"inserted_at"`
+}
+
+func (ref *SourceRef) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if bytes.Equal(trimmed, []byte("null")) {
+		*ref = SourceRef{}
+		return nil
+	}
+
+	var adID string
+	if err := json.Unmarshal(trimmed, &adID); err == nil {
+		*ref = SourceRef{AdID: adID}
+		return nil
+	}
+
+	type alias SourceRef
+	var decoded alias
+	if err := json.Unmarshal(trimmed, &decoded); err != nil {
+		return err
+	}
+
+	*ref = SourceRef(decoded)
+	return nil
 }
 
 type ActivityAdsContextData struct {

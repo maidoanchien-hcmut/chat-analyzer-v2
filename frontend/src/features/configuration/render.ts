@@ -6,7 +6,11 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
   const compareRight = configuration.pageDetail?.configVersions.find((item) => item.id === configuration.promptCompareRightVersionId) ?? null;
   const onboardingTimezones = dedupeTimezones([
     "Asia/Ho_Chi_Minh",
+    "Asia/Saigon",
+    "Asia/Bangkok",
+    "UTC",
     onboarding.timezone,
+    configuration.scheduler.timezone,
     ...configuration.connectedPages.map((page) => page.businessTimezone),
     configuration.pageDetail?.businessTimezone ?? null
   ]);
@@ -40,8 +44,14 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
             </div>
           </div>
           <form data-form="onboarding-token">
-            <label><span>User access token</span><input name="token" type="password" value="${escapeHtml(onboarding.token)}" /></label>
-            <label><span>Timezone</span><select name="timezone">${renderOptions(onboardingTimezones, onboarding.timezone)}</select></label>
+            <label>
+              <span>User access token</span>
+              <textarea name="token" rows="3" spellcheck="false" autocomplete="off" placeholder="Dán user access token Pancake ở đây.">${escapeHtml(onboarding.token)}</textarea>
+            </label>
+            <label>
+              <span>Business timezone</span>
+              <select name="timezone">${renderOptions(onboardingTimezones, onboarding.timezone)}</select>
+            </label>
             <label class="inline-check"><input type="checkbox" name="etlEnabled" ${onboarding.etlEnabled ? "checked" : ""} /> bật ETL</label>
             <label class="inline-check"><input type="checkbox" name="analysisEnabled" ${onboarding.analysisEnabled ? "checked" : ""} /> bật AI</label>
             <button type="submit">Tải page từ token</button>
@@ -54,11 +64,16 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
                 ${onboarding.tokenPages.map((page) => `<option value="${escapeHtml(page.pageId)}" ${page.pageId === onboarding.selectedPancakePageId ? "selected" : ""}>${escapeHtml(page.pageName)}</option>`).join("")}
               </select>
             </label>
+            <div class="two-column-grid">
+              <label><span>Số hội thoại sample</span><input name="sampleConversationLimit" type="number" min="1" max="100" step="1" inputmode="numeric" value="${onboarding.sampleConversationLimit}" /></label>
+              <label><span>Số trang tin nhắn / thread</span><input name="sampleMessagePageLimit" type="number" min="1" max="20" step="1" inputmode="numeric" value="${onboarding.sampleMessagePageLimit}" /></label>
+            </div>
+            <button type="button" data-action="load-onboarding-sample">Lấy sample dữ liệu thật</button>
             <button type="submit">Register và activate mặc định</button>
           </form>
           <div class="banner banner-warning">
             <strong>Lazy operator</strong>
-            <p>Tag taxonomy mới mặc định đi vào <code>noise</code>, opening rules là optional, prompt preview là flow tinh chỉnh riêng và không đổi publish pointer.</p>
+            <p>Tag taxonomy mới mặc định đi vào <code>noise</code>, opening rules là optional, và sample workspace chỉ phục vụ tinh chỉnh non-publish trước khi đưa page vào lịch chạy.</p>
           </div>
         </article>
         <article class="panel-card panel-tight ${configuration.activeTab === "page-info" ? "panel-focus" : ""}">
@@ -99,7 +114,7 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
           <h3>Config version owner-clean</h3>
           <div class="button-row">
             <button data-action="use-active-config">Nạp active config</button>
-            <button data-action="load-prompt-preview">Chạy thử sample</button>
+            <button data-action="load-onboarding-sample">Làm mới sample thật</button>
             <button data-action="activate-config-version">Activate config đang chọn</button>
           </div>
         </div>
@@ -161,7 +176,7 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
               <div class="section-headline">
                 <div>
                   <h4>Prompt profile</h4>
-                  <p class="muted-copy">Prompt profile là plain text business-facing. Clone/compare/evidence/sample preview phục vụ tinh chỉnh inference, không thay thế flow manual run/publish.</p>
+                  <p class="muted-copy">Prompt profile là plain text business-facing. Clone/compare phục vụ quản lý version prompt; sample dữ liệu thật được xem ở workspace riêng bên dưới.</p>
                 </div>
               </div>
               <div class="two-column-grid">
@@ -184,8 +199,8 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
               </div>
               <label><span>Prompt text</span><textarea name="promptText" rows="8" placeholder="Prompt sẽ lấy từ active config của backend sau khi tải page.">${escapeHtml(configuration.promptText)}</textarea></label>
               <div class="banner banner-warning">
-                <strong>Semantics của Chạy thử</strong>
-                <p>Chạy thử chỉ tạo preview sample/inference trong workspace cấu hình, không đổi publish pointer và không đồng nghĩa publish dashboard.</p>
+                <strong>Semantics của sample workspace</strong>
+                <p>Sample chỉ lấy dữ liệu thật để operator rà tag thô và opening block. Luồng này không đổi publish pointer và không đồng nghĩa publish dashboard.</p>
               </div>
               <div class="two-column-grid">
                 <label>
@@ -225,6 +240,11 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
               </div>
               <div class="two-column-grid">
                 <label class="inline-check"><input type="checkbox" name="schedulerUseSystemDefaults" ${configuration.scheduler.useSystemDefaults ? "checked" : ""} /> Dùng mặc định hệ thống</label>
+                <label>
+                  <span>Scheduler timezone</span>
+                  <input name="schedulerTimezone" list="scheduler-timezone-options" value="${escapeHtml(configuration.scheduler.timezone)}" placeholder="Asia/Ho_Chi_Minh" />
+                  <datalist id="scheduler-timezone-options">${renderDatalistOptions(onboardingTimezones)}</datalist>
+                </label>
                 <label><span>Giờ chạy official daily</span><input type="time" name="schedulerOfficialDailyTime" value="${escapeHtml(configuration.scheduler.officialDailyTime)}" /></label>
                 <label><span>Lookback hours</span><input type="number" name="schedulerLookbackHours" min="0" value="${configuration.scheduler.lookbackHours}" /></label>
               </div>
@@ -250,29 +270,33 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
             <button type="submit">Tạo config version</button>
           </div>
         </form>
-        ${configuration.promptPreview ? `
+        ${configuration.onboardingSamplePreview ? `
           <div class="two-column-grid">
             <article class="sub-panel">
-              <h4>Before / After</h4>
-              <p><strong>${escapeHtml(configuration.promptPreview.activeVersionLabel)}</strong>: ${escapeHtml(configuration.promptPreview.beforeSummary)}</p>
-              <p><strong>${escapeHtml(configuration.promptPreview.draftVersionLabel)}</strong>: ${escapeHtml(configuration.promptPreview.afterSummary)}</p>
+              <h4>Sample dữ liệu thật</h4>
+              <div class="meta-list">
+                <span>Page: ${escapeHtml(configuration.onboardingSamplePreview.pageName)}</span>
+                <span>Pancake page id: ${escapeHtml(configuration.onboardingSamplePreview.pageId)}</span>
+                <span>Ngày: ${escapeHtml(configuration.onboardingSamplePreview.targetDate)}</span>
+                <span>Timezone: ${escapeHtml(configuration.onboardingSamplePreview.businessTimezone)}</span>
+              </div>
+              <div class="meta-list">
+                <span>Window: ${escapeHtml(configuration.onboardingSamplePreview.windowStartAt)} -> ${escapeHtml(configuration.onboardingSamplePreview.windowEndExclusiveAt)}</span>
+                ${renderSummarySpans(configuration.onboardingSamplePreview)}
+              </div>
             </article>
             <article class="sub-panel">
-              <h4>Structured output sample</h4>
-              <ul>${configuration.promptPreview.structuredOutput.map((item) => `<li><strong>${escapeHtml(item.field)}</strong>: ${escapeHtml(item.value)}</li>`).join("")}</ul>
+              <h4>Tag thô từ page</h4>
+              ${configuration.onboardingSamplePreview.pageTags.length > 0
+                ? `<ul>${configuration.onboardingSamplePreview.pageTags.map((item) => `<li>${escapeHtml(item.text)}${item.isDeactive ? " (đã tắt)" : ""}</li>`).join("")}</ul>`
+                : "<p class='muted-copy'>Sample chưa thấy tag nào từ page.</p>"}
             </article>
           </div>
-          <div class="two-column-grid">
-            <article class="sub-panel">
-              <h4>Evidence bundle</h4>
-              <ul>${configuration.promptPreview.evidence.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>
-            </article>
-            <article class="sub-panel">
-              <h4>Field explanations</h4>
-              <ul>${configuration.promptPreview.explanations.map((item) => `<li><strong>${escapeHtml(item.field)}</strong>: ${escapeHtml(item.explanation)}</li>`).join("")}</ul>
-            </article>
-          </div>
-        ` : "<p class='muted-copy'>Prompt preview sample, evidence bundle và field explanations sẽ hiện tại đây.</p>"}
+          <article class="sub-panel">
+            <h4>Hội thoại sample</h4>
+            ${renderSampleConversations(configuration.onboardingSamplePreview.conversations)}
+          </article>
+        ` : "<p class='muted-copy'>Workspace sample dữ liệu thật sẽ hiện ở đây sau khi nhập token, chọn page và bấm lấy sample.</p>"}
       </article>
       </section>
     </section>
@@ -281,6 +305,10 @@ export function renderConfiguration(configuration: ConfigurationState, onboardin
 
 function renderOptions(values: string[], selectedValue: string) {
   return values.map((value) => `<option value="${escapeHtml(value)}" ${value === selectedValue ? "selected" : ""}>${escapeHtml(value)}</option>`).join("");
+}
+
+function renderDatalistOptions(values: string[]) {
+  return values.map((value) => `<option value="${escapeHtml(value)}"></option>`).join("");
 }
 
 function dedupeTimezones(values: Array<string | null>) {
@@ -315,4 +343,69 @@ function renderPromptAuditCard(
       </article>
     </div>
   `;
+}
+
+function renderSummarySpans(preview: NonNullable<ConfigurationState["onboardingSamplePreview"]>) {
+  return [
+    renderSummarySpan("Hội thoại quét", preview.summary.conversationsScanned),
+    renderSummarySpan("Thread day tạo được", preview.summary.threadDaysBuilt),
+    renderSummarySpan("Tin nhắn đọc", preview.summary.messagesSeen),
+    renderSummarySpan("Tin nhắn chọn", preview.summary.messagesSelected)
+  ].filter(Boolean).join("");
+}
+
+function renderSummarySpan(label: string, value: unknown) {
+  if (typeof value !== "number" && typeof value !== "string") {
+    return "";
+  }
+  return `<span>${escapeHtml(label)}: ${escapeHtml(String(value))}</span>`;
+}
+
+function renderSampleConversations(
+  conversations: NonNullable<ConfigurationState["onboardingSamplePreview"]>["conversations"]
+) {
+  if (conversations.length === 0) {
+    return "<p class='muted-copy'>Chưa có hội thoại sample nào khớp window hiện tại.</p>";
+  }
+
+  return conversations.map((conversation) => `
+    <article class="conversation-item">
+      <div class="section-headline">
+        <strong>Conversation ${escapeHtml(conversation.conversationId)}</strong>
+        <span class="meta-chip">${escapeHtml(conversation.customerDisplayName || "Không rõ khách")}</span>
+      </div>
+      ${conversation.firstMeaningfulMessageText
+        ? `<p class="muted-copy">First meaningful message: ${escapeHtml(conversation.firstMeaningfulMessageText)}</p>`
+        : ""}
+      <div class="two-column-grid">
+        <div>
+          <h5>Observed tags</h5>
+          ${conversation.observedTags.length > 0
+            ? `<ul>${conversation.observedTags.map((item) => `<li>${escapeHtml(item.sourceTagText || item.sourceTagId)}</li>`).join("")}</ul>`
+            : "<p class='muted-copy'>Không thấy tag quan sát được trong sample này.</p>"}
+        </div>
+        <div>
+          <h5>Opening messages</h5>
+          ${conversation.openingMessages.length > 0
+            ? `<ul>${conversation.openingMessages.map((item) => `<li><strong>${escapeHtml(item.senderRole)}</strong> / ${escapeHtml(item.messageType)}: ${escapeHtml(item.redactedText)}</li>`).join("")}</ul>`
+            : "<p class='muted-copy'>Opening block chưa có message candidate.</p>"}
+        </div>
+      </div>
+      <div class="two-column-grid">
+        <div>
+          <h5>Normalized tag signals</h5>
+          ${conversation.normalizedTagSignals.length > 0
+            ? `<ul>${conversation.normalizedTagSignals.map((item) => `<li>${escapeHtml(item.role)} / ${escapeHtml(item.sourceTagText)} -> ${escapeHtml(item.canonicalCode || "noise")} (${escapeHtml(item.mappingSource || "unknown")})</li>`).join("")}</ul>`
+            : "<p class='muted-copy'>Chưa có signal canonical nào từ tag mapping hiện tại.</p>"}
+        </div>
+        <div>
+          <h5>Explicit opening signals</h5>
+          ${conversation.explicitSignals.length > 0
+            ? `<ul>${conversation.explicitSignals.map((item) => `<li>${escapeHtml(item.signalRole)} / ${escapeHtml(item.signalCode)}: ${escapeHtml(item.rawText)}</li>`).join("")}</ul>`
+            : "<p class='muted-copy'>Chưa detect explicit signal từ opening rules hiện tại.</p>"}
+          <p class="muted-copy">Cut reason: ${escapeHtml(conversation.cutReason || "unknown")}</p>
+        </div>
+      </div>
+    </article>
+  `).join("");
 }

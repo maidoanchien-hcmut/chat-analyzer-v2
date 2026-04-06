@@ -3,8 +3,8 @@ import type {
   ConnectedPageSummary,
   HealthSummaryViewModel,
   MappingQueueItem,
+  OnboardingSamplePreviewViewModel,
   OnboardingPageCandidate,
-  PromptPreviewViewModel,
   RunDetailViewModel,
   RunGroupViewModel,
   RunPreviewViewModel
@@ -25,6 +25,7 @@ export type OpeningRuleDraft = {
 
 export type SchedulerDraft = {
   useSystemDefaults: boolean;
+  timezone: string;
   officialDailyTime: string;
   lookbackHours: number;
 };
@@ -41,6 +42,8 @@ export type OnboardingState = {
   timezone: string;
   etlEnabled: boolean;
   analysisEnabled: boolean;
+  sampleConversationLimit: number;
+  sampleMessagePageLimit: number;
 };
 
 export type ConfigurationState = {
@@ -58,7 +61,7 @@ export type ConfigurationState = {
   activateAfterCreate: boolean;
   etlEnabled: boolean;
   analysisEnabled: boolean;
-  promptPreview: PromptPreviewViewModel | null;
+  onboardingSamplePreview: OnboardingSamplePreviewViewModel | null;
   promptCloneSourceVersionId: string;
   promptCloneSourcePageId: string;
   promptCompareLeftVersionId: string;

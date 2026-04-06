@@ -18,6 +18,7 @@ import {
   determinePublishEligibility,
   formatDateInTimezone,
   isHistoricalTargetDate,
+  parseDayStart,
   splitRequestedWindowByTargetDate,
   type PlannedChildRun
 } from "./chat_extractor.planner.ts";
@@ -33,6 +34,7 @@ import {
 import type {
   ExecuteJobBody,
   ManualJobBody,
+  OnboardingSamplePreviewBody,
   OfficialDailyJobBody,
   PreviewJobBody,
   PublishAs,
@@ -61,6 +63,7 @@ export type WorkerExecution = {
 type ChatExtractorServiceDependencies = {
   listPagesFromToken: (userAccessToken: string) => Promise<ListedPage[]>;
   runWorker: (manifest: WorkerManifest) => Promise<WorkerExecution>;
+  runRuntimePreview: (input: RuntimePreviewWorkerInput) => Promise<RuntimePreviewOutput>;
   runAnalysis: (pipelineRunId: string) => Promise<{
     pipelineRunId: string;
     analysisRunId: string;
@@ -88,14 +91,54 @@ type RuntimeSnapshot = {
   etlConfigHash: string;
 };
 
+type RuntimePreviewWorkerInput = {
+  pageId: string;
+  userAccessToken: string;
+  businessTimezone: string;
+  targetDate: string;
+  windowStartAt: string;
+  windowEndExclusiveAt: string;
+  tagMappingJson: ReturnType<typeof defaultTagMappingConfig>;
+  openingRulesJson: ReturnType<typeof defaultOpeningRulesConfig>;
+  schedulerJson: ReturnType<typeof defaultSchedulerConfig>;
+};
+
+type RuntimePreviewTag = {
+  pancakeTagId: string;
+  text: string;
+  isDeactive: boolean;
+};
+
+type RuntimePreviewConversation = {
+  conversationId: string;
+  customerDisplayName: string;
+  firstMeaningfulMessageText: string;
+  observedTagsJson: unknown;
+  normalizedTagSignalsJson: unknown;
+  openingBlockJson: unknown;
+};
+
+export type RuntimePreviewOutput = {
+  pageId: string;
+  targetDate: string;
+  businessTimezone: string;
+  windowStartAt: string;
+  windowEndExclusiveAt: string;
+  summary: Record<string, unknown>;
+  pageTags: RuntimePreviewTag[];
+  conversations: RuntimePreviewConversation[];
+};
+
 export class ChatExtractorService {
   private readonly listPagesFromTokenImpl: ChatExtractorServiceDependencies["listPagesFromToken"];
   private readonly runWorkerImpl: ChatExtractorServiceDependencies["runWorker"];
+  private readonly runRuntimePreviewImpl: ChatExtractorServiceDependencies["runRuntimePreview"];
   private readonly runAnalysisImpl: ChatExtractorServiceDependencies["runAnalysis"];
 
   constructor(deps: Partial<ChatExtractorServiceDependencies> = {}) {
     this.listPagesFromTokenImpl = deps.listPagesFromToken ?? fetchPancakePages;
     this.runWorkerImpl = deps.runWorker ?? runWorkerManifest;
+    this.runRuntimePreviewImpl = deps.runRuntimePreview ?? runWorkerRuntimePreview;
     this.runAnalysisImpl = deps.runAnalysis ?? runAnalysisLoadedRun;
   }
 
@@ -147,6 +190,34 @@ export class ChatExtractorService {
     }
 
     return this.getConnectedPage(page.id);
+  }
+
+  async previewOnboardingSample(input: OnboardingSamplePreviewBody) {
+    await this.resolveListedPage(input.userAccessToken, input.pancakePageId);
+    const now = new Date();
+    const targetDate = formatDateInTimezone(now, input.businessTimezone);
+    const dayStart = parseDayStart(targetDate, input.businessTimezone);
+    if (now <= dayStart) {
+      throw new AppError(409, "CHAT_EXTRACTOR_ONBOARDING_SAMPLE_WINDOW_EMPTY", "Chưa có khoảng sample hợp lệ trong ngày hiện tại theo business timezone đã chọn.");
+    }
+
+    const schedulerBase = input.schedulerJson ?? defaultSchedulerConfig(input.businessTimezone);
+    return this.runRuntimePreviewImpl({
+      pageId: input.pancakePageId,
+      userAccessToken: input.userAccessToken,
+      businessTimezone: input.businessTimezone,
+      targetDate,
+      windowStartAt: dayStart.toISOString(),
+      windowEndExclusiveAt: now.toISOString(),
+      tagMappingJson: input.tagMappingJson,
+      openingRulesJson: input.openingRulesJson,
+      schedulerJson: {
+        ...schedulerBase,
+        timezone: input.businessTimezone,
+        maxConversationsPerRun: input.sampleConversationLimit,
+        maxMessagePagesPerThread: input.sampleMessagePageLimit
+      }
+    });
   }
 
   async createConfigVersion(connectedPageId: string, input: {
@@ -528,6 +599,67 @@ async function runAnalysisLoadedRun(pipelineRunId: string) {
   return summary;
 }
 
+async function runWorkerRuntimePreview(input: RuntimePreviewWorkerInput): Promise<RuntimePreviewOutput> {
+  const proc = Bun.spawn([
+    "go",
+    "run",
+    ".",
+    "-runtime-only",
+    "-job-json",
+    JSON.stringify({
+      manifest_version: 1,
+      run_group_id: randomUUID(),
+      page_id: input.pageId,
+      user_access_token: input.userAccessToken,
+      business_timezone: input.businessTimezone,
+      target_date: input.targetDate,
+      run_mode: "onboarding_sample",
+      processing_mode: "etl_only",
+      publish_eligibility: "provisional_current_day_partial",
+      requested_window_start_at: input.windowStartAt,
+      requested_window_end_exclusive_at: input.windowEndExclusiveAt,
+      window_start_at: input.windowStartAt,
+      window_end_exclusive_at: input.windowEndExclusiveAt,
+      is_full_day: false,
+      etl_config: {
+        config_version_id: "onboarding-sample-preview",
+        etl_config_hash: "sha256:onboarding-sample-preview",
+        tag_mapping: toWorkerTagMappingConfig(input.tagMappingJson),
+        opening_rules: toWorkerOpeningRulesConfig(input.openingRulesJson),
+        scheduler: toWorkerSchedulerConfig(input.schedulerJson)
+      }
+    })
+  ], {
+    cwd: workerRoot,
+    stdout: "pipe",
+    stderr: "pipe"
+  });
+
+  const [stdout, stderr, exitCode] = await Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited
+  ]);
+
+  if (exitCode !== 0) {
+    throw new AppError(
+      502,
+      "CHAT_EXTRACTOR_ONBOARDING_SAMPLE_FAILED",
+      `Không thể lấy sample onboarding từ runtime preview. ${compactErrorText(stderr || stdout || `worker exited with code ${exitCode}`)}`
+    );
+  }
+
+  try {
+    return parseRuntimePreviewOutput(stdout);
+  } catch (error) {
+    throw new AppError(
+      502,
+      "CHAT_EXTRACTOR_ONBOARDING_SAMPLE_INVALID_OUTPUT",
+      `Runtime preview trả về JSON không hợp lệ. ${compactErrorText(error)}`
+    );
+  }
+}
+
 async function runWorkerManifest(manifest: WorkerManifest): Promise<WorkerExecution> {
   await mkdir(resolve(workerRoot, "tmp"), { recursive: true });
   const tempDir = await mkdtemp(resolve(tmpdir(), "chat-analyzer-chat-extractor-"));
@@ -556,6 +688,98 @@ async function runWorkerManifest(manifest: WorkerManifest): Promise<WorkerExecut
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
+}
+
+function parseRuntimePreviewOutput(raw: string): RuntimePreviewOutput {
+  const parsed = JSON.parse(raw) as Partial<RuntimePreviewOutput> | null;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error("preview output phải là object JSON.");
+  }
+  if (typeof parsed.pageId !== "string" || typeof parsed.targetDate !== "string" || typeof parsed.businessTimezone !== "string") {
+    throw new Error("preview output thiếu pageId/targetDate/businessTimezone.");
+  }
+  if (typeof parsed.windowStartAt !== "string" || typeof parsed.windowEndExclusiveAt !== "string") {
+    throw new Error("preview output thiếu windowStartAt/windowEndExclusiveAt.");
+  }
+  if (!parsed.summary || typeof parsed.summary !== "object" || Array.isArray(parsed.summary)) {
+    throw new Error("preview output thiếu summary.");
+  }
+
+  return {
+    pageId: parsed.pageId,
+    targetDate: parsed.targetDate,
+    businessTimezone: parsed.businessTimezone,
+    windowStartAt: parsed.windowStartAt,
+    windowEndExclusiveAt: parsed.windowEndExclusiveAt,
+    summary: parsed.summary as Record<string, unknown>,
+    pageTags: Array.isArray(parsed.pageTags)
+      ? parsed.pageTags
+        .filter((item) => item && typeof item === "object")
+        .map((item) => ({
+          pancakeTagId: typeof (item as { pancakeTagId?: unknown }).pancakeTagId === "string" ? (item as { pancakeTagId: string }).pancakeTagId : "",
+          text: typeof (item as { text?: unknown }).text === "string" ? (item as { text: string }).text : "",
+          isDeactive: typeof (item as { isDeactive?: unknown }).isDeactive === "boolean" ? (item as { isDeactive: boolean }).isDeactive : false
+        }))
+      : [],
+    conversations: Array.isArray(parsed.conversations)
+      ? parsed.conversations
+        .filter((item) => item && typeof item === "object" && typeof (item as { conversationId?: unknown }).conversationId === "string")
+        .map((item) => ({
+          conversationId: (item as { conversationId: string }).conversationId,
+          customerDisplayName: typeof (item as { customerDisplayName?: unknown }).customerDisplayName === "string"
+            ? (item as { customerDisplayName: string }).customerDisplayName
+            : "",
+          firstMeaningfulMessageText: typeof (item as { firstMeaningfulMessageText?: unknown }).firstMeaningfulMessageText === "string"
+            ? (item as { firstMeaningfulMessageText: string }).firstMeaningfulMessageText
+            : "",
+          observedTagsJson: (item as { observedTagsJson?: unknown }).observedTagsJson ?? null,
+          normalizedTagSignalsJson: (item as { normalizedTagSignalsJson?: unknown }).normalizedTagSignalsJson ?? null,
+          openingBlockJson: (item as { openingBlockJson?: unknown }).openingBlockJson ?? null
+        }))
+      : []
+  };
+}
+
+function toWorkerTagMappingConfig(value: ReturnType<typeof defaultTagMappingConfig>) {
+  return {
+    version: value.version,
+    default_role: value.defaultRole,
+    entries: value.entries.map((entry) => ({
+      source_tag_id: entry.sourceTagId,
+      source_tag_text: entry.sourceTagText,
+      role: entry.role,
+      canonical_code: entry.canonicalCode,
+      mapping_source: entry.mappingSource,
+      status: entry.status
+    }))
+  };
+}
+
+function toWorkerOpeningRulesConfig(value: ReturnType<typeof defaultOpeningRulesConfig>) {
+  return {
+    version: value.version,
+    selectors: value.selectors.map((selector) => ({
+      selector_id: selector.selectorId,
+      signal_role: selector.signalRole,
+      signal_code: selector.signalCode,
+      allowed_message_types: selector.allowedMessageTypes,
+      options: selector.options.map((option) => ({
+        raw_text: option.rawText,
+        match_mode: option.matchMode
+      }))
+    }))
+  };
+}
+
+function toWorkerSchedulerConfig(value: ReturnType<typeof defaultSchedulerConfig>) {
+  return {
+    version: value.version,
+    timezone: value.timezone,
+    official_daily_time: value.officialDailyTime,
+    lookback_hours: value.lookbackHours,
+    max_conversations_per_run: value.maxConversationsPerRun,
+    max_message_pages_per_thread: value.maxMessagePagesPerThread
+  };
 }
 
 function buildWorkerManifest(input: {

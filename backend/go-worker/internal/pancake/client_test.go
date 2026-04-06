@@ -100,3 +100,24 @@ func TestDecodeConversationAndMessagesPreserveSourceFacts(t *testing.T) {
 		t.Fatalf("expected customer ad_clicks to decode, got %+v", envelope.Customers)
 	}
 }
+
+func TestDecodeConversationAcceptsStringAdIDs(t *testing.T) {
+	conversations, err := decodeConversations([]json.RawMessage{
+		json.RawMessage(`{
+			"id":"conv-2",
+			"page_id":"1406535699642677",
+			"inserted_at":"2026-04-01T09:00:00",
+			"updated_at":"2026-04-01T09:10:00",
+			"ad_ids":["6603811182227","6603811621627"]
+		}`),
+	})
+	if err != nil {
+		t.Fatalf("decode conversations: %v", err)
+	}
+	if len(conversations[0].AdIDs) != 2 {
+		t.Fatalf("expected 2 string ad_ids to decode, got %+v", conversations[0].AdIDs)
+	}
+	if conversations[0].AdIDs[0].AdID != "6603811182227" || conversations[0].AdIDs[1].AdID != "6603811621627" {
+		t.Fatalf("expected string ad_ids to map into SourceRef.AdID, got %+v", conversations[0].AdIDs)
+	}
+}

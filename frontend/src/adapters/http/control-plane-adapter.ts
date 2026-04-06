@@ -3,6 +3,7 @@ import type {
   ControlPlaneAdapter,
   FieldExplanation,
   HealthSummaryViewModel,
+  OnboardingSamplePreviewInput,
   ManualRunInput,
   PublishEligibility,
   RunDetailViewModel,
@@ -109,6 +110,24 @@ type RawRunDetail = {
   error_text: string | null;
 };
 
+type RawOnboardingSamplePreview = {
+  pageId: string;
+  targetDate: string;
+  businessTimezone: string;
+  windowStartAt: string;
+  windowEndExclusiveAt: string;
+  summary: Record<string, unknown>;
+  pageTags: Array<{ pancakeTagId: string; text: string; isDeactive: boolean }>;
+  conversations: Array<{
+    conversationId: string;
+    customerDisplayName?: string;
+    firstMeaningfulMessageText?: string;
+    observedTagsJson: unknown;
+    normalizedTagSignalsJson?: unknown;
+    openingBlockJson: unknown;
+  }>;
+};
+
 export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlaneAdapter {
   return {
     async listPagesFromToken(userAccessToken) {
@@ -132,6 +151,26 @@ export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlan
         input
       );
       return mapConnectedPage(result.page);
+    },
+    async previewOnboardingSample(input: OnboardingSamplePreviewInput) {
+      const result = await requestJson<{
+        samplePreview: RawOnboardingSamplePreview;
+      }>(
+        getBaseUrl(),
+        "POST",
+        "/chat-extractor/control-center/pages/onboarding-sample/preview",
+        {
+          pancakePageId: input.pancakePageId,
+          userAccessToken: input.userAccessToken,
+          businessTimezone: input.businessTimezone,
+          tagMappingJson: input.tagMappingJson,
+          openingRulesJson: input.openingRulesJson,
+          schedulerJson: input.schedulerJson,
+          sampleConversationLimit: input.sampleConversationLimit,
+          sampleMessagePageLimit: input.sampleMessagePageLimit
+        }
+      );
+      return mapOnboardingSamplePreview(result.samplePreview, input.pageName);
     },
     async listConnectedPages() {
       const result = await requestJson<{ pages: RawConnectedPageDetail[] }>(
@@ -270,6 +309,84 @@ export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlan
       return result.healthSummary;
     }
   };
+}
+
+function readString(value: unknown, key: string) {
+  if (!value || typeof value !== "object") {
+    return "";
+  }
+  const result = (value as Record<string, unknown>)[key];
+  return typeof result === "string" ? result : "";
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" ? value : 0;
+}
+
+function readArray(value: unknown) {
+  return Array.isArray(value) ? value : [];
+}
+
+function mapOnboardingSamplePreview(input: RawOnboardingSamplePreview, pageName: string) {
+  return {
+    pageId: input.pageId,
+    pageName,
+    targetDate: input.targetDate,
+    businessTimezone: input.businessTimezone,
+    windowStartAt: input.windowStartAt,
+    windowEndExclusiveAt: input.windowEndExclusiveAt,
+    summary: {
+      conversationsScanned: readNumber(input.summary?.conversations_scanned),
+      threadDaysBuilt: readNumber(input.summary?.thread_days_built),
+      messagesSeen: readNumber(input.summary?.messages_seen),
+      messagesSelected: readNumber(input.summary?.messages_selected)
+    },
+    pageTags: input.pageTags.map((tag) => ({
+      pancakeTagId: tag.pancakeTagId,
+      text: tag.text,
+      isDeactive: tag.isDeactive
+    })),
+    conversations: input.conversations.map((conversation) => {
+      const openingBlock = asRecord(conversation.openingBlockJson);
+      return {
+        conversationId: conversation.conversationId,
+        customerDisplayName: conversation.customerDisplayName ?? "",
+        firstMeaningfulMessageText: conversation.firstMeaningfulMessageText ?? "",
+        observedTags: readArray(conversation.observedTagsJson).map((item) => ({
+          sourceTagId: readString(item, "source_tag_id") || readString(item, "sourceTagId"),
+          sourceTagText: readString(item, "source_tag_text") || readString(item, "sourceTagText")
+        })).filter((item) => item.sourceTagId || item.sourceTagText),
+        normalizedTagSignals: flattenNormalizedTagSignals(conversation.normalizedTagSignalsJson),
+        openingMessages: readArray(openingBlock.messages).map((item) => ({
+          senderRole: readString(item, "sender_role") || readString(item, "senderRole"),
+          messageType: readString(item, "message_type") || readString(item, "messageType"),
+          redactedText: readString(item, "redacted_text") || readString(item, "redactedText")
+        })).filter((item) => item.senderRole || item.messageType || item.redactedText),
+        explicitSignals: readArray(openingBlock.explicit_signals).map((item) => ({
+          signalRole: readString(item, "signal_role") || readString(item, "signalRole"),
+          signalCode: readString(item, "signal_code") || readString(item, "signalCode"),
+          rawText: readString(item, "raw_text") || readString(item, "rawText")
+        })).filter((item) => item.signalRole || item.signalCode || item.rawText),
+        cutReason: readString(openingBlock, "cut_reason") || readString(openingBlock, "cutReason")
+      };
+    })
+  };
+}
+
+function flattenNormalizedTagSignals(value: unknown) {
+  const source = asRecord(value);
+  return Object.entries(source).flatMap(([role, entries]) => readArray(entries).map((item) => ({
+    role,
+    sourceTagText: readString(item, "source_tag_text") || readString(item, "sourceTagText"),
+    canonicalCode: readString(item, "canonical_code") || readString(item, "canonicalCode"),
+    mappingSource: readString(item, "mapping_source") || readString(item, "mappingSource")
+  }))).filter((item) => item.sourceTagText || item.canonicalCode || item.mappingSource);
+}
+
+function asRecord(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
 function buildManualRunBody(input: ManualRunInput) {

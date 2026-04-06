@@ -15,6 +15,11 @@
   --radius-lg: 22px;
   --radius-md: 16px;
   --radius-sm: 12px;
+  --space-1: 6px;
+  --space-2: 8px;
+  --space-3: 10px;
+  --space-4: 12px;
+  --space-5: 16px;
   --font-ui: "Be Vietnam Pro", "Segoe UI", sans-serif;
   --font-mono: "JetBrains Mono", "Consolas", monospace;
 }

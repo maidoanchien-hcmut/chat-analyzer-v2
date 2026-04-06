@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { defaultOpeningRulesConfig, defaultTagMappingConfig } from "./chat_extractor.artifacts.ts";
 
 export const processingModeSchema = z.enum(["etl_only", "etl_and_ai"]);
 export const runModeSchema = z.enum(["manual_range", "backfill_day", "official_daily", "onboarding_sample"]);
@@ -96,6 +97,32 @@ export const registerPageBodySchema = z
     businessTimezone: raw.business_timezone,
     etlEnabled: raw.etl_enabled,
     analysisEnabled: raw.analysis_enabled
+  }));
+
+export const onboardingSamplePreviewBodySchema = z
+  .object({
+    user_access_token: z.string().min(1),
+    pancake_page_id: z.string().min(1),
+    business_timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
+    tag_mapping_json: z.unknown().optional(),
+    opening_rules_json: z.unknown().optional(),
+    scheduler_json: z.union([z.null(), z.unknown()]).optional(),
+    sample_conversation_limit: z.number().int().min(1).max(100).default(12),
+    sample_message_page_limit: z.number().int().min(1).max(20).default(2)
+  })
+  .transform((raw) => ({
+    userAccessToken: raw.user_access_token,
+    pancakePageId: raw.pancake_page_id,
+    businessTimezone: raw.business_timezone,
+    tagMappingJson: raw.tag_mapping_json === undefined ? defaultTagMappingConfig() : normalizeTagMappingConfig(raw.tag_mapping_json),
+    openingRulesJson: raw.opening_rules_json === undefined ? defaultOpeningRulesConfig() : normalizeOpeningRulesConfig(raw.opening_rules_json),
+    schedulerJson: raw.scheduler_json === undefined
+      ? null
+      : raw.scheduler_json === null
+        ? null
+        : normalizeSchedulerConfig(raw.scheduler_json),
+    sampleConversationLimit: raw.sample_conversation_limit,
+    sampleMessagePageLimit: raw.sample_message_page_limit
   }));
 
 export const createConfigVersionBodySchema = z
@@ -256,6 +283,7 @@ export type OpeningRulesConfig = ReturnType<typeof normalizeOpeningRulesConfig>;
 export type SchedulerConfig = ReturnType<typeof normalizeSchedulerConfig>;
 export type NotificationTargetsConfig = ReturnType<typeof normalizeNotificationTargets>;
 export type RegisterPageBody = z.infer<typeof registerPageBodySchema>;
+export type OnboardingSamplePreviewBody = z.infer<typeof onboardingSamplePreviewBodySchema>;
 export type CreateConfigVersionBody = z.infer<typeof createConfigVersionBodySchema>;
 export type ManualJobBody = z.infer<typeof manualJobBodySchema>;
 export type OfficialDailyJobBody = z.infer<typeof officialDailyJobBodySchema>;

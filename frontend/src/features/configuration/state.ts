@@ -1,4 +1,4 @@
-import type { ConnectedPageConfigVersion, CreateConfigVersionInput } from "../../adapters/contracts.ts";
+import type { ConnectedPageConfigVersion, CreateConfigVersionInput, OnboardingSamplePreviewInput } from "../../adapters/contracts.ts";
 import type { NotificationTargetDraft, OpeningRuleDraft, SchedulerDraft, TagMappingDraft } from "../../app/screen-state.ts";
 
 type ConfigDraftInput = {
@@ -47,14 +47,16 @@ export function buildCreateConfigVersionInput(input: ConfigDraftInput): CreateCo
           ]
         }))
     },
-    schedulerJson: {
-      version: 1,
-      timezone: "Asia/Ho_Chi_Minh",
-      officialDailyTime: input.scheduler.officialDailyTime,
-      lookbackHours: input.scheduler.lookbackHours,
-      maxConversationsPerRun: 0,
-      maxMessagePagesPerThread: 0
-    },
+    schedulerJson: input.scheduler.useSystemDefaults
+      ? null
+      : {
+        version: 1,
+        timezone: input.scheduler.timezone,
+        officialDailyTime: input.scheduler.officialDailyTime,
+        lookbackHours: input.scheduler.lookbackHours,
+        maxConversationsPerRun: 0,
+        maxMessagePagesPerThread: 0
+      },
     notificationTargetsJson: {
       version: 1,
       telegram: input.notificationTargets
@@ -77,13 +79,59 @@ export function buildCreateConfigVersionInput(input: ConfigDraftInput): CreateCo
   };
 }
 
-export function configVersionToDraft(configVersion: ConnectedPageConfigVersion | null) {
+export function buildOnboardingSamplePreviewInput(input: {
+  pancakePageId: string;
+  userAccessToken: string;
+  pageName: string;
+  businessTimezone: string;
+  tagMappings: TagMappingDraft[];
+  openingRules: OpeningRuleDraft[];
+  scheduler: SchedulerDraft;
+  sampleConversationLimit: number;
+  sampleMessagePageLimit: number;
+}): OnboardingSamplePreviewInput {
+  const payload = buildCreateConfigVersionInput({
+    promptText: "",
+    tagMappings: input.tagMappings,
+    openingRules: input.openingRules,
+    scheduler: {
+      ...input.scheduler,
+      timezone: input.businessTimezone
+    },
+    notificationTargets: [],
+    notes: "",
+    activate: false,
+    etlEnabled: false,
+    analysisEnabled: false
+  });
+
+  return {
+    pancakePageId: input.pancakePageId,
+    userAccessToken: input.userAccessToken,
+    pageName: input.pageName,
+    businessTimezone: input.businessTimezone,
+    tagMappingJson: payload.tagMappingJson,
+    openingRulesJson: payload.openingRulesJson,
+    schedulerJson: payload.schedulerJson ?? {
+      version: 1,
+      timezone: input.businessTimezone,
+      officialDailyTime: input.scheduler.officialDailyTime,
+      lookbackHours: input.scheduler.lookbackHours,
+      maxConversationsPerRun: input.sampleConversationLimit,
+      maxMessagePagesPerThread: input.sampleMessagePageLimit
+    },
+    sampleConversationLimit: input.sampleConversationLimit,
+    sampleMessagePageLimit: input.sampleMessagePageLimit
+  };
+}
+
+export function configVersionToDraft(configVersion: ConnectedPageConfigVersion | null, fallbackTimezone = "Asia/Ho_Chi_Minh") {
   if (!configVersion) {
     return {
       promptText: "",
       tagMappings: [createEmptyTagMapping()],
       openingRules: [createEmptyOpeningRule()],
-      scheduler: createDefaultScheduler(),
+      scheduler: createDefaultScheduler(fallbackTimezone),
       notificationTargets: [createEmptyNotificationTarget()],
       notes: ""
     };
@@ -93,7 +141,7 @@ export function configVersionToDraft(configVersion: ConnectedPageConfigVersion |
     promptText: configVersion.promptText,
     tagMappings: parseTagMappings(configVersion.tagMappingJson),
     openingRules: parseOpeningRules(configVersion.openingRulesJson),
-    scheduler: parseScheduler(configVersion.schedulerJson),
+    scheduler: parseScheduler(configVersion.schedulerJson, fallbackTimezone),
     notificationTargets: parseNotificationTargets(configVersion.notificationTargetsJson),
     notes: configVersion.notes ?? ""
   };
@@ -116,9 +164,10 @@ export function createEmptyOpeningRule(): OpeningRuleDraft {
   };
 }
 
-export function createDefaultScheduler(): SchedulerDraft {
+export function createDefaultScheduler(timezone = "Asia/Ho_Chi_Minh"): SchedulerDraft {
   return {
     useSystemDefaults: true,
+    timezone,
     officialDailyTime: "00:00",
     lookbackHours: 2
   };
@@ -152,12 +201,13 @@ function parseOpeningRules(value: unknown): OpeningRuleDraft[] {
   return mapped.length > 0 ? mapped : [createEmptyOpeningRule()];
 }
 
-function parseScheduler(value: unknown): SchedulerDraft {
+function parseScheduler(value: unknown, fallbackTimezone: string): SchedulerDraft {
   if (!value || typeof value !== "object") {
-    return createDefaultScheduler();
+    return createDefaultScheduler(fallbackTimezone);
   }
   return {
     useSystemDefaults: false,
+    timezone: readString(value, "timezone") || fallbackTimezone,
     officialDailyTime: readString(value, "officialDailyTime") || "00:00",
     lookbackHours: readNumber(value, "lookbackHours", 2)
   };

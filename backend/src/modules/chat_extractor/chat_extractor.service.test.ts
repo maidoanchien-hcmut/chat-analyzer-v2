@@ -1,4 +1,9 @@
 import { afterEach, describe, expect, it } from "bun:test";
+import type {
+  ConnectedPageDetailRecord,
+  PagePromptIdentityRecord,
+  PipelineRunRecord
+} from "./chat_extractor.repository.ts";
 
 const TEST_DATABASE_URL = "postgresql://test:test@localhost:5432/chat_analyzer_test?schema=public";
 const CONNECTED_PAGE_ID = "11111111-1111-4111-8111-111111111111";
@@ -37,14 +42,15 @@ describe("chat_extractor service", () => {
     const result = await service.previewJobRequest(parsed as never);
     expect(result.run_group.run_mode).toBe("official_daily");
     expect(result.child_runs).toHaveLength(1);
-    expect(result.child_runs[0]).toMatchObject({
+    const childRun = result.child_runs[0]!;
+    expect(childRun).toMatchObject({
       target_date: "2026-04-03",
       is_full_day: true,
       publish_eligibility: "official_full_day"
     });
-    expect(result.child_runs[0].will_use_config_version).toBe(result.run_group.will_use_config_version);
-    expect(result.child_runs[0].will_use_prompt_version).toBe(result.run_group.will_use_prompt_version);
-    expect(result.child_runs[0].will_use_compiled_prompt_hash).toBe(result.run_group.will_use_compiled_prompt_hash);
+    expect(childRun.will_use_config_version).toBe(result.run_group.will_use_config_version);
+    expect(childRun.will_use_prompt_version).toBe(result.run_group.will_use_prompt_version);
+    expect(childRun.will_use_compiled_prompt_hash).toBe(result.run_group.will_use_compiled_prompt_hash);
   });
 
   it("executes official_daily with official request kind and manifest run mode", async () => {
@@ -111,9 +117,9 @@ describe("chat_extractor service", () => {
       return existingPage.page;
     });
     patchRepository(repositoryModule.chatExtractorRepository, "ensureDefaultTaxonomy", async () => {
-      return existingPage.activeConfigVersion.analysisTaxonomyVersion;
+      return existingPage.activeConfigVersion!.analysisTaxonomyVersion;
     });
-    patchRepository(repositoryModule.chatExtractorRepository, "getActiveConfigVersion", async () => existingPage.activeConfigVersion);
+    patchRepository(repositoryModule.chatExtractorRepository, "getActiveConfigVersion", async () => existingPage.activeConfigVersion!);
     patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => existingPage);
 
     const { ChatExtractorService } = await import("./chat_extractor.service.ts");
@@ -135,6 +141,91 @@ describe("chat_extractor service", () => {
 
     expect(capturedUpsertInput.etlEnabled).toBe(false);
     expect(capturedUpsertInput.analysisEnabled).toBe(true);
+  });
+
+  it("normalizes onboarding sample preview request with default draft config and sample caps", async () => {
+    const { onboardingSamplePreviewBodySchema } = await loadChatExtractorTypes();
+
+    const parsed = onboardingSamplePreviewBodySchema.parse({
+      user_access_token: "user-token",
+      pancake_page_id: "1406535699642677",
+      business_timezone: "Asia/Saigon"
+    });
+
+    expect(parsed.businessTimezone).toBe("Asia/Saigon");
+    expect(parsed.tagMappingJson).toEqual({
+      version: 1,
+      defaultRole: "noise",
+      entries: []
+    });
+    expect(parsed.openingRulesJson).toEqual({
+      version: 1,
+      selectors: []
+    });
+    expect(parsed.schedulerJson).toBeNull();
+    expect(parsed.sampleConversationLimit).toBe(12);
+    expect(parsed.sampleMessagePageLimit).toBe(2);
+  });
+
+  it("returns runtime-only onboarding sample preview with the worker stdout shape", async () => {
+    const { onboardingSamplePreviewBodySchema } = await loadChatExtractorTypes();
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      listPagesFromToken: async () => [
+        {
+          pageId: "1406535699642677",
+          pageName: "O2 SKIN"
+        }
+      ],
+      runRuntimePreview: async (input) => ({
+        pageId: input.pageId,
+        targetDate: input.targetDate,
+        businessTimezone: input.businessTimezone,
+        windowStartAt: input.windowStartAt,
+        windowEndExclusiveAt: input.windowEndExclusiveAt,
+        summary: {
+          conversations_scanned: 6,
+          thread_days_built: 4
+        },
+        pageTags: [
+          {
+            pancakeTagId: "11",
+            text: "KH mới",
+            isDeactive: false
+          }
+        ],
+        conversations: [
+          {
+            conversationId: "c-1",
+            customerDisplayName: "Khách A",
+            firstMeaningfulMessageText: "Cho mình hỏi lịch tái khám.",
+            observedTagsJson: [{ sourceTagText: "KH mới" }],
+            normalizedTagSignalsJson: { journey: [], need: [], outcome: [], branch: [], staff: [], noise: [] },
+            openingBlockJson: { explicitSignals: [] }
+          }
+        ]
+      })
+    });
+    const parsed = onboardingSamplePreviewBodySchema.parse({
+      user_access_token: "user-token",
+      pancake_page_id: "1406535699642677",
+      business_timezone: "Asia/Saigon",
+      sample_conversation_limit: 8,
+      sample_message_page_limit: 3
+    });
+
+    const result = await service.previewOnboardingSample(parsed);
+
+    expect(result.pageId).toBe("1406535699642677");
+    expect(result.businessTimezone).toBe("Asia/Saigon");
+    expect(result.summary).toEqual({
+      conversations_scanned: 6,
+      thread_days_built: 4
+    });
+    expect(result.pageTags).toHaveLength(1);
+    expect(result.conversations[0]?.conversationId).toBe("c-1");
+    expect(result.conversations[0]?.customerDisplayName).toBe("Khách A");
   });
 
   it("marks the run group execution as aborted when worker startup throws before worker-side status refresh", async () => {
@@ -391,7 +482,7 @@ function patchRepository<T extends object, K extends keyof T>(module: T, key: K,
 function createConnectedPageDetail(overrides?: {
   etlEnabled?: boolean;
   analysisEnabled?: boolean;
-}) {
+}): ConnectedPageDetailRecord {
   return {
     page: {
       id: CONNECTED_PAGE_ID,
@@ -409,23 +500,23 @@ function createConnectedPageDetail(overrides?: {
       id: CONFIG_VERSION_ID,
       connectedPageId: CONNECTED_PAGE_ID,
       versionNo: 7,
-      tagMappingJson: {
-        version: 1,
-        defaultRole: "noise",
-        entries: []
-      },
-      openingRulesJson: {
-        version: 1,
-        selectors: []
-      },
-      schedulerJson: {
-        version: 1,
-        timezone: "Asia/Ho_Chi_Minh",
-        officialDailyTime: "00:00",
-        lookbackHours: 2,
-        maxConversationsPerRun: 0,
-        maxMessagePagesPerThread: 0
-      },
+        tagMappingJson: {
+          version: 1,
+          defaultRole: "noise",
+          entries: []
+        } as const,
+        openingRulesJson: {
+          version: 1,
+          selectors: []
+        } as const,
+        schedulerJson: {
+          version: 1,
+          timezone: "Asia/Ho_Chi_Minh",
+          officialDailyTime: "00:00",
+          lookbackHours: 2,
+          maxConversationsPerRun: 0,
+          maxMessagePagesPerThread: 0
+        } as const,
       notificationTargetsJson: null,
       promptText: "Prompt page",
       analysisTaxonomyVersionId: TAXONOMY_VERSION_ID,
@@ -434,10 +525,10 @@ function createConnectedPageDetail(overrides?: {
       analysisTaxonomyVersion: {
         id: TAXONOMY_VERSION_ID,
         versionCode: "default.v1",
-        taxonomyJson: {
-          version: 1,
-          categories: {}
-        },
+          taxonomyJson: {
+            version: 1,
+            categories: {}
+          } as const,
         isActive: true,
         createdAt: new Date("2026-04-01T00:00:00.000Z")
       }
@@ -446,7 +537,7 @@ function createConnectedPageDetail(overrides?: {
   };
 }
 
-function createPromptIdentity() {
+function createPromptIdentity(): PagePromptIdentityRecord {
   return {
     id: PROMPT_IDENTITY_ID,
     connectedPageId: CONNECTED_PAGE_ID,
@@ -457,7 +548,7 @@ function createPromptIdentity() {
   };
 }
 
-function buildRunGroupRuns(runGroupId: string, createInput: any, pageDetail: ReturnType<typeof createConnectedPageDetail>) {
+function buildRunGroupRuns(runGroupId: string, createInput: any, pageDetail: ConnectedPageDetailRecord): PipelineRunRecord[] {
   return createInput.childRuns.map((run: any) => ({
     id: run.id,
     runGroupId,
@@ -468,8 +559,8 @@ function buildRunGroupRuns(runGroupId: string, createInput: any, pageDetail: Ret
     requestedWindowEndExclusiveAt: run.requestedWindowEndExclusiveAt,
     isFullDay: run.isFullDay,
     runMode: run.runMode,
-    status: "loaded",
-    publishState: "draft",
+    status: "loaded" as const,
+    publishState: "draft" as const,
     publishEligibility: run.publishEligibility,
     supersedesRunId: null,
     supersededByRunId: null,
@@ -492,18 +583,18 @@ function buildRunGroupRuns(runGroupId: string, createInput: any, pageDetail: Ret
       frozenCompiledPromptHash: createInput.frozenCompiledPromptHash,
       frozenPromptVersion: createInput.frozenPromptVersion,
       publishIntent: createInput.publishIntent,
-      status: "loaded",
+      status: "loaded" as const,
       createdBy: createInput.createdBy,
       createdAt: new Date("2026-04-03T00:00:00.000Z"),
       startedAt: new Date("2026-04-03T00:00:00.000Z"),
       finishedAt: new Date("2026-04-03T00:05:00.000Z"),
       connectedPage: pageDetail.page,
-      frozenConfigVersion: pageDetail.activeConfigVersion
+      frozenConfigVersion: pageDetail.activeConfigVersion!
     }
   }));
 }
 
-function createPipelineRunRecord(overrides?: Partial<ReturnType<typeof buildRunGroupRuns>[number]>) {
+function createPipelineRunRecord(overrides?: Partial<PipelineRunRecord>): PipelineRunRecord {
   return {
     id: "run-201",
     runGroupId: "rg-201",
@@ -514,9 +605,9 @@ function createPipelineRunRecord(overrides?: Partial<ReturnType<typeof buildRunG
     requestedWindowEndExclusiveAt: null,
     isFullDay: false,
     runMode: "manual_range",
-    status: "loaded",
-    publishState: "draft",
-    publishEligibility: "official_full_day",
+    status: "loaded" as const,
+    publishState: "draft" as const,
+    publishEligibility: "official_full_day" as const,
     supersedesRunId: null,
     supersededByRunId: null,
     requestJson: {},
@@ -538,13 +629,13 @@ function createPipelineRunRecord(overrides?: Partial<ReturnType<typeof buildRunG
       frozenCompiledPromptHash: "sha256:prompt-a12",
       frozenPromptVersion: "Prompt A12",
       publishIntent: "official",
-      status: "loaded",
+      status: "loaded" as const,
       createdBy: "operator",
       createdAt: new Date("2026-04-03T00:00:00.000Z"),
       startedAt: new Date("2026-04-03T00:00:00.000Z"),
       finishedAt: new Date("2026-04-03T00:05:00.000Z"),
       connectedPage: createConnectedPageDetail().page,
-      frozenConfigVersion: createConnectedPageDetail().activeConfigVersion
+      frozenConfigVersion: createConnectedPageDetail().activeConfigVersion!
     },
     ...overrides
   };

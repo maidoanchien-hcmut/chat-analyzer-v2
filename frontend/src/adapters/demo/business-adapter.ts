@@ -6,7 +6,6 @@ import type {
   ExplorationViewModel,
   OverviewViewModel,
   PageComparisonViewModel,
-  PromptPreviewViewModel,
   StaffPerformanceViewModel,
   ThreadHistoryViewModel
 } from "../contracts.ts";
@@ -65,29 +64,6 @@ export function createBusinessAdapter(): BusinessAdapter {
     },
     async getExportWorkbook(input) {
       return buildExportWorkbook(input);
-    },
-    async getPromptPreview() {
-      return {
-        activeVersionLabel: "Prompt A12",
-        draftVersionLabel: "Bản nháp đang sửa",
-        beforeSummary: "Prompt active đang đánh giá outcome nghiêng về chốt hẹn.",
-        afterSummary: "Bản nháp bổ sung rubric risk cho khách tái khám và staff handoff.",
-        structuredOutput: [
-          { field: "opening_theme", value: "Khách quay lại để cập nhật tiến độ điều trị" },
-          { field: "primary_need", value: "Đặt lịch tái khám" },
-          { field: "risk_level", value: "Trung bình" },
-          { field: "response_quality", value: "Cần cải thiện ở bước xác nhận thời gian" }
-        ],
-        evidence: [
-          "Opening block có nút 'Khách hàng tái khám'",
-          "Khách hỏi lại lịch cũ và nhắc toa điều trị",
-          "Nhân viên chậm xác nhận khung giờ hơn 14 phút"
-        ],
-        explanations: [
-          { field: "risk_level", explanation: "Khách có nhu cầu rõ nhưng đang chờ staff xác nhận lịch." },
-          { field: "response_quality", explanation: "Staff có phản hồi nhưng chưa chốt next step trong cùng nhịp hội thoại." }
-        ]
-      };
     }
   };
 }
