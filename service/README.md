@@ -2,7 +2,7 @@
 
 AI service nội bộ cho seam phân tích hội thoại.
 
-Contract gRPC nằm ở [conversation_analysis.proto](D:/Code/chat-analyzer-v2/proto/conversation_analysis.proto). Tên entity tracked trong contract hiện dùng:
+Contract giữa `backend` và `service` là `HTTP/JSON` nội bộ theo batch. Tên entity tracked trong contract hiện dùng:
 
 - `thread_day_id`
 - `thread_id`
@@ -17,7 +17,7 @@ Contract gRPC nằm ở [conversation_analysis.proto](D:/Code/chat-analyzer-v2/p
 - `closing_outcome_inference_code`
 - `staff_assessments_json`
 
-Service giữ owner-clean runtime theo cấu trúc `pydantic models -> executor -> provider adapter -> gRPC transport`.
+Service giữ owner-clean runtime theo cấu trúc `pydantic models -> executor -> provider adapter -> internal HTTP transport`.
 
 ## Runtime modes
 
@@ -50,6 +50,10 @@ Provider config là `service runtime env` thuần kỹ thuật. Không đưa `pr
 ## Biến môi trường
 
 ```text
+ANALYSIS_SERVICE_HTTP_HOST=0.0.0.0
+ANALYSIS_SERVICE_HTTP_PORT=8000
+ANALYSIS_SERVICE_HTTP_MAX_REQUEST_BYTES=67108864
+ANALYSIS_SERVICE_SHARED_SECRET=dev-only-insecure-change-me
 ANALYSIS_SERVICE_RUNTIME_MODE=deterministic_dev | openai_compatible_live
 ANALYSIS_SERVICE_PROVIDER_NAME=deterministic_dev | openai_compatible
 ANALYSIS_SERVICE_PROVIDER_BASE_URL=https://example.test/v1
@@ -75,6 +79,7 @@ Ví dụ deterministic dev:
 
 ```powershell
 $env:ANALYSIS_SERVICE_RUNTIME_MODE='deterministic_dev'
+$env:ANALYSIS_SERVICE_SHARED_SECRET='dev-only-insecure-change-me'
 uv run python main.py
 ```
 
@@ -82,6 +87,7 @@ Ví dụ live provider:
 
 ```powershell
 $env:ANALYSIS_SERVICE_RUNTIME_MODE='openai_compatible_live'
+$env:ANALYSIS_SERVICE_SHARED_SECRET='dev-only-insecure-change-me'
 $env:ANALYSIS_SERVICE_PROVIDER_NAME='openai_compatible'
 $env:ANALYSIS_SERVICE_PROVIDER_BASE_URL='https://example.test/v1'
 $env:ANALYSIS_SERVICE_PROVIDER_API_KEY='secret'

@@ -10,7 +10,7 @@
 - Postgres tables của Seam 1 và Seam 2 là system of record. Runtime state của bất kỳ AI framework nào không được làm source of truth.
 - `backend/` là owner của scheduler, run state, publish/supersede, review queue, read API và persistence.
 - `service/` chỉ nhận evidence bundle đã freeze và trả kết quả structured, versioned, audit được.
-- Tất cả contract JSON/gRPC của AI module phải được định nghĩa bằng Python `pydantic` v2 models có version.
+- Tất cả contract request/response của AI module phải được định nghĩa bằng Python `pydantic` v2 models có version.
 - `conversation analysis` mặc định là `1 conversation_day -> 1 structured result`, không agent loop, không multi-agent delegation trong cùng request.
 - `AI-assisted CRM mapping` có thể cần orchestration chặt hơn, nhưng vẫn phải nằm sau cùng một external contract ổn định.
 - UI và docs domain không được leak framework name vào capability chính thức của sản phẩm nếu không thật sự cần cho vận hành kỹ thuật.
@@ -64,7 +64,7 @@
 
 - Phù hợp nhất với bài toán batch ETL -> analysis -> publish.
 - Giữ domain độc lập hơn với infra/framework.
-- Dễ switch framework trong trường hợp cực đoan vì boundary đã pin bằng `pydantic` models và gRPC contract.
+- Dễ switch framework trong trường hợp cực đoan vì boundary đã pin bằng `pydantic` models và contract `HTTP/JSON` nội bộ ổn định.
 - Vẫn mở cửa cho LangGraph ở chỗ nó thực sự có lợi.
 
 **Nhược điểm**
@@ -89,7 +89,7 @@
 
 - Chọn **self-orchestration** làm xương sống hệ thống.
 - Chọn **Python `pydantic` v2** làm lớp contract chuẩn cho request/response, output schema và validation.
-- Chọn **framework-neutral service boundary**: gRPC là transport, không phải domain contract.
+- Chọn **framework-neutral service boundary**: `HTTP/JSON` nội bộ là transport hiện tại, không phải domain contract.
 - **Không chọn ADK làm framework mặc định của repo.**
 - **Không chọn LangGraph làm kiến trúc trung tâm của toàn hệ thống.**
 - **Cho phép dùng LangGraph như implementation detail** cho các flow cần branching/HITL rõ ràng, trước mắt phù hợp nhất là AI-assisted CRM mapping hoặc các review workflow phức tạp sau này.

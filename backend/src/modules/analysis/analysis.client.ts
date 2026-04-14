@@ -1,6 +1,3 @@
-import { resolve } from "node:path";
-import grpc from "@grpc/grpc-js";
-import protoLoader from "@grpc/proto-loader";
 import { env } from "../../config/env.ts";
 import { AppError } from "../../core/errors.ts";
 import type {
@@ -11,98 +8,63 @@ import type {
   ConversationAnalysisResult
 } from "./analysis.types.ts";
 
-type ProtoServiceClient = {
-  AnalyzeConversation: (
-    request: Record<string, unknown>,
-    metadata: grpc.Metadata,
-    options: grpc.CallOptions,
-    callback: (
-      error: grpc.ServiceError | null,
-      response?: {
-        results?: Array<Record<string, unknown>>;
-        runtime_metadata_json?: string;
-      }
-    ) => void
-  ) => void;
-};
-
 export interface ConversationAnalysisClient {
   analyzeConversations(input: ConversationAnalysisRequest): Promise<ConversationAnalysisResponse>;
 }
 
-const protoPath = resolve(import.meta.dir, "../../../../proto/conversation_analysis.proto");
-
-let cachedCtor: (new (address: string, credentials: grpc.ChannelCredentials) => ProtoServiceClient) | null = null;
-
-export class GrpcConversationAnalysisClient implements ConversationAnalysisClient {
-  private readonly client: ProtoServiceClient;
-
+export class HttpConversationAnalysisClient implements ConversationAnalysisClient {
   constructor(
-    target = env.analysisServiceGrpcTarget,
-    private readonly timeoutMs = env.analysisServiceGrpcTimeoutMs
-  ) {
-    const ClientCtor = loadConversationAnalysisClient();
-    this.client = new ClientCtor(target, grpc.credentials.createInsecure());
-  }
+    private readonly baseUrl = env.analysisServiceBaseUrl,
+    private readonly sharedSecret = env.analysisServiceSharedSecret,
+    private readonly timeoutMs = env.analysisServiceTimeoutMs
+  ) {}
 
   async analyzeConversations(input: ConversationAnalysisRequest): Promise<ConversationAnalysisResponse> {
-    const deadline = Date.now() + this.timeoutMs;
-    const request = {
+    const requestBody = {
       runtime: serializeRuntime(input.runtime),
       bundles: input.bundles.map(serializeBundle)
     };
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
 
-    const response = await new Promise<{
-      results?: Array<Record<string, unknown>>;
-      runtime_metadata_json?: string;
-    }>((resolveResponse, reject) => {
-      this.client.AnalyzeConversation(
-        request,
-        new grpc.Metadata(),
-        { deadline },
-        (error, payload) => {
-          if (error) {
-            reject(error);
-            return;
-          }
-          resolveResponse(payload ?? {});
-        }
-      );
+    const response = await fetch(buildAnalyzeUrl(this.baseUrl), {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${this.sharedSecret}`,
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(requestBody),
+      signal: controller.signal
     }).catch((error: unknown) => {
-      throw new AppError(502, "ANALYSIS_SERVICE_UNAVAILABLE", compactGrpcError(error), {
-        target: env.analysisServiceGrpcTarget
+      throw new AppError(502, "ANALYSIS_SERVICE_UNAVAILABLE", compactHttpError(error), {
+        target: this.baseUrl
       });
+    }).finally(() => {
+      clearTimeout(timeout);
     });
 
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "");
+      throw new AppError(502, "ANALYSIS_SERVICE_UNAVAILABLE", compactHttpFailure(response.status, errorText), {
+        target: this.baseUrl,
+        status: response.status
+      });
+    }
+
+    const payload = await response.json().catch((error: unknown) => {
+      throw new AppError(502, "ANALYSIS_SERVICE_INVALID_RESPONSE", compactHttpError(error), {
+        target: this.baseUrl
+      });
+    }) as {
+      results?: Array<Record<string, unknown>>;
+      runtime_metadata_json?: Record<string, unknown>;
+    };
+
     return {
-      results: (response.results ?? []).map((item) => deserializeResult(item)),
-      runtimeMetadataJson: parseJson(readString(response.runtime_metadata_json, "{}"), {})
+      results: (payload.results ?? []).map((item) => deserializeResult(item)),
+      runtimeMetadataJson: readObject(payload.runtime_metadata_json)
     };
   }
-}
-
-function loadConversationAnalysisClient() {
-  if (cachedCtor) {
-    return cachedCtor;
-  }
-
-  const definition = protoLoader.loadSync(protoPath, {
-    keepCase: true,
-    longs: String,
-    enums: String,
-    defaults: false
-  });
-  const loaded = grpc.loadPackageDefinition(definition) as unknown as {
-    chatanalyzer: {
-      conversationanalysis: {
-        v1: {
-          ConversationAnalysisService: new (address: string, credentials: grpc.ChannelCredentials) => ProtoServiceClient;
-        };
-      };
-    };
-  };
-  cachedCtor = loaded.chatanalyzer.conversationanalysis.v1.ConversationAnalysisService;
-  return cachedCtor;
 }
 
 function serializeRuntime(runtime: AnalysisRuntimeSnapshot) {
@@ -114,16 +76,16 @@ function serializeRuntime(runtime: AnalysisRuntimeSnapshot) {
     output_schema_version: runtime.outputSchemaVersion,
     taxonomy_version: runtime.taxonomyVersionCode,
     page_prompt_text: runtime.pagePromptText,
-    taxonomy_json: JSON.stringify(runtime.taxonomyJson),
-    generation_config_json: JSON.stringify(runtime.generationConfig),
-    profile_json: JSON.stringify({
+    taxonomy_json: runtime.taxonomyJson,
+    generation_config: runtime.generationConfig,
+    profile_json: {
       ...runtime.profileJson,
       page_prompt_hash: runtime.pagePromptHash,
       page_prompt_version: runtime.promptVersion,
       config_version_id: runtime.configVersionId,
       taxonomy_version_id: runtime.taxonomyVersionId,
       connected_page_id: runtime.connectedPageId
-    })
+    }
   };
 }
 
@@ -137,20 +99,20 @@ function serializeBundle(bundle: AnalysisUnitBundle) {
     target_date: bundle.targetDate,
     business_timezone: bundle.businessTimezone,
     customer_display_name: bundle.customerDisplayName ?? "",
-    normalized_tag_signals_json: JSON.stringify(bundle.normalizedTagSignalsJson ?? {}),
-    observed_tags_json: JSON.stringify(bundle.observedTagsJson ?? []),
-    opening_block_json: JSON.stringify(bundle.openingBlockJson ?? {}),
+    normalized_tag_signals_json: bundle.normalizedTagSignalsJson ?? {},
+    observed_tags_json: bundle.observedTagsJson ?? [],
+    opening_block_json: bundle.openingBlockJson ?? {},
     first_meaningful_message_id: bundle.firstMeaningfulMessageId ?? "",
     first_meaningful_message_text_redacted: bundle.firstMeaningfulMessageTextRedacted ?? "",
     first_meaningful_message_sender_role: bundle.firstMeaningfulMessageSenderRole ?? "",
     explicit_revisit_signal: bundle.explicitRevisitSignal ?? "",
     explicit_need_signal: bundle.explicitNeedSignal ?? "",
     explicit_outcome_signal: bundle.explicitOutcomeSignal ?? "",
-    source_thread_json_redacted: JSON.stringify(bundle.sourceThreadJsonRedacted ?? {}),
+    source_thread_json_redacted: bundle.sourceThreadJsonRedacted ?? {},
     message_count: bundle.messageCount,
-    first_staff_response_seconds: bundle.firstStaffResponseSeconds ?? 0,
-    avg_staff_response_seconds: bundle.avgStaffResponseSeconds ?? 0,
-    staff_participants_json: JSON.stringify(bundle.staffParticipantsJson ?? []),
+    first_staff_response_seconds: bundle.firstStaffResponseSeconds,
+    avg_staff_response_seconds: bundle.avgStaffResponseSeconds,
+    staff_participants_json: bundle.staffParticipantsJson ?? [],
     messages: bundle.messages.map((message) => ({
       id: message.id,
       inserted_at: message.insertedAt,
@@ -178,21 +140,14 @@ function deserializeResult(raw: Record<string, unknown>): ConversationAnalysisRe
     closingOutcomeInferenceCode: readString(raw.closing_outcome_inference_code, "unknown"),
     processRiskLevelCode: readString(raw.process_risk_level_code, "unknown"),
     processRiskReasonText: readNullableString(raw.process_risk_reason_text),
-    staffAssessmentsJson: parseJson(readString(raw.staff_assessments_json, "[]"), []),
-    evidenceUsedJson: parseJson(readString(raw.evidence_used_json, "{}"), {}),
-    fieldExplanationsJson: parseJson(readString(raw.field_explanations_json, "{}"), {}),
-    supportingMessageIdsJson: parseJson(readString(raw.supporting_message_ids_json, "[]"), []),
-    usageJson: parseJson(readUsageJson(raw.usage), {}),
-    costMicros: Number(readString(raw.cost_micros, "0")),
-    failureInfoJson: parseJson(readString(raw.failure_info_json, ""), null)
+    staffAssessmentsJson: readArray(raw.staff_assessments_json),
+    evidenceUsedJson: readObject(raw.evidence_used_json),
+    fieldExplanationsJson: readObject(raw.field_explanations_json),
+    supportingMessageIdsJson: readStringArray(raw.supporting_message_ids_json),
+    usageJson: readObject(raw.usage_json),
+    costMicros: readNumber(raw.cost_micros),
+    failureInfoJson: readNullableObject(raw.failure_info_json)
   };
-}
-
-function readUsageJson(value: unknown) {
-  if (value && typeof value === "object" && "json" in value) {
-    return readString((value as { json?: unknown }).json, "{}");
-  }
-  return "{}";
 }
 
 function readString(value: unknown, fallback = "") {
@@ -204,22 +159,47 @@ function readNullableString(value: unknown) {
   return parsed.length > 0 ? parsed : null;
 }
 
-function parseJson<T>(raw: string, fallback: T): T {
-  if (!raw) {
-    return fallback;
-  }
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
+function readObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }
 
-function compactGrpcError(error: unknown) {
+function readNullableObject(value: unknown) {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : null;
+}
+
+function readArray<T = unknown>(value: unknown) {
+  return Array.isArray(value) ? value as T[] : [];
+}
+
+function readStringArray(value: unknown) {
+  return readArray(value).filter((item): item is string => typeof item === "string");
+}
+
+function readNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function buildAnalyzeUrl(baseUrl: string) {
+  return new URL("/internal/analyze", baseUrl).toString();
+}
+
+function compactHttpError(error: unknown) {
+  if (error instanceof DOMException && error.name === "AbortError") {
+    return `Request timeout sau ${env.analysisServiceTimeoutMs}ms`;
+  }
   if (error instanceof Error) {
     return error.message;
   }
   return String(error);
 }
 
-export const conversationAnalysisClient: ConversationAnalysisClient = new GrpcConversationAnalysisClient();
+function compactHttpFailure(status: number, errorText: string) {
+  const detail = errorText.trim();
+  return detail ? `HTTP ${status}: ${detail}` : `HTTP ${status}`;
+}
+
+export const conversationAnalysisClient: ConversationAnalysisClient = new HttpConversationAnalysisClient();

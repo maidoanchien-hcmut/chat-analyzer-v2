@@ -47,7 +47,7 @@
 - Scheduler runtime thật cho `official_daily`, bao gồm queue orchestration vận hành định kỳ thay vì chỉ manual run.
 - Activation theo tinh thần `lazy operator`: `connect -> chọn page -> activate` chạy được ngay với default an toàn, không bị chặn bởi bước map tag/opening rules/prompt.
 - `opening_rules` mặc định phải có built-in heuristic dựa trên observed payload đã định nghĩa sẵn từ source-of-truth, nhưng vẫn là best-effort extractor và fail-open về `first_meaningful_message` khi không match.
-- `service/` chưa có runtime env/provider/model routing thật cho LLM API; hiện backend chỉ biết gọi gRPC sang service, nhưng service chưa pin đang dùng dịch vụ LLM nào và chưa fail-closed khi thiếu provider config.
+- `service/` chưa có runtime env/provider/model routing thật cho LLM API; hiện backend chỉ biết gọi service qua contract nội bộ, nhưng service chưa pin đang dùng dịch vụ LLM nào và chưa fail-closed khi thiếu provider config.
 - System prompt của `service/` phải chốt rõ việc LLM phân loại các signal trong hội thoại theo taxonomy canonical, phân biệt explicit signal với semantic inference, thay vì chỉ mô tả vai trò đánh giá hội thoại chung chung.
 - Prompt profile workspace đầy đủ theo `docs/ui-flows.md`, gồm preview audit được, compare `before/after`, clone version cũ/page khác, và semantics tách khỏi publish path.
 - `Vận hành` full UX cho health summary, run detail, manual run preview, publish action, historical overwrite confirm và diagnostics.

@@ -123,6 +123,20 @@ class ServiceResultModel(BaseModel):
   failure_info_json: dict[str, Any] | None = None
 
 
+class AnalyzeConversationRequestModel(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
+  runtime: RuntimeSnapshotModel
+  bundles: list[UnitBundleModel] = Field(default_factory=list)
+
+
+class AnalyzeConversationResponseModel(BaseModel):
+  model_config = ConfigDict(extra="forbid")
+
+  results: list[ServiceResultModel] = Field(default_factory=list)
+  runtime_metadata_json: dict[str, Any] = Field(default_factory=dict)
+
+
 class RuntimeMetadataModel(BaseModel):
   model_config = ConfigDict(extra="forbid")
 

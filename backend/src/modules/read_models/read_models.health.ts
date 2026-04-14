@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { createConnection } from "node:net";
 import { resolve } from "node:path";
 import { env } from "../../config/env.ts";
 import { prisma } from "../../infra/prisma.ts";
@@ -88,39 +87,40 @@ async function probeQueue() {
 }
 
 async function probeAnalysisService() {
-  const [host, rawPort] = env.analysisServiceGrpcTarget.split(":");
-  const port = Number(rawPort);
-  if (!host || !Number.isFinite(port)) {
+  let healthUrl: string;
+  try {
+    healthUrl = new URL("/health", env.analysisServiceBaseUrl).toString();
+  } catch {
     return {
       status: "warning",
-      detail: `Target khong hop le: ${env.analysisServiceGrpcTarget}`
+      detail: `Base URL khong hop le: ${env.analysisServiceBaseUrl}`
     };
   }
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1500);
   try {
-    await new Promise<void>((resolveProbe, rejectProbe) => {
-      const socket = createConnection({ host, port, timeout: 1500 }, () => {
-        socket.end();
-        resolveProbe();
-      });
-      socket.once("timeout", () => {
-        socket.destroy();
-        rejectProbe(new Error("connect timeout"));
-      });
-      socket.once("error", (error) => {
-        socket.destroy();
-        rejectProbe(error);
-      });
+    const response = await fetch(healthUrl, {
+      method: "GET",
+      signal: controller.signal
     });
+    if (!response.ok) {
+      return {
+        status: "warning",
+        detail: `HTTP ${response.status} @ ${healthUrl}`
+      };
+    }
     return {
       status: "ready",
-      detail: `TCP ready @ ${env.analysisServiceGrpcTarget}`
+      detail: `HTTP ready @ ${healthUrl}`
     };
   } catch (error) {
     return {
       status: "warning",
       detail: compactError(error)
     };
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

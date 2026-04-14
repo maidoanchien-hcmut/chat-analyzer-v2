@@ -817,6 +817,8 @@ AI unit ở grain `thread_day` phải nhận:
 
 Bundle này là hậu quả của snapshot ETL-transform đã freeze cho run đó, không chỉ là hậu quả của prompt.
 
+Boundary giữa `backend` và `service` phải là `HTTP/JSON` nội bộ theo batch, với `backend` là caller duy nhất. Không dùng `gRPC` cho seam này. Không được thiết kế kiểu `REST JSON` per-thread cho daily bulk processing; request phải gửi theo lô `thread_day` để giữ được orchestration, retry/resume và cost control ở `backend`.
+
 AI phải:
 
 - ưu tiên source evidence explicit

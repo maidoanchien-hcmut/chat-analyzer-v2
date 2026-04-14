@@ -4,7 +4,7 @@ Monorepo cho ứng dụng `chat-analyzer` trong dev environment:
 
 - `backend/`: owner của extraction control-plane, analysis orchestration, semantic mart/publish semantics, read APIs, và ODS persistence.
 - `frontend/`: shell vận hành tối giản bằng HTML/CSS/TypeScript thuần, chỉ bám contract extraction mới của backend.
-- `service/`: AI service gRPC bằng Python; hiện contract nội bộ đã đổi sang `pipeline_run/thread_day`.
+- `service/`: AI service nội bộ bằng Python; hiện contract nội bộ đã đổi sang `pipeline_run/thread_day` và giao tiếp với `backend` qua `HTTP/JSON` theo batch.
 - `docs/`: source-of-truth thiết kế và implementation plan.
 
 ## Yêu cầu môi trường
@@ -18,6 +18,7 @@ Port mặc định:
 
 - Frontend: `http://localhost:5173`
 - Backend: `http://localhost:3000`
+- Service: `http://localhost:8000`
 - PostgreSQL: `localhost:5432`
 - Redis: `localhost:6379`
 
@@ -44,6 +45,12 @@ Chạy backend:
 cd D:\Code\chat-analyzer-v2\backend
 bun run dev
 ```
+
+Biến môi trường nội bộ cho analysis service:
+
+- `ANALYSIS_SERVICE_BASE_URL`
+- `ANALYSIS_SERVICE_TIMEOUT_MS`
+- `ANALYSIS_SERVICE_SHARED_SECRET`
 
 Extraction endpoints hiện hành:
 
@@ -129,12 +136,13 @@ bun run walkthrough:http
 
 ## Service
 
-AI service giữ gRPC contract nội bộ ở [proto/conversation_analysis.proto](D:/Code/chat-analyzer-v2/proto/conversation_analysis.proto). Contract tracked trong repo không còn dùng `etl_run` hay `conversation_day`; unit hiện theo `thread_day` và `pipeline_run`.
+AI service hiện dùng contract nội bộ `HTTP/JSON` theo batch giữa `backend` và `service`. Contract tracked trong repo không còn dùng `etl_run` hay `conversation_day`; unit hiện theo `thread_day` và `pipeline_run`.
 
 Chạy service:
 
 ```powershell
 cd D:\Code\chat-analyzer-v2\service
+uv sync
 uv run python main.py
 ```
 

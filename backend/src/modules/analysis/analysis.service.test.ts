@@ -258,7 +258,7 @@ describe("analysis service", () => {
       repository: repository as never,
       client: {
         analyzeConversations: async () => {
-          throw new Error("grpc unavailable");
+          throw new Error("analysis service unavailable");
         }
       },
       batchSize: 10

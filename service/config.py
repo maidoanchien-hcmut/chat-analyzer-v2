@@ -13,10 +13,10 @@ RuntimeMode = Literal["deterministic_dev", "openai_compatible_live"]
 class ServiceConfig(BaseModel):
   model_config = ConfigDict(extra="forbid")
 
-  grpc_host: str = Field(default="0.0.0.0")
-  grpc_port: int = Field(default=50051, ge=1, le=65535)
-  grpc_max_message_length: int = Field(default=64 * 1024 * 1024, ge=1024)
-  grpc_max_workers: int = Field(default=8, ge=1, le=64)
+  http_host: str = Field(default="0.0.0.0")
+  http_port: int = Field(default=8000, ge=1, le=65535)
+  http_max_request_bytes: int = Field(default=64 * 1024 * 1024, ge=1024)
+  shared_secret: str = Field(default="dev-only-insecure-change-me", min_length=1)
   runtime_mode: RuntimeMode = Field(default="deterministic_dev")
   provider_name: str | None = None
   provider_base_url: str | None = None
@@ -71,10 +71,10 @@ class ServiceConfig(BaseModel):
 def load_config() -> ServiceConfig:
   try:
     return ServiceConfig(
-      grpc_host=os.getenv("ANALYSIS_SERVICE_GRPC_HOST", "0.0.0.0"),
-      grpc_port=os.getenv("ANALYSIS_SERVICE_GRPC_PORT", "50051"),
-      grpc_max_message_length=os.getenv("ANALYSIS_SERVICE_GRPC_MAX_MESSAGE_LENGTH", str(64 * 1024 * 1024)),
-      grpc_max_workers=os.getenv("ANALYSIS_SERVICE_GRPC_MAX_WORKERS", "8"),
+      http_host=os.getenv("ANALYSIS_SERVICE_HTTP_HOST", "0.0.0.0"),
+      http_port=os.getenv("ANALYSIS_SERVICE_HTTP_PORT", "8000"),
+      http_max_request_bytes=os.getenv("ANALYSIS_SERVICE_HTTP_MAX_REQUEST_BYTES", str(64 * 1024 * 1024)),
+      shared_secret=os.getenv("ANALYSIS_SERVICE_SHARED_SECRET", "dev-only-insecure-change-me"),
       runtime_mode=os.getenv("ANALYSIS_SERVICE_RUNTIME_MODE", "deterministic_dev"),
       provider_name=os.getenv("ANALYSIS_SERVICE_PROVIDER_NAME"),
       provider_base_url=os.getenv("ANALYSIS_SERVICE_PROVIDER_BASE_URL"),

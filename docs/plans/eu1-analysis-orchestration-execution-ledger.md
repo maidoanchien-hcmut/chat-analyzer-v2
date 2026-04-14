@@ -6,7 +6,7 @@ Codex main agent
 
 Objective Card:
 - canonical nouns: pipeline_run, analysis_run, analysis_result, thread_day, bundle freeze, runtime_snapshot, prompt_hash, prompt_version, taxonomy_version, evidence_hash, output_schema_version
-- owner map: T1 owns proto and service runtime; T2 owns backend analysis schema/repository/orchestration/controller wiring; T3 owns verification-focused backend/service tests and fixtures in files under backend/src/modules/analysis and service/tests if needed, without editing proto or service runtime implementation files owned by T1
+- owner map: T1 owns service runtime; T2 owns backend analysis schema/repository/orchestration/controller wiring; T3 owns verification-focused backend/service tests and fixtures in files under backend/src/modules/analysis and service/tests if needed, without editing service runtime implementation files owned by T1
 - invariants: backend owns orchestration, freeze snapshot, validation, persistence, retry/resume idempotency; service owns system prompt and never reads live DB; analysis_result uniqueness stays at (analysis_run_id, thread_day_id); journey_code and primary_need_code remain separate and revisit never becomes primary_need_code
 - verification bar: service proof with uv run pytest; backend proof with bun test; integration proof for loaded pipeline_run -> analyze -> persisted results; retry/resume proof for no duplicate analysis_result and correct unit/cost aggregation
 - debt register path: docs/plans/first-end-to-end-slice-debt.md
@@ -14,7 +14,7 @@ Objective Card:
 
 | Task ID | Task Name | Owner Sub-Agent | Write Scope | Depends On | Status | Proof Status | Integration Status | Bridge Code Status | Debt Registration | Notes |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| T1 | Proto and service runtime rewrite | 019d59dd-2a9d-73f3-9e97-8882b4832ed3 | proto/conversation_analysis.proto; service/** | None | Accepted | Passed | Integrated | Removed Before Return | Not Needed | Subagent hit usage limit before final summary; coordinator verified and integrated the resulting owner-clean service rewrite locally. |
+| T1 | Service runtime rewrite | 019d59dd-2a9d-73f3-9e97-8882b4832ed3 | service/** | None | Accepted | Passed | Integrated | Removed Before Return | Not Needed | Subagent hit usage limit before final summary; coordinator verified and integrated the resulting owner-clean service rewrite locally. |
 | T2 | Backend analysis orchestration and persistence | 019d59de-06e7-7c41-b27c-69f3f7c1f04e | backend/prisma/**; backend/src/modules/analysis/**; backend/src/app.ts | T1 | Accepted | Passed | Reworked During Integration | None | Not Needed | Worker returned schema/client foundation only; coordinator completed repository/service/controller wiring and normalized owner boundaries during integration. |
 | T3 | Verification and integration fixtures | Coordinator local rescue | backend/src/modules/analysis/**/*.test.ts; service/tests/**; related README docs if needed | T1, T2 | Accepted | Passed | Integrated | None | Not Needed | Coordinator added backend analysis tests and chat_extractor ETL->AI proof, then ran backend/service verification. |
 
@@ -33,9 +33,9 @@ Objective Card:
 
 ### T1 Acceptance Check
 - Assigned requirements:
-  Lock the gRPC/service contract for EU1, rewrite the service into owner-clean `pydantic models -> executor -> transport`, keep `journey_code` separate from `primary_need_code`, and fail closed on invalid output.
+  Lock the backend/service contract for EU1 around internal `HTTP/JSON`, rewrite the service into owner-clean `pydantic models -> executor -> transport`, keep `journey_code` separate from `primary_need_code`, and fail closed on invalid output.
 - Returned summary:
-  No final summary because the subagent hit usage limit, but the workspace contained the intended T1 diff: updated proto, new `service/analysis_models.py`, new `service/analysis_executor.py`, updated transport in `service/main.py`, generated protobuf updates, tests, and removal of `service/analysis_runtime.py`.
+  No final summary because the subagent hit usage limit, but the workspace contained the intended T1 diff: new `service/analysis_models.py`, new `service/analysis_executor.py`, updated transport in `service/main.py`, tests, and removal of `service/analysis_runtime.py`.
 - Verification result:
   Approved
 - Requirement gaps:
@@ -53,7 +53,7 @@ Objective Card:
 
 ### T2 Acceptance Check
 - Assigned requirements:
-  Add backend analysis orchestration so a loaded `pipeline_run` can build frozen bundles, call the service over gRPC, persist `analysis_run`/`analysis_result` idempotently, and expose a backend seam to trigger and inspect the flow.
+  Add backend analysis orchestration so a loaded `pipeline_run` can build frozen bundles, call the service over internal `HTTP/JSON`, persist `analysis_run`/`analysis_result` idempotently, and expose a backend seam to trigger and inspect the flow.
 - Returned summary:
   Worker returned schema changes, migration, analysis artifacts/types/client foundation, and a partial repository, but orchestration/service/controller wiring and proof were incomplete.
 - Verification result:

@@ -89,10 +89,10 @@ def build_bundle(**overrides) -> UnitBundleModel:
 
 def build_config() -> ServiceConfig:
   return ServiceConfig(
-    grpc_host="0.0.0.0",
-    grpc_port=50051,
-    grpc_max_message_length=64 * 1024 * 1024,
-    grpc_max_workers=8,
+    http_host="0.0.0.0",
+    http_port=8000,
+    http_max_request_bytes=64 * 1024 * 1024,
+    shared_secret="dev-only-insecure-change-me",
     runtime_mode="deterministic_dev",
     log_level="INFO",
   )
@@ -202,10 +202,10 @@ def test_invalid_outputs_fail_closed():
 )
 def test_live_runtime_requires_explicit_provider_contract(field_name, field_value, expected_error):
   payload = {
-    "grpc_host": "0.0.0.0",
-    "grpc_port": 50051,
-    "grpc_max_message_length": 64 * 1024 * 1024,
-    "grpc_max_workers": 8,
+    "http_host": "0.0.0.0",
+    "http_port": 8000,
+    "http_max_request_bytes": 64 * 1024 * 1024,
+    "shared_secret": "dev-only-insecure-change-me",
     "runtime_mode": "openai_compatible_live",
     "provider_name": "openai_compatible",
     "provider_base_url": "https://example.test/v1",
@@ -222,10 +222,10 @@ def test_live_runtime_requires_explicit_provider_contract(field_name, field_valu
 def test_live_runtime_rejects_unknown_provider_name():
   with pytest.raises(Exception, match="provider_name=openai_compatible"):
     ServiceConfig(
-      grpc_host="0.0.0.0",
-      grpc_port=50051,
-      grpc_max_message_length=64 * 1024 * 1024,
-      grpc_max_workers=8,
+      http_host="0.0.0.0",
+      http_port=8000,
+      http_max_request_bytes=64 * 1024 * 1024,
+      shared_secret="dev-only-insecure-change-me",
       runtime_mode="openai_compatible_live",
       provider_name="other_provider",
       provider_base_url="https://example.test/v1",
@@ -289,10 +289,10 @@ def test_runtime_metadata_uses_resolved_provider_model_and_generation_config():
 def test_live_adapter_uses_shared_prompt_builder_and_returns_usage_metadata():
   captured: dict[str, object] = {}
   config = ServiceConfig(
-    grpc_host="0.0.0.0",
-    grpc_port=50051,
-    grpc_max_message_length=64 * 1024 * 1024,
-    grpc_max_workers=8,
+    http_host="0.0.0.0",
+    http_port=8000,
+    http_max_request_bytes=64 * 1024 * 1024,
+    shared_secret="dev-only-insecure-change-me",
     runtime_mode="openai_compatible_live",
     provider_name="openai_compatible",
     provider_base_url="https://example.test/v1",

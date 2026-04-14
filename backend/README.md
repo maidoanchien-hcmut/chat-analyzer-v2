@@ -9,6 +9,12 @@ bunx prisma generate
 bun run dev
 ```
 
+Backend gọi `service` qua `HTTP/JSON` nội bộ với:
+
+- `ANALYSIS_SERVICE_BASE_URL`
+- `ANALYSIS_SERVICE_TIMEOUT_MS`
+- `ANALYSIS_SERVICE_SHARED_SECRET`
+
 Schema extraction hiện theo owner-clean seam:
 
 - `connected_page`

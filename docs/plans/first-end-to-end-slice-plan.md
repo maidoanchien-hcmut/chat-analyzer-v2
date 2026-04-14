@@ -11,9 +11,9 @@
 **Primary Contract:** Mọi dữ liệu business-facing và `.xlsx` chỉ được đọc từ semantic mart đã materialize theo từng `pipeline_run` và được resolve qua active publish snapshot pointer xác định tường minh theo `page + target_date + publish channel`; mọi audit và drill-down AI chỉ được đọc từ ODS + AI inference store của chính snapshot đó; `draft` chỉ đọc qua run-scoped preview/result APIs với `run_id` tường minh, không đi qua dashboard path mặc định; AI runtime chỉ nhận bundle freeze từ backend và trả structured output canonical.
 **First Proof:** Một full-day run local cho đúng 1 page và 1 ngày phải chứng minh được toàn tuyến `thread_day/message loaded -> analysis_run/analysis_result persisted idempotent -> fact_thread_day/fact_staff_thread_day materialized -> active published_official pointer atomically switched -> overview/staff/thread/export HTTP trả dữ liệu thật cùng version metadata`.
 **First Slice:** Thêm analysis orchestration owner-clean cho một `pipeline_run` đã load xong ODS, persist được `analysis_run` và `analysis_result` từ service mới mà không dùng lại runtime heuristic hiện tại.
-**Blast Radius:** `backend/prisma/schema.prisma`, migrations mới, module backend cho analysis/mart/read-model/mapping, `proto/`, toàn bộ `service/` runtime, adapter HTTP business của frontend, và một phần render/state ở `frontend/` phải đi cùng nhau vì cùng owner một contract publish/audit.
+**Blast Radius:** `backend/prisma/schema.prisma`, migrations mới, module backend cho analysis/mart/read-model/mapping, toàn bộ `service/` runtime, adapter HTTP business của frontend, và một phần render/state ở `frontend/` phải đi cùng nhau vì cùng owner một contract publish/audit.
 **Execution Posture:** Thực hiện theo các execution unit owner-clean. Không giữ dual-path lâu dài kiểu `demo adapter cho business` song song với `HTTP thật`, không giữ service heuristic như runtime thật, và không vá dashboard bằng query trực tiếp từ ODS/raw tables.
-**Allowed Mechanism:** Rewrite service mạnh tay; gRPC typed giữa backend và service; materialized fact rows per run; HTTP read APIs typed cho business views; label rendering theo `analysis_taxonomy_version`; targeted tests/integration fixtures; README/docs cập nhật theo shape mới.
+**Allowed Mechanism:** Rewrite service mạnh tay; contract `HTTP/JSON` nội bộ theo batch giữa backend và service; materialized fact rows per run; HTTP read APIs typed cho business views; label rendering theo `analysis_taxonomy_version`; targeted tests/integration fixtures; README/docs cập nhật theo shape mới.
 **Forbidden Shortcuts:** Query dashboard trực tiếp từ `thread_day + analysis_result`; build staff coaching trong frontend; để frontend tự hợp nhất raw/code thành nhãn business; để service tự query dữ liệu ngoài request bundle; coi `revisit` là `primary_need`; giữ business views trên fixture chỉ vì backend chưa xong.
 **Forbidden Scaffolding:** Không thêm shim `demo-to-http`, không thêm bridge service cũ -> service mới, không thêm read endpoint "tạm" trả shape gần giống fixture nhưng không gắn mart, không thêm semantic path thứ hai ngoài mart đã publish, không thêm ownership layer tenant/company/workspace.
 **Proof Obligations:** `bun test` cho backend/frontend, `go test ./...`, `uv run pytest` hoặc tương đương cho service mới, migration deploy được trên DB trống, một fixture/integration proof chứng minh full-day publish và HTTP reads nhất quán, export `.xlsx` dùng đúng snapshot official, compare-page đọc cùng snapshot resolver như overview, `draft` run xem được qua preview/run-result mà không rò sang dashboard, và UI/backend cùng expose đúng warning cho `published_provisional` hoặc mixed-version slice.
@@ -65,7 +65,7 @@
   - export `.xlsx` từ snapshot official
   - health/runtime details cho AI service
   - CRM mapping queue thật
-- `service/` hiện là heuristic runtime tạm, chỉ để giữ gRPC contract; không phải production analysis engine.
+- `service/` hiện là heuristic runtime tạm, chỉ để giữ contract nội bộ cũ; không phải production analysis engine.
 - `frontend/` business views vẫn đang đọc `frontend/src/adapters/demo/business-adapter.ts`; app shell hiện hardcode business adapter demo cho:
   - `Tổng quan`
   - `Khám phá dữ liệu`
@@ -95,10 +95,10 @@
 - `backend` là owner của page prompt snapshot, taxonomy freeze, prompt identity, prompt hash/prompt version và metadata audit của run.
 - `service` là owner của bước lắp ráp prompt cuối cùng gửi tới model provider, trên cơ sở system prompt của service cộng với runtime snapshot do backend freeze.
 - `frontend` không bao giờ gọi `service` trực tiếp.
-- Chỉ `backend` được gọi `service`, và transport giữa hai bên là gRPC.
+- Chỉ `backend` được gọi `service`, và transport giữa hai bên là `HTTP/JSON` nội bộ theo batch.
 - Page prompt chỉ là rubric cục bộ; không được đổi taxonomy canonical toàn hệ thống.
 - Tag chưa cấu hình tay mặc định vào `noise` và không làm nghẽn onboarding hay daily run.
-- `service/` mới phải giữ framework-neutral boundary; gRPC là transport, không phải domain contract.
+- `service/` mới phải giữ framework-neutral boundary; `HTTP/JSON` nội bộ là transport hiện tại, không phải domain contract.
 
 ## 3. Design Gate Cho Phần Còn Lại
 
@@ -228,8 +228,7 @@ Hiện backend đã có `official_daily` planning semantics, nhưng chưa có sc
 
 - `backend/prisma/schema.prisma`
 - migration cho `analysis_run` / `analysis_result` nếu cần chỉnh shape
-- module backend mới cho analysis orchestration, gRPC client, bundle builder, persistence
-- `proto/conversation_analysis.proto` nếu contract cần chỉnh
+- module backend mới cho analysis orchestration, HTTP client nội bộ, bundle builder, persistence
 - toàn bộ runtime trong `service/`
 - README liên quan
 
@@ -255,7 +254,7 @@ Hiện backend đã có `official_daily` planning semantics, nhưng chưa có sc
 - Thêm backend analysis module:
   - chọn `pipeline_run` eligible cho analysis
   - build unit bundles từ `thread_day` + `message`
-  - gọi service qua gRPC theo batch
+  - gọi service qua `HTTP/JSON` theo batch
   - persist `analysis_run`
   - persist `analysis_result` bằng idempotent upsert/replace trong phạm vi một `analysis_run`
   - mark status/count/cost/error chính xác theo persisted unit rows, không blind increment theo số lần retry
