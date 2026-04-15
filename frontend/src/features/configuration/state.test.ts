@@ -222,7 +222,7 @@ describe("configuration workflow", () => {
     expect(html).toContain("risk_level");
   });
 
-  it("renders onboarding timezone as an owner-clean input and shows a dedicated lane for normal operators", () => {
+  it("renders onboarding timezone as a full IANA select and shows a dedicated lane for normal operators", () => {
     const configuration = {
       ...createConfigurationState(),
       activeTab: "page-info" as const
@@ -230,8 +230,9 @@ describe("configuration workflow", () => {
 
     const html = renderConfiguration(configuration);
 
-    expect(html).toContain("<select name=\"businessTimezone\">");
+    expect(html).toContain('<select name="businessTimezone">');
     expect(html).toContain("Page đang vận hành");
+    expect(html).toContain("Lane 1: Onboarding page mới");
     expect(html).toContain("Tải cấu hình page đã chọn");
     expect(html).not.toContain("<select name=\"schedulerTimezone\">");
   });
@@ -262,7 +263,9 @@ describe("configuration workflow", () => {
       }
     });
     expect(taxonomyHtml).toContain('name="tagRawTag"');
-    expect(taxonomyHtml).not.toContain('data-form="onboarding-token"');
+    expect(taxonomyHtml).toContain('data-form="onboarding-token"');
+    expect(taxonomyHtml).toContain("Trả về mặc định");
+    expect(taxonomyHtml).not.toContain('<select name="tagSource">');
     expect(taxonomyHtml).not.toContain("Preview workspace runtime thật");
 
     const openingRulesHtml = renderConfiguration({
@@ -288,7 +291,7 @@ describe("configuration workflow", () => {
       activeTab: "prompt-profile"
     });
     expect(promptProfileHtml).toContain("Preview workspace runtime thật");
-    expect(promptProfileHtml).not.toContain('data-form="onboarding-token"');
+    expect(promptProfileHtml).toContain('data-form="onboarding-token"');
     expect(promptProfileHtml).not.toContain("Scheduler default toàn hệ thống");
 
     const schedulerHtml = renderConfiguration({
@@ -310,11 +313,11 @@ describe("configuration workflow", () => {
 
     expect(options.find((option) => option.value === "Asia/Ho_Chi_Minh")).toEqual({
       value: "Asia/Ho_Chi_Minh",
-      label: "GMT+07:00 - Asia/Ho_Chi_Minh"
+      label: "Asia/Ho_Chi_Minh"
     });
     expect(options.find((option) => option.value === "Asia/Saigon")).toEqual({
       value: "Asia/Saigon",
-      label: "GMT+07:00 - Asia/Saigon (legacy alias)"
+      label: "Asia/Saigon (legacy alias)"
     });
     expect(options.filter((option) => option.value === "America/Los_Angeles")).toHaveLength(1);
   });
@@ -332,19 +335,19 @@ describe("configuration workflow", () => {
         { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
       ],
       scheduler: { useSystemDefaults: true, timezone: "Asia/Bangkok", officialDailyTime: "00:00", lookbackHours: 2 },
-      sampleConversationLimit: 9,
-      sampleMessagePageLimit: 3
+      sampleConversationLimit: 9
     });
 
     expect(payload).toMatchObject({
       pancakePageId: "pk_101",
       userAccessToken: "user-token",
       businessTimezone: "Asia/Saigon",
-      sampleConversationLimit: 9,
-      sampleMessagePageLimit: 3
+      sampleConversationLimit: 9
     });
     expect(payload.schedulerJson).toMatchObject({
-      timezone: "Asia/Saigon"
+      timezone: "Asia/Saigon",
+      maxConversationsPerRun: 9,
+      maxMessagePagesPerThread: 0
     });
   });
 
@@ -358,16 +361,16 @@ describe("configuration workflow", () => {
       ],
       scheduler: { useSystemDefaults: true, timezone: "Asia/Bangkok", officialDailyTime: "00:00", lookbackHours: 2 },
       businessTimezone: "Asia/Saigon",
-      sampleConversationLimit: 9,
-      sampleMessagePageLimit: 3
+      sampleConversationLimit: 9
     });
 
     expect(payload).toMatchObject({
-      sampleConversationLimit: 9,
-      sampleMessagePageLimit: 3
+      sampleConversationLimit: 9
     });
     expect(payload.schedulerJson).toMatchObject({
-      timezone: "Asia/Saigon"
+      timezone: "Asia/Saigon",
+      maxConversationsPerRun: 9,
+      maxMessagePagesPerThread: 0
     });
   });
 
@@ -649,16 +652,14 @@ describe("configuration workflow", () => {
       openingRules: [],
       scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
       businessTimezone: "Asia/Saigon",
-      sampleConversationLimit: 12,
-      sampleMessagePageLimit: 2
+      sampleConversationLimit: 12
     });
     const currentWorkspaceFingerprint = buildPromptWorkspaceSampleFingerprint({
       tagMappings: [{ sourceTagId: "11", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }],
       openingRules: [],
       scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
       businessTimezone: "Asia/Saigon",
-      sampleConversationLimit: 12,
-      sampleMessagePageLimit: 2
+      sampleConversationLimit: 12
     });
     const comparisonFingerprint = buildPromptPreviewComparisonFingerprint({
       promptText: "Prompt sample",
@@ -737,8 +738,7 @@ describe("configuration workflow", () => {
         openingRules: [],
         scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
         businessTimezone: "Asia/Saigon",
-        sampleConversationLimit: 12,
-        sampleMessagePageLimit: 2
+        sampleConversationLimit: 12
       }),
       comparisonFingerprint: staleComparisonFingerprint,
       currentWorkspaceFingerprint: buildPromptWorkspaceSampleFingerprint({
@@ -746,8 +746,7 @@ describe("configuration workflow", () => {
         openingRules: [],
         scheduler: { useSystemDefaults: true, timezone: "Asia/Saigon", officialDailyTime: "00:00", lookbackHours: 2 },
         businessTimezone: "Asia/Saigon",
-        sampleConversationLimit: 12,
-        sampleMessagePageLimit: 2
+        sampleConversationLimit: 12
       }),
       currentComparisonFingerprint: currentComparisonFingerprint,
       hasSamplePreview: true,
@@ -993,6 +992,45 @@ describe("configuration workflow", () => {
     expect(html).toContain("Tag mapping đã đổi");
     expect(html).toContain("Prompt draft đã đổi");
   });
+
+  it("renders taxonomy inventory from onboarding sample and separates deactivated tags", () => {
+    const html = renderConfiguration({
+      ...createConfigurationState(),
+      activeTab: "taxonomy",
+      workspace: {
+        ...createConfigurationState().workspace,
+        selectedPancakePageId: "pk_101",
+        tagMappings: [
+          { sourceTagId: "11", rawTag: "KH mới", role: "noise", canonicalValue: "", source: "system_default" }
+        ]
+      },
+      onboardingSamplePreview: {
+        pageId: "pk_101",
+        pageName: "Page Da Lieu Quan 1",
+        targetDate: "2026-04-05",
+        businessTimezone: "Asia/Ho_Chi_Minh",
+        windowStartAt: "2026-04-04T17:00:00.000Z",
+        windowEndExclusiveAt: "2026-04-05T06:00:00.000Z",
+        summary: {
+          conversationsScanned: 1,
+          threadDaysBuilt: 1,
+          messagesSeen: 3,
+          messagesSelected: 2
+        },
+        pageTags: [
+          { pancakeTagId: "11", text: "KH mới", isDeactive: false },
+          { pancakeTagId: "12", text: "Đã chốt", isDeactive: false },
+          { pancakeTagId: "13", text: "Tag cũ", isDeactive: true }
+        ],
+        conversations: []
+      }
+    });
+
+    expect(html).toContain("Tag inventory: 2");
+    expect(html).toContain('value="12"');
+    expect(html).toContain("Tag đã tắt ở Pancake");
+    expect(html).toContain("Tag cũ");
+  });
 });
 
 function createConfigurationState(): ConfigurationState {
@@ -1101,12 +1139,11 @@ function createConfigurationState(): ConfigurationState {
       tokenPages: [],
       selectedPancakePageId: "",
       businessTimezone: "Asia/Ho_Chi_Minh",
-      selectedPageId: "",
-      selectedConfigVersionId: "",
+      selectedPageId: "cp-101",
+      selectedConfigVersionId: "cfg-18",
       etlEnabled: true,
       analysisEnabled: false,
       sampleConversationLimit: 12,
-      sampleMessagePageLimit: 2,
       promptText: "Prompt sample",
       tagMappings: [],
       openingRules: [],
@@ -1120,6 +1157,8 @@ function createConfigurationState(): ConfigurationState {
       promptCompareRightVersionId: "cfg-17",
       selectedPromptSampleConversationId: ""
     },
+    draftSource: "connected_page_active_config",
+    draftBaselineFingerprint: null,
     onboardingSamplePreview: null,
     onboardingSampleSeedSummary: null,
     promptWorkspaceSamplePreview: null,

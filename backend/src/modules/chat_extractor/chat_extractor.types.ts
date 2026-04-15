@@ -88,6 +88,14 @@ export const registerPageBodySchema = z
     pancake_page_id: z.string().min(1),
     user_access_token: z.string().min(1),
     business_timezone: businessTimezoneSchema.default("Asia/Ho_Chi_Minh"),
+    tag_mapping_json: z.unknown().optional(),
+    opening_rules_json: z.unknown().optional(),
+    scheduler_json: z.union([z.null(), z.unknown()]).optional(),
+    notification_targets_json: z.union([z.null(), z.unknown()]).optional(),
+    prompt_text: z.string().trim().optional(),
+    analysis_taxonomy_version_id: z.string().uuid().optional(),
+    notes: z.string().trim().optional(),
+    activate: z.boolean().default(true),
     etl_enabled: z.boolean().optional(),
     analysis_enabled: z.boolean().optional()
   })
@@ -95,6 +103,22 @@ export const registerPageBodySchema = z
     pancakePageId: raw.pancake_page_id,
     userAccessToken: raw.user_access_token,
     businessTimezone: raw.business_timezone,
+    tagMappingJson: raw.tag_mapping_json === undefined ? undefined : normalizeTagMappingConfig(raw.tag_mapping_json),
+    openingRulesJson: raw.opening_rules_json === undefined ? undefined : normalizeOpeningRulesConfig(raw.opening_rules_json),
+    schedulerJson: raw.scheduler_json === undefined
+      ? undefined
+      : raw.scheduler_json === null
+        ? null
+        : normalizeSchedulerConfig(raw.scheduler_json),
+    notificationTargetsJson: raw.notification_targets_json === undefined
+      ? undefined
+      : raw.notification_targets_json === null
+        ? null
+        : normalizeNotificationTargets(raw.notification_targets_json),
+    promptText: raw.prompt_text === undefined ? undefined : normalizeOptionalText(raw.prompt_text),
+    analysisTaxonomyVersionId: raw.analysis_taxonomy_version_id,
+    notes: raw.notes === undefined ? undefined : normalizeOptionalText(raw.notes),
+    activate: raw.activate,
     etlEnabled: raw.etl_enabled,
     analysisEnabled: raw.analysis_enabled
   }));
@@ -107,8 +131,7 @@ export const onboardingSamplePreviewBodySchema = z
     tag_mapping_json: z.unknown().optional(),
     opening_rules_json: z.unknown().optional(),
     scheduler_json: z.union([z.null(), z.unknown()]).optional(),
-    sample_conversation_limit: z.number().int().min(1).max(100).default(12),
-    sample_message_page_limit: z.number().int().min(1).max(20).default(2)
+    sample_conversation_limit: z.number().int().min(1).max(100).default(12)
   })
   .transform((raw) => ({
     userAccessToken: raw.user_access_token,
@@ -121,8 +144,7 @@ export const onboardingSamplePreviewBodySchema = z
       : raw.scheduler_json === null
         ? null
       : normalizeSchedulerConfig(raw.scheduler_json),
-    sampleConversationLimit: raw.sample_conversation_limit,
-    sampleMessagePageLimit: raw.sample_message_page_limit
+    sampleConversationLimit: raw.sample_conversation_limit
   }));
 
 export const promptWorkspaceSampleBodySchema = z
@@ -130,8 +152,7 @@ export const promptWorkspaceSampleBodySchema = z
     tag_mapping_json: z.unknown().optional(),
     opening_rules_json: z.unknown().optional(),
     scheduler_json: z.union([z.null(), z.unknown()]).optional(),
-    sample_conversation_limit: z.number().int().min(1).max(100).default(12),
-    sample_message_page_limit: z.number().int().min(1).max(20).default(2)
+    sample_conversation_limit: z.number().int().min(1).max(100).default(12)
   })
   .transform((raw) => ({
     tagMappingJson: raw.tag_mapping_json === undefined ? undefined : normalizeTagMappingConfig(raw.tag_mapping_json),
@@ -141,8 +162,7 @@ export const promptWorkspaceSampleBodySchema = z
       : raw.scheduler_json === null
         ? null
         : normalizeSchedulerConfig(raw.scheduler_json),
-    sampleConversationLimit: raw.sample_conversation_limit,
-    sampleMessagePageLimit: raw.sample_message_page_limit
+    sampleConversationLimit: raw.sample_conversation_limit
   }));
 
 export const createConfigVersionBodySchema = z

@@ -206,7 +206,21 @@ export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlan
         getBaseUrl(),
         "POST",
         "/chat-extractor/control-center/pages/register",
-        input
+        {
+          pancakePageId: input.pancakePageId,
+          userAccessToken: input.userAccessToken,
+          businessTimezone: input.businessTimezone,
+          tagMappingJson: input.tagMappingJson,
+          openingRulesJson: input.openingRulesJson,
+          schedulerJson: input.schedulerJson,
+          notificationTargetsJson: input.notificationTargetsJson,
+          promptText: input.promptText,
+          analysisTaxonomyVersionId: input.analysisTaxonomyVersionId,
+          notes: input.notes,
+          activate: input.activate,
+          etlEnabled: input.etlEnabled,
+          analysisEnabled: input.analysisEnabled
+        }
       );
       return mapConnectedPage(result.page);
     },
@@ -224,8 +238,7 @@ export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlan
           tagMappingJson: input.tagMappingJson,
           openingRulesJson: input.openingRulesJson,
           schedulerJson: input.schedulerJson,
-          sampleConversationLimit: input.sampleConversationLimit,
-          sampleMessagePageLimit: input.sampleMessagePageLimit
+          sampleConversationLimit: input.sampleConversationLimit
         }
       );
       return mapOnboardingSamplePreview(result.samplePreview, input.pageName);
@@ -241,8 +254,7 @@ export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlan
           tagMappingJson: input.tagMappingJson,
           openingRulesJson: input.openingRulesJson,
           schedulerJson: input.schedulerJson,
-          sampleConversationLimit: input.sampleConversationLimit,
-          sampleMessagePageLimit: input.sampleMessagePageLimit
+          sampleConversationLimit: input.sampleConversationLimit
         }
       );
       return mapPromptWorkspaceSamplePreview(result.samplePreview);
@@ -299,12 +311,13 @@ export function createControlPlaneAdapter(getBaseUrl: () => string): ControlPlan
       return mapConnectedPage(result.page);
     },
     async createConfigVersion(pageId, input) {
-      await requestJson(
+      const result = await requestJson<{ configVersion: RawConfigVersion }>(
         getBaseUrl(),
         "POST",
         `/chat-extractor/control-center/pages/${encodeURIComponent(pageId)}/config-versions`,
         input
       );
+      return mapConfigVersion(result.configVersion);
     },
     async activateConfigVersion(pageId, configVersionId) {
       const result = await requestJson<{ page: RawConnectedPageDetail }>(
@@ -589,6 +602,26 @@ function buildManualRunBody(input: ManualRunInput) {
   };
 }
 
+function mapConfigVersion(configVersion: RawConfigVersion) {
+  return {
+    id: configVersion.id,
+    versionNo: configVersion.versionNo,
+    promptText: configVersion.promptText,
+    tagMappingJson: configVersion.tagMappingJson,
+    openingRulesJson: configVersion.openingRulesJson,
+    schedulerJson: configVersion.schedulerJson,
+    notificationTargetsJson: configVersion.notificationTargetsJson,
+    notes: configVersion.notes,
+    analysisTaxonomyVersionId: configVersion.analysisTaxonomyVersionId,
+    analysisTaxonomyVersionCode: configVersion.analysisTaxonomyVersion.versionCode,
+    createdAt: configVersion.createdAt,
+    promptVersionLabel: configVersion.promptVersionLabel ?? `Prompt v${String(configVersion.versionNo)}`,
+    promptHash: configVersion.promptHash ?? "sha256:pending",
+    evidenceBundle: Array.isArray(configVersion.evidenceBundle) ? configVersion.evidenceBundle : [],
+    fieldExplanations: Array.isArray(configVersion.fieldExplanations) ? configVersion.fieldExplanations : []
+  };
+}
+
 function mapConnectedPage(input: RawConnectedPageDetail): ConnectedPageDetailViewModel {
   return {
     id: input.id,
@@ -603,42 +636,8 @@ function mapConnectedPage(input: RawConnectedPageDetail): ConnectedPageDetailVie
     analysisEnabled: input.analysisEnabled,
     activeConfigVersionId: input.activeConfigVersionId,
     updatedAt: input.updatedAt,
-    configVersions: input.configVersions.map((configVersion) => ({
-      id: configVersion.id,
-      versionNo: configVersion.versionNo,
-      promptText: configVersion.promptText,
-      tagMappingJson: configVersion.tagMappingJson,
-      openingRulesJson: configVersion.openingRulesJson,
-      schedulerJson: configVersion.schedulerJson,
-      notificationTargetsJson: configVersion.notificationTargetsJson,
-      notes: configVersion.notes,
-      analysisTaxonomyVersionId: configVersion.analysisTaxonomyVersionId,
-      analysisTaxonomyVersionCode: configVersion.analysisTaxonomyVersion.versionCode,
-      createdAt: configVersion.createdAt,
-      promptVersionLabel: configVersion.promptVersionLabel ?? `Prompt v${String(configVersion.versionNo)}`,
-      promptHash: configVersion.promptHash ?? "sha256:pending",
-      evidenceBundle: Array.isArray(configVersion.evidenceBundle) ? configVersion.evidenceBundle : [],
-      fieldExplanations: Array.isArray(configVersion.fieldExplanations) ? configVersion.fieldExplanations : []
-    })),
-    activeConfigVersion: input.activeConfigVersion
-      ? {
-        id: input.activeConfigVersion.id,
-        versionNo: input.activeConfigVersion.versionNo,
-        promptText: input.activeConfigVersion.promptText,
-        tagMappingJson: input.activeConfigVersion.tagMappingJson,
-        openingRulesJson: input.activeConfigVersion.openingRulesJson,
-        schedulerJson: input.activeConfigVersion.schedulerJson,
-        notificationTargetsJson: input.activeConfigVersion.notificationTargetsJson,
-        notes: input.activeConfigVersion.notes,
-        analysisTaxonomyVersionId: input.activeConfigVersion.analysisTaxonomyVersionId,
-        analysisTaxonomyVersionCode: input.activeConfigVersion.analysisTaxonomyVersion.versionCode,
-        createdAt: input.activeConfigVersion.createdAt,
-        promptVersionLabel: input.activeConfigVersion.promptVersionLabel ?? `Prompt v${String(input.activeConfigVersion.versionNo)}`,
-        promptHash: input.activeConfigVersion.promptHash ?? "sha256:pending",
-        evidenceBundle: Array.isArray(input.activeConfigVersion.evidenceBundle) ? input.activeConfigVersion.evidenceBundle : [],
-        fieldExplanations: Array.isArray(input.activeConfigVersion.fieldExplanations) ? input.activeConfigVersion.fieldExplanations : []
-      }
-      : null
+    configVersions: input.configVersions.map(mapConfigVersion),
+    activeConfigVersion: input.activeConfigVersion ? mapConfigVersion(input.activeConfigVersion) : null
   };
 }
 

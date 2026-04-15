@@ -84,6 +84,14 @@ describe("chat extractor controller", () => {
       pancakePageId: "1406535699642677",
       userAccessToken: "user-token",
       businessTimezone: "Asia/Saigon",
+      tagMappingJson: undefined,
+      openingRulesJson: undefined,
+      schedulerJson: undefined,
+      notificationTargetsJson: undefined,
+      promptText: undefined,
+      analysisTaxonomyVersionId: undefined,
+      notes: undefined,
+      activate: true,
       etlEnabled: true,
       analysisEnabled: false
     });
@@ -136,8 +144,7 @@ describe("chat extractor controller", () => {
         userAccessToken: "user-token",
         pancakePageId: "1406535699642677",
         businessTimezone: "Asia/Saigon",
-        sampleConversationLimit: 5,
-        sampleMessagePageLimit: 2
+        sampleConversationLimit: 5
       })
     }));
 
@@ -198,8 +205,7 @@ describe("chat extractor controller", () => {
         "content-type": "application/json"
       },
       body: JSON.stringify({
-        sampleConversationLimit: 5,
-        sampleMessagePageLimit: 2
+        sampleConversationLimit: 5
       })
     }));
 

@@ -34,9 +34,13 @@
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
+.compact-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .configuration-shell {
   display: grid;
-  grid-template-columns: 320px minmax(0, 1fr);
+  grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
   gap: var(--space-3);
   align-items: start;
 }
@@ -60,12 +64,24 @@
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.status-grid {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .metric-grid.compact {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .filter-bar {
   grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.context-bar {
+  display: grid;
+  gap: var(--space-2);
+  grid-template-columns: minmax(180px, 220px) repeat(4, minmax(0, 1fr));
 }
 
 .list-grid,
@@ -83,9 +99,12 @@
   .configuration-shell,
   .history-layout,
   .two-column-grid,
+  .compact-grid,
+  .status-grid,
   .metric-grid,
   .metric-grid.compact,
   .filter-bar,
+  .context-bar,
   .list-grid {
     grid-template-columns: 1fr;
   }

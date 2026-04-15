@@ -467,6 +467,14 @@ export type RegisterPageInput = {
   pancakePageId: string;
   userAccessToken: string;
   businessTimezone: string;
+  tagMappingJson?: unknown;
+  openingRulesJson?: unknown;
+  schedulerJson?: unknown;
+  notificationTargetsJson?: unknown;
+  promptText?: string | null;
+  analysisTaxonomyVersionId?: string;
+  notes?: string | null;
+  activate?: boolean;
   etlEnabled: boolean;
   analysisEnabled: boolean;
 };
@@ -480,7 +488,6 @@ export type OnboardingSamplePreviewInput = {
   openingRulesJson: unknown;
   schedulerJson: unknown;
   sampleConversationLimit: number;
-  sampleMessagePageLimit: number;
 };
 
 export type PromptWorkspaceSampleInput = {
@@ -488,7 +495,6 @@ export type PromptWorkspaceSampleInput = {
   openingRulesJson: unknown;
   schedulerJson: unknown;
   sampleConversationLimit: number;
-  sampleMessagePageLimit: number;
 };
 
 export type PromptPreviewArtifactInput = {
@@ -528,7 +534,7 @@ export interface ControlPlaneAdapter {
   previewPromptArtifacts(pageId: string, input: PromptPreviewArtifactInput): Promise<PromptPreviewComparisonViewModel>;
   listConnectedPages(): Promise<ConnectedPageSummary[]>;
   getConnectedPage(pageId: string): Promise<ConnectedPageDetailViewModel>;
-  createConfigVersion(pageId: string, input: CreateConfigVersionInput): Promise<void>;
+  createConfigVersion(pageId: string, input: CreateConfigVersionInput): Promise<ConnectedPageConfigVersion>;
   activateConfigVersion(pageId: string, configVersionId: string): Promise<ConnectedPageDetailViewModel>;
   previewManualRun(input: ManualRunInput): Promise<RunPreviewViewModel>;
   executeManualRun(input: ManualRunInput): Promise<RunGroupViewModel>;

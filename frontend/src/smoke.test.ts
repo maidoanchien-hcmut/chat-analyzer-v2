@@ -167,7 +167,7 @@ function routeStub(method: string, pathname: string) {
   }
 
   if (method === "POST" && pathname.endsWith("/config-versions")) {
-    return json({ ok: true });
+    return json({ configVersion: buildPage("cfg-18").configVersions[0] });
   }
 
   if (method === "POST" && pathname.endsWith("/activate")) {

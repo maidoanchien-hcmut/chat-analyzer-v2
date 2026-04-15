@@ -55,8 +55,7 @@ describe("chat_extractor service", () => {
         default_role: "noise",
         entries: []
       },
-      sample_conversation_limit: 3,
-      sample_message_page_limit: 1
+      sample_conversation_limit: 3
     });
 
     const result = await service.previewPromptWorkspaceSample(CONNECTED_PAGE_ID, parsed);
@@ -64,6 +63,7 @@ describe("chat_extractor service", () => {
     expect(capturedRuntimePreviewInput.userAccessToken).toBe(pageDetail.page.pancakeUserAccessToken);
     expect(capturedRuntimePreviewInput.pageId).toBe(pageDetail.page.pancakePageId);
     expect(capturedRuntimePreviewInput.schedulerJson.maxConversationsPerRun).toBe(3);
+    expect(capturedRuntimePreviewInput.schedulerJson.maxMessagePagesPerThread).toBe(0);
     expect(result.connectedPageId).toBe(CONNECTED_PAGE_ID);
     expect(result.pageName).toBe(pageDetail.page.pageName);
     expect(result.sampleWorkspaceKey).toMatch(
@@ -141,8 +141,7 @@ describe("chat_extractor service", () => {
     const samplePreview = await service.previewPromptWorkspaceSample(
       CONNECTED_PAGE_ID,
       promptWorkspaceSampleBodySchema.parse({
-        sample_conversation_limit: 3,
-        sample_message_page_limit: 1
+        sample_conversation_limit: 3
       })
     );
     const parsed = promptPreviewArtifactBodySchema.parse({
@@ -182,8 +181,7 @@ describe("chat_extractor service", () => {
     const samplePreview = await service.previewPromptWorkspaceSample(
       CONNECTED_PAGE_ID,
       promptWorkspaceSampleBodySchema.parse({
-        sample_conversation_limit: 3,
-        sample_message_page_limit: 1
+        sample_conversation_limit: 3
       })
     );
     const realWorkspace = promptPreviewArtifactBodySchema.parse({
@@ -507,7 +505,134 @@ describe("chat_extractor service", () => {
     expect(activatedConfigId === "cfg-new").toBe(true);
   });
 
-  it("normalizes onboarding sample preview request with default draft config and sample caps", async () => {
+  it("registering a new page with onboarding draft applies the operator config before activation", async () => {
+    const { registerPageBodySchema } = await loadChatExtractorTypes();
+    const repositoryModule = await loadChatExtractorRepository();
+    let capturedCreateConfigInput: any;
+    let activatedConfigId: string | null = null;
+
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageByPancakePageId", async () => null);
+    patchRepository(repositoryModule.chatExtractorRepository, "upsertConnectedPage", async () => ({
+      ...createConnectedPageDetail().page,
+      activeConfigVersionId: null
+    }));
+    patchRepository(repositoryModule.chatExtractorRepository, "ensureDefaultTaxonomy", async () => {
+      return createConnectedPageDetail().activeConfigVersion!.analysisTaxonomyVersion;
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "getActiveConfigVersion", async () => null);
+    patchRepository(repositoryModule.chatExtractorRepository, "nextConfigVersionNo", async () => 1);
+    patchRepository(repositoryModule.chatExtractorRepository, "createPageConfigVersion", async (input: unknown) => {
+      capturedCreateConfigInput = input;
+      return {
+        ...createConnectedPageDetail().activeConfigVersion!,
+        id: "cfg-onboarding",
+        versionNo: 1,
+        tagMappingJson: (input as any).tagMappingJson,
+        openingRulesJson: (input as any).openingRulesJson,
+        schedulerJson: (input as any).schedulerJson,
+        promptText: (input as any).promptText
+      };
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "activateConfigVersion", async (_pageId: string, configVersionId: string) => {
+      activatedConfigId = configVersionId;
+      return {
+        ...createConnectedPageDetail().page,
+        activeConfigVersionId: configVersionId
+      };
+    });
+    patchRepository(repositoryModule.chatExtractorRepository, "getConnectedPageById", async () => ({
+      ...createConnectedPageDetail(),
+      page: {
+        ...createConnectedPageDetail().page,
+        activeConfigVersionId: "cfg-onboarding"
+      },
+      activeConfigVersion: {
+        ...createConnectedPageDetail().activeConfigVersion!,
+        id: "cfg-onboarding",
+        versionNo: 1,
+        tagMappingJson: capturedCreateConfigInput.tagMappingJson,
+        openingRulesJson: capturedCreateConfigInput.openingRulesJson,
+        schedulerJson: capturedCreateConfigInput.schedulerJson,
+        promptText: capturedCreateConfigInput.promptText
+      }
+    }));
+
+    const { ChatExtractorService } = await import("./chat_extractor.service.ts");
+    const service = new ChatExtractorService({
+      listPagesFromToken: async () => [
+        {
+          pageId: "1406535699642677",
+          pageName: "O2 SKIN"
+        }
+      ]
+    });
+    const parsed = registerPageBodySchema.parse({
+      pancake_page_id: "1406535699642677",
+      user_access_token: "user-token",
+      business_timezone: "Asia/Ho_Chi_Minh",
+      prompt_text: "Prompt onboarding riêng",
+      tag_mapping_json: {
+        version: 1,
+        default_role: "noise",
+        entries: [
+          {
+            source_tag_id: "11",
+            source_tag_text: "KH mới",
+            role: "journey",
+            canonical_code: "new_to_clinic",
+            mapping_source: "operator",
+            status: "active"
+          }
+        ]
+      },
+      opening_rules_json: {
+        version: 1,
+        selectors: [
+          {
+            selector_id: "opening-rule-1",
+            signal_role: "journey",
+            signal_code: "revisit",
+            allowed_message_types: ["text"],
+            options: [{ raw_text: "Khách hàng tái khám", match_mode: "exact" }]
+          }
+        ]
+      },
+      scheduler_json: {
+        version: 1,
+        timezone: "Asia/Ho_Chi_Minh",
+        official_daily_time: "07:30",
+        lookback_hours: 4,
+        max_conversations_per_run: 0,
+        max_message_pages_per_thread: 0
+      }
+    });
+
+    await service.registerPageConfig(parsed as never);
+
+    expect(capturedCreateConfigInput.promptText).toBe("Prompt onboarding riêng");
+    expect(capturedCreateConfigInput.tagMappingJson.entries[0]).toMatchObject({
+      sourceTagId: "11",
+      role: "journey",
+      canonicalCode: "new_to_clinic",
+      mappingSource: "operator"
+    });
+    expect(capturedCreateConfigInput.openingRulesJson.selectors[0]).toMatchObject({
+      selectorId: "opening-rule-1",
+      signalRole: "journey",
+      signalCode: "revisit"
+    });
+    expect(capturedCreateConfigInput.schedulerJson).toEqual({
+      version: 1,
+      timezone: "Asia/Ho_Chi_Minh",
+      officialDailyTime: "07:30",
+      lookbackHours: 4,
+      maxConversationsPerRun: 0,
+      maxMessagePagesPerThread: 0
+    });
+    expect(activatedConfigId).toBe("cfg-onboarding");
+  });
+
+  it("normalizes onboarding sample preview request with default draft config and conversation cap", async () => {
     const { onboardingSamplePreviewBodySchema } = await loadChatExtractorTypes();
 
     const parsed = onboardingSamplePreviewBodySchema.parse({
@@ -525,7 +650,6 @@ describe("chat_extractor service", () => {
     expect(parsed.openingRulesJson).toEqual(expectedDefaultOpeningRules());
     expect(parsed.schedulerJson).toBeNull();
     expect(parsed.sampleConversationLimit).toBe(12);
-    expect(parsed.sampleMessagePageLimit).toBe(2);
   });
 
   it("normalizes tag mapping by real source tag identity even when duplicate text entries are reordered", async () => {
@@ -653,8 +777,7 @@ describe("chat_extractor service", () => {
         max_conversations_per_run: 40,
         max_message_pages_per_thread: 9
       },
-      sample_conversation_limit: 8,
-      sample_message_page_limit: 3
+      sample_conversation_limit: 8
     });
 
     await service.previewOnboardingSample(parsed);
@@ -669,7 +792,7 @@ describe("chat_extractor service", () => {
         officialDailyTime: "08:30",
         lookbackHours: 6,
         maxConversationsPerRun: 8,
-        maxMessagePagesPerThread: 3
+        maxMessagePagesPerThread: 0
       }
     });
   });
@@ -718,8 +841,7 @@ describe("chat_extractor service", () => {
       user_access_token: "user-token",
       pancake_page_id: "1406535699642677",
       business_timezone: "Asia/Saigon",
-      sample_conversation_limit: 8,
-      sample_message_page_limit: 3
+      sample_conversation_limit: 8
     });
 
     const result = await service.previewOnboardingSample(parsed);

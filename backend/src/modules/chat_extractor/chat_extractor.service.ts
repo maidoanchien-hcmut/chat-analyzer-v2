@@ -260,19 +260,38 @@ export class ChatExtractorService {
 
     const defaultTaxonomy = await chatExtractorRepository.ensureDefaultTaxonomy();
     const activeConfig = await chatExtractorRepository.getActiveConfigVersion(page.id);
-    if (!activeConfig) {
+    const hasPersistedActiveConfig = Boolean(page.activeConfigVersionId || activeConfig);
+    const hasOnboardingDraft =
+      input.tagMappingJson !== undefined
+      || input.openingRulesJson !== undefined
+      || input.schedulerJson !== undefined
+      || input.notificationTargetsJson !== undefined
+      || input.promptText !== undefined
+      || input.analysisTaxonomyVersionId !== undefined
+      || input.notes !== undefined;
+
+    if (!hasPersistedActiveConfig || hasOnboardingDraft) {
+      const taxonomyVersionId = input.analysisTaxonomyVersionId
+        ?? activeConfig?.analysisTaxonomyVersionId
+        ?? defaultTaxonomy.id;
       const configVersion = await chatExtractorRepository.createPageConfigVersion({
         connectedPageId: page.id,
         versionNo: await chatExtractorRepository.nextConfigVersionNo(page.id),
-        tagMappingJson: defaultTagMappingConfig(),
-        openingRulesJson: defaultOpeningRulesConfig(),
-        schedulerJson: defaultSchedulerConfig(input.businessTimezone),
-        notificationTargetsJson: null,
-        promptText: DEFAULT_PAGE_PROMPT,
-        analysisTaxonomyVersionId: defaultTaxonomy.id,
-        notes: null
+        tagMappingJson: input.tagMappingJson ?? activeConfig?.tagMappingJson ?? defaultTagMappingConfig(),
+        openingRulesJson: input.openingRulesJson ?? activeConfig?.openingRulesJson ?? defaultOpeningRulesConfig(),
+        schedulerJson: input.schedulerJson === undefined
+          ? (activeConfig?.schedulerJson ?? defaultSchedulerConfig(input.businessTimezone))
+          : input.schedulerJson,
+        notificationTargetsJson: input.notificationTargetsJson === undefined
+          ? (activeConfig?.notificationTargetsJson ?? null)
+          : input.notificationTargetsJson,
+        promptText: input.promptText ?? activeConfig?.promptText ?? DEFAULT_PAGE_PROMPT,
+        analysisTaxonomyVersionId: taxonomyVersionId,
+        notes: input.notes ?? null
       });
-      await chatExtractorRepository.activateConfigVersion(page.id, configVersion.id);
+      if (input.activate) {
+        await chatExtractorRepository.activateConfigVersion(page.id, configVersion.id);
+      }
     }
 
     return this.getConnectedPage(page.id);
@@ -301,7 +320,7 @@ export class ChatExtractorService {
         ...schedulerBase,
         timezone: input.businessTimezone,
         maxConversationsPerRun: input.sampleConversationLimit,
-        maxMessagePagesPerThread: input.sampleMessagePageLimit
+        maxMessagePagesPerThread: 0
       }
     });
   }
@@ -668,7 +687,7 @@ export class ChatExtractorService {
         ...schedulerBase,
         timezone: page.page.businessTimezone,
         maxConversationsPerRun: input.sampleConversationLimit,
-        maxMessagePagesPerThread: input.sampleMessagePageLimit
+        maxMessagePagesPerThread: 0
       }
     });
   }

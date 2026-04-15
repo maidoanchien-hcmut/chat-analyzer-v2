@@ -34,7 +34,6 @@ type PromptWorkspaceFingerprintInput = {
   scheduler: SchedulerDraft;
   businessTimezone: string;
   sampleConversationLimit: number;
-  sampleMessagePageLimit: number;
 };
 
 type PromptPreviewFreshnessInput = {
@@ -142,7 +141,6 @@ export function buildOnboardingSamplePreviewInput(input: {
   openingRules: OpeningRuleDraft[];
   scheduler: SchedulerDraft;
   sampleConversationLimit: number;
-  sampleMessagePageLimit: number;
 }): OnboardingSamplePreviewInput {
   const payload = buildCreateConfigVersionInput({
     promptText: "",
@@ -172,10 +170,9 @@ export function buildOnboardingSamplePreviewInput(input: {
       officialDailyTime: input.scheduler.officialDailyTime,
       lookbackHours: input.scheduler.lookbackHours,
       maxConversationsPerRun: input.sampleConversationLimit,
-      maxMessagePagesPerThread: input.sampleMessagePageLimit
+      maxMessagePagesPerThread: 0
     },
-    sampleConversationLimit: input.sampleConversationLimit,
-    sampleMessagePageLimit: input.sampleMessagePageLimit
+    sampleConversationLimit: input.sampleConversationLimit
   };
 }
 
@@ -204,10 +201,9 @@ export function buildPromptWorkspaceSampleInput(input: PromptWorkspaceFingerprin
       officialDailyTime: input.scheduler.officialDailyTime,
       lookbackHours: input.scheduler.lookbackHours,
       maxConversationsPerRun: input.sampleConversationLimit,
-      maxMessagePagesPerThread: input.sampleMessagePageLimit
+      maxMessagePagesPerThread: 0
     },
-    sampleConversationLimit: input.sampleConversationLimit,
-    sampleMessagePageLimit: input.sampleMessagePageLimit
+    sampleConversationLimit: input.sampleConversationLimit
   };
 }
 
@@ -232,6 +228,10 @@ export function buildPromptPreviewArtifactInput(input: {
 
 export function buildPromptWorkspaceSampleFingerprint(input: PromptWorkspaceFingerprintInput) {
   return JSON.stringify(buildPromptWorkspaceSampleInput(input));
+}
+
+export function buildConfigurationDraftFingerprint(input: ConfigDraftInput) {
+  return JSON.stringify(buildCreateConfigVersionInput(input));
 }
 
 export function buildPromptPreviewComparisonFingerprint(input: {

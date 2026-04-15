@@ -220,7 +220,6 @@ describe("frontend app", () => {
       etlEnabled: true,
       analysisEnabled: false,
       sampleConversationLimit: 12,
-      sampleMessagePageLimit: 2,
       promptText: "Prompt đang chỉnh từ sample",
       tagMappings: [
         { sourceTagId: "", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
@@ -284,8 +283,7 @@ describe("frontend app", () => {
       businessTimezone: "Asia/Ho_Chi_Minh",
       etlEnabled: true,
       analysisEnabled: false,
-      sampleConversationLimit: 12,
-      sampleMessagePageLimit: 2
+      sampleConversationLimit: 12
     };
 
     await (app as any).loadOnboardingSamplePreview(null);
@@ -305,6 +303,241 @@ describe("frontend app", () => {
       signalType: "customer_journey",
       canonicalValue: "revisit"
     });
+  });
+
+  it("keeps the newly saved config version selected when operator does not activate immediately", async () => {
+    installBrowserGlobals("?view=configuration", baseUrl);
+    const root = createRoot();
+    const app = new FrontendApp(root);
+    await app.init();
+
+    const activeConfig = {
+      id: "cfg-101",
+      versionNo: 1,
+      promptText: "Prompt default từ backend.",
+      tagMappingJson: null,
+      openingRulesJson: null,
+      schedulerJson: null,
+      notificationTargetsJson: null,
+      notes: null,
+      analysisTaxonomyVersionId: "tax-1",
+      analysisTaxonomyVersionCode: "default.v1",
+      createdAt: "2026-04-05T09:10:00.000Z",
+      promptVersionLabel: "Prompt A1",
+      promptHash: "sha256:a1",
+      evidenceBundle: [],
+      fieldExplanations: []
+    };
+    const createdConfig = {
+      ...activeConfig,
+      id: "cfg-102",
+      versionNo: 2,
+      promptText: "Prompt draft vừa lưu.",
+      promptVersionLabel: "Prompt A2",
+      promptHash: "sha256:a2"
+    };
+
+    (app as any).configuration.pageDetail = {
+      ...connectedPagesResponse[0],
+      activeConfigVersionId: "cfg-101",
+      activeConfigVersion: activeConfig,
+      configVersions: [activeConfig]
+    };
+    (app as any).configuration.workspace = {
+      ...(app as any).configuration.workspace,
+      selectedPageId: "11111111-1111-4111-8111-111111111111",
+      selectedConfigVersionId: "cfg-101",
+      promptText: "Prompt draft vừa lưu.",
+      tagMappings: [
+        { sourceTagId: "11", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+      ],
+      openingRules: [
+        { buttonTitle: "Khách hàng tái khám", signalType: "customer_journey", canonicalValue: "revisit" }
+      ],
+      scheduler: { useSystemDefaults: true, timezone: "Asia/Ho_Chi_Minh", officialDailyTime: "00:00", lookbackHours: 2 },
+      notificationTargets: [{ channel: "telegram", value: "" }],
+      notes: "",
+      activateAfterCreate: false
+    };
+    Object.assign((app as any).controlPlaneAdapter, {
+      async createConfigVersion() {
+        return createdConfig;
+      },
+      async getConnectedPage() {
+        return {
+          ...(app as any).configuration.pageDetail,
+          configVersions: [createdConfig, activeConfig],
+          activeConfigVersion: activeConfig,
+          activeConfigVersionId: "cfg-101"
+        };
+      }
+    });
+
+    const form = {
+      dataset: { form: "configuration-create" }
+    } as unknown as HTMLFormElement;
+    (globalThis as Record<string, unknown>).FormData = class {
+      get(name: string) {
+        const values: Record<string, string> = {
+          selectedConfigVersionId: "cfg-101",
+          promptText: "Prompt draft vừa lưu.",
+          promptCloneSourceVersionId: "",
+          promptCloneSourcePageId: "",
+          promptCompareLeftVersionId: "",
+          promptCompareRightVersionId: "",
+          selectedPromptSampleConversationId: "",
+          notes: "",
+          schedulerTimezone: "Asia/Ho_Chi_Minh",
+          schedulerOfficialDailyTime: "00:00",
+          schedulerLookbackHours: "2"
+        };
+        return values[name] ?? null;
+      }
+
+      getAll(name: string) {
+        const values: Record<string, string[]> = {
+          tagSourceTagId: ["11"],
+          tagRawTag: ["KH mới"],
+          tagRole: ["customer_journey"],
+          tagCanonicalValue: ["new_to_clinic"],
+          tagSource: ["operator_override"],
+          openingButtonTitle: ["Khách hàng tái khám"],
+          openingSignalType: ["customer_journey"],
+          openingCanonicalValue: ["revisit"],
+          notificationChannel: ["telegram"],
+          notificationValue: [""]
+        };
+        return values[name] ?? [];
+      }
+    };
+
+    await (app as any).createConfigVersion(form);
+
+    expect((app as any).configuration.workspace.selectedConfigVersionId).toBe("cfg-102");
+    expect((app as any).configuration.workspace.promptText).toBe("Prompt draft vừa lưu.");
+    expect((app as any).configuration.draftSource).toBe("connected_page_saved_version");
+    expect((app as any).configuration.pageDetail.configVersions[0].id).toBe("cfg-102");
+  });
+
+  it("finalizes onboarding with the current draft before the page is added to operations", async () => {
+    installBrowserGlobals("?view=configuration", baseUrl);
+    const root = createRoot();
+    const app = new FrontendApp(root);
+    await app.init();
+
+    let capturedRegisterInput: Record<string, unknown> | null = null;
+    Object.assign((app as any).controlPlaneAdapter, {
+      async registerPage(input: Record<string, unknown>) {
+        capturedRegisterInput = input;
+        return {
+          ...connectedPagesResponse[0],
+          pageName: "Page Da Lieu Quan 1",
+          pancakePageId: "pk_101",
+          businessTimezone: "Asia/Ho_Chi_Minh",
+          activeConfigVersionId: "cfg-101",
+          activeConfigVersion: {
+            id: "cfg-101",
+            versionNo: 1,
+            promptText: "Prompt draft onboarding",
+            tagMappingJson: {
+              version: 1,
+              defaultRole: "noise",
+              entries: [
+                {
+                  sourceTagId: "11",
+                  sourceTagText: "KH mới",
+                  role: "journey",
+                  canonicalCode: "new_to_clinic",
+                  mappingSource: "operator",
+                  status: "active"
+                }
+              ]
+            },
+            openingRulesJson: null,
+            schedulerJson: null,
+            notificationTargetsJson: null,
+            notes: null,
+            analysisTaxonomyVersionId: "tax-1",
+            analysisTaxonomyVersionCode: "default.v1",
+            createdAt: "2026-04-05T09:10:00.000Z",
+            promptVersionLabel: "Prompt A1",
+            promptHash: "sha256:a1",
+            evidenceBundle: [],
+            fieldExplanations: []
+          },
+          configVersions: []
+        };
+      }
+    });
+    (app as any).configuration.workspace = {
+      ...(app as any).configuration.workspace,
+      token: "user-token",
+      tokenPages: [{ pageId: "pk_101", pageName: "Page Da Lieu Quan 1" }],
+      selectedPancakePageId: "pk_101",
+      selectedPageId: "",
+      promptText: "Prompt draft onboarding",
+      tagMappings: [
+        { sourceTagId: "11", rawTag: "KH mới", role: "customer_journey", canonicalValue: "new_to_clinic", source: "operator_override" }
+      ],
+      openingRules: [{ buttonTitle: "", signalType: "customer_journey", canonicalValue: "" }],
+      scheduler: { useSystemDefaults: true, timezone: "Asia/Ho_Chi_Minh", officialDailyTime: "00:00", lookbackHours: 2 },
+      notificationTargets: [{ channel: "telegram", value: "" }],
+      notes: "",
+      activateAfterCreate: true
+    };
+
+    const form = {
+      dataset: { form: "configuration-create" }
+    } as unknown as HTMLFormElement;
+    (globalThis as Record<string, unknown>).FormData = class {
+      get(name: string) {
+        const values: Record<string, string> = {
+          selectedConfigVersionId: "",
+          promptText: "Prompt draft onboarding",
+          promptCloneSourceVersionId: "",
+          promptCloneSourcePageId: "",
+          promptCompareLeftVersionId: "",
+          promptCompareRightVersionId: "",
+          selectedPromptSampleConversationId: "",
+          notes: "",
+          schedulerTimezone: "Asia/Ho_Chi_Minh",
+          schedulerOfficialDailyTime: "00:00",
+          schedulerLookbackHours: "2"
+        };
+        return values[name] ?? null;
+      }
+
+      getAll(name: string) {
+        const values: Record<string, string[]> = {
+          tagSourceTagId: ["11"],
+          tagRawTag: ["KH mới"],
+          tagRole: ["customer_journey"],
+          tagCanonicalValue: ["new_to_clinic"],
+          tagSource: ["operator_override"],
+          openingButtonTitle: [""],
+          openingSignalType: ["customer_journey"],
+          openingCanonicalValue: [""],
+          notificationChannel: ["telegram"],
+          notificationValue: [""]
+        };
+        return values[name] ?? [];
+      }
+    };
+
+    await (app as any).createConfigVersion(form);
+
+    expect(capturedRegisterInput).toMatchObject({
+      pancakePageId: "pk_101",
+      userAccessToken: "user-token",
+      promptText: "Prompt draft onboarding"
+    });
+    expect((capturedRegisterInput as any).tagMappingJson.entries[0]).toMatchObject({
+      sourceTagId: "11",
+      canonicalCode: "new_to_clinic",
+      mappingSource: "operator"
+    });
+    expect((app as any).configuration.workspace.selectedPageId).toBe("11111111-1111-4111-8111-111111111111");
+    expect((app as any).configuration.draftSource).toBe("connected_page_active_config");
   });
 
   it("clears a stale connected page binding when onboarding switches to a different pancake page", async () => {
@@ -333,12 +566,10 @@ describe("frontend app", () => {
       tokenPages: [{ pageId: "pk_101", pageName: "Page Da Lieu Quan 1" }],
       selectedPancakePageId: "pk_101",
       businessTimezone: "Asia/Ho_Chi_Minh",
-      sampleConversationLimit: 5,
-      sampleMessagePageLimit: 4
+      sampleConversationLimit: 5
     };
     let capturedPreviewInput: {
       sampleConversationLimit?: number;
-      sampleMessagePageLimit?: number;
     } | null = null;
     Object.assign((app as any).controlPlaneAdapter, {
       async previewOnboardingSample(input: Record<string, unknown>) {
@@ -365,8 +596,7 @@ describe("frontend app", () => {
     await (app as any).loadOnboardingSamplePreview(null);
 
     expect(capturedPreviewInput).toEqual(expect.objectContaining({
-      sampleConversationLimit: 5,
-      sampleMessagePageLimit: 4
+      sampleConversationLimit: 5
     }));
   });
 

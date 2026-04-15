@@ -48,7 +48,6 @@ export type ConfigurationWorkspaceDraft = {
   etlEnabled: boolean;
   analysisEnabled: boolean;
   sampleConversationLimit: number;
-  sampleMessagePageLimit: number;
   promptText: string;
   tagMappings: TagMappingDraft[];
   openingRules: OpeningRuleDraft[];
@@ -80,6 +79,8 @@ export type ConfigurationState = {
   connectedPages: ConnectedPageSummary[];
   pageDetail: ConnectedPageDetailViewModel | null;
   workspace: ConfigurationWorkspaceDraft;
+  draftSource: "blank" | "onboarding_sample" | "connected_page_active_config" | "connected_page_saved_version";
+  draftBaselineFingerprint: string | null;
   onboardingSamplePreview: OnboardingSamplePreviewViewModel | null;
   onboardingSampleSeedSummary: OnboardingSampleSeedSummary | null;
   promptWorkspaceSamplePreview: PromptWorkspaceSampleViewModel | null;
